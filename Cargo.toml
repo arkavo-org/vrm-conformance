@@ -56,6 +56,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.40"
 
+# Time (RFC 3339 timestamps for manifest entries)
+time = { version = "0.3", features = ["formatting"] }
+
 # Test
 insta = { version = "1.39", features = ["json", "yaml"] }
 pretty_assertions = "1.4"
