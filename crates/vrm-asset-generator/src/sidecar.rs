@@ -10,10 +10,15 @@ use vrm_test_plan::{
     Output, PostProcessing, PropertyAssertion, TestPlan, ToneMapping,
 };
 
-pub fn write_meta_json(params: &MToonParams, vrm_path: &Utf8Path, out: &Utf8Path) -> Result<()> {
+pub fn write_meta_json(
+    params: &MToonParams,
+    spring_bone: Option<&crate::spring_bone::SpringBoneParams>,
+    vrm_path: &Utf8Path,
+    out: &Utf8Path,
+) -> Result<()> {
     let bytes = std::fs::read(vrm_path)?;
     let hash = blake3::hash(&bytes);
-    let meta = json!({
+    let mut meta = json!({
         "id": params.id,
         "license": "CC0-1.0",
         "generator": format!("arkavo-org/vrm-conformance vrm-asset-generator {}", env!("CARGO_PKG_VERSION")),
@@ -22,6 +27,11 @@ pub fn write_meta_json(params: &MToonParams, vrm_path: &Utf8Path, out: &Utf8Path
         "byte_size": bytes.len(),
         "params": params,
     });
+    if let Some(sb) = spring_bone {
+        meta["spring_bone"] = serde_json::to_value(sb)?;
+        meta["spec_section"] =
+            serde_json::Value::String("VRMC_materials_mtoon + VRMC_springBone".into());
+    }
     std::fs::write(out, serde_json::to_vec_pretty(&meta)?)?;
     Ok(())
 }
