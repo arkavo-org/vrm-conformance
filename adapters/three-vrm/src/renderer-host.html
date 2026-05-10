@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>three-vrm renderer host</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #ff00ff; overflow: hidden; }
+      #c { display: block; }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.171.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.171.0/examples/jsm/",
+          "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@3.5.0/lib/three-vrm.module.min.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <script type="module">
+      import * as THREE from "three";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { VRMLoaderPlugin } from "@pixiv/three-vrm";
+
+      const MAGENTA = 0xff00ff;
+
+      const state = {
+        canvas: null,
+        renderer: null,
+        scene: null,
+        camera: null,
+        directional: null,
+        ambient: null,
+        vrm: null,
+      };
+
+      function ensureRenderer(width, height) {
+        if (!state.canvas) {
+          state.canvas = document.getElementById("c");
+        }
+        state.canvas.width = width;
+        state.canvas.height = height;
+        if (!state.renderer) {
+          state.renderer = new THREE.WebGLRenderer({
+            canvas: state.canvas,
+            antialias: true,
+            alpha: false,
+            preserveDrawingBuffer: true,
+          });
+          state.renderer.setClearColor(MAGENTA, 1.0);
+          state.renderer.outputColorSpace = THREE.SRGBColorSpace;
+          state.renderer.toneMapping = THREE.NoToneMapping;
+        }
+        state.renderer.setSize(width, height, false);
+
+        if (!state.scene) {
+          state.scene = new THREE.Scene();
+          state.scene.background = new THREE.Color(MAGENTA);
+        }
+        if (!state.camera) {
+          state.camera = new THREE.PerspectiveCamera(30, width / height, 0.01, 100);
+        } else {
+          state.camera.aspect = width / height;
+          state.camera.updateProjectionMatrix();
+        }
+        if (!state.directional) {
+          state.directional = new THREE.DirectionalLight(0xffffff, 1.0);
+          state.scene.add(state.directional);
+        }
+        if (!state.ambient) {
+          state.ambient = new THREE.AmbientLight(0x808080, 0.3);
+          state.scene.add(state.ambient);
+        }
+      }
+
+      window.__loadVrm = async function (url) {
+        ensureRenderer(1024, 1024);
+        if (state.vrm) {
+          state.scene.remove(state.vrm.scene);
+          state.vrm = null;
+        }
+        const loader = new GLTFLoader();
+        loader.register((parser) => new VRMLoaderPlugin(parser));
+        const gltf = await loader.loadAsync(url);
+        const vrm = gltf.userData.vrm;
+        state.vrm = vrm;
+        state.scene.add(vrm.scene);
+      };
+
+      window.__setCamera = function (params) {
+        ensureRenderer(state.canvas?.width ?? 1024, state.canvas?.height ?? 1024);
+        state.camera.position.set(...params.position);
+        state.camera.up.set(...params.up);
+        state.camera.lookAt(new THREE.Vector3(...params.target));
+        state.camera.fov = params.fov_degrees;
+        state.camera.updateProjectionMatrix();
+      };
+
+      window.__setLighting = function (params) {
+        ensureRenderer(state.canvas?.width ?? 1024, state.canvas?.height ?? 1024);
+        const d = params.directional;
+        // three.js DirectionalLight is positioned at (x,y,z); aim is from
+        // position toward (0,0,0). Set position to negation of incoming-light
+        // direction so travel through the scene matches the requested dir.
+        state.directional.position.set(-d.dir[0], -d.dir[1], -d.dir[2]).multiplyScalar(5);
+        state.directional.color.setRGB(d.color[0], d.color[1], d.color[2]);
+        state.directional.intensity = d.intensity;
+        state.directional.castShadow = !!params.cast_shadows;
+        if (state.renderer) {
+          state.renderer.shadowMap.enabled = !!params.cast_shadows;
+        }
+        const a = params.ambient;
+        state.ambient.color.setRGB(a.color[0], a.color[1], a.color[2]);
+        state.ambient.intensity = a.intensity;
+      };
+
+      window.__setPostProcessing = function (params) {
+        ensureRenderer(state.canvas?.width ?? 1024, state.canvas?.height ?? 1024);
+        const map = {
+          None: THREE.NoToneMapping,
+          Linear: THREE.LinearToneMapping,
+          Reinhard: THREE.ReinhardToneMapping,
+          Aces: THREE.ACESFilmicToneMapping,
+        };
+        state.renderer.toneMapping = map[params.tone_mapping] ?? THREE.NoToneMapping;
+        state.renderer.toneMappingExposure = params.exposure ?? 1.0;
+      };
+
+      window.__render = async function (params) {
+        ensureRenderer(params.width, params.height);
+        if (params.color_space === "Linear") {
+          state.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+        } else {
+          state.renderer.outputColorSpace = THREE.SRGBColorSpace;
+        }
+        if (state.vrm && typeof state.vrm.update === "function") {
+          state.vrm.update(1 / 60);
+        }
+        state.renderer.render(state.scene, state.camera);
+        const dataUrl = state.canvas.toDataURL("image/png");
+        return dataUrl;
+      };
+
+      window.__dispose = function () {
+        if (state.vrm) {
+          state.scene.remove(state.vrm.scene);
+          state.vrm = null;
+        }
+      };
+
+      window.__rendererReady = true;
+    </script>
+  </body>
+</html>
