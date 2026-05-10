@@ -4,5 +4,6 @@
 
 pub mod buffer;
 pub mod glb;
+pub mod humanoid;
 pub mod mesh;
 pub mod params;
