@@ -1,8 +1,8 @@
-// Operation registry + dispatch. Until Phase 2C-b lands, every op returns
-// Unimplemented with the appropriate phase label. Phase 1 ops report
-// `v1.x` because they're scheduled to be implemented in 2C-b (the
-// still-unbuilt next phase). Reserved Phase 2+ ops report their target
-// phase.
+// Operation registry + dispatch. Phase 2C-b: load_vrm, set_*, render,
+// dispose call into the browser session; reserved Phase 2+ ops still
+// return Unimplemented with the appropriate phase label.
+
+import type { BrowserSession } from "./browser-session.js";
 
 export interface RpcError {
   code: number;
@@ -10,16 +10,15 @@ export interface RpcError {
   data?: unknown;
 }
 
-const PHASE_BY_METHOD: Record<string, string> = {
-  // Phase 1 ops — to be implemented in 2C-b
-  load_vrm: "v1.x",
-  set_camera: "v1.x",
-  set_lighting: "v1.x",
-  set_post_processing: "v1.x",
-  render: "v1.x",
-  dispose: "v1.x",
+export interface AdapterContext {
+  session: BrowserSession;
+  /** session_id counter. v0.1 is single-session: load_vrm overwrites
+   *  whatever was loaded prior; the session_id is purely for protocol
+   *  compliance. */
+  nextSessionId: { value: number };
+}
 
-  // Reserved
+const PHASE_BY_RESERVED_METHOD: Record<string, string> = {
   set_environment: "v1.x",
   set_expression: "Phase 3",
   set_humanoid_pose: "Phase 2",
@@ -41,32 +40,129 @@ export interface DispatchFailure {
 
 export type DispatchOutcome<T = unknown> = DispatchSuccess<T> | DispatchFailure;
 
-/**
- * Dispatch one method invocation. In Phase 2C-a all known methods return
- * Unimplemented; the dispatch table exists to ensure unknown methods get
- * `-32601` while known-but-deferred methods get `-32000`.
- */
-export function dispatch(method: string, _params: unknown): DispatchOutcome {
-  const phase = PHASE_BY_METHOD[method];
-  if (phase === undefined) {
+export async function dispatch(
+  ctx: AdapterContext,
+  method: string,
+  params: unknown,
+): Promise<DispatchOutcome> {
+  try {
+    switch (method) {
+      case "load_vrm": {
+        const p = params as { path?: string };
+        if (!p?.path) return badParams("missing path");
+        await ctx.session.loadVrm(p.path);
+        const id = `three-vrm-${++ctx.nextSessionId.value}`;
+        return { ok: true, result: { session_id: id } };
+      }
+      case "set_camera": {
+        await ctx.session.setCamera(params);
+        return { ok: true, result: {} };
+      }
+      case "set_lighting": {
+        await ctx.session.setLighting(params);
+        return { ok: true, result: {} };
+      }
+      case "set_post_processing": {
+        await ctx.session.setPostProcessing(params);
+        return { ok: true, result: {} };
+      }
+      case "render": {
+        const p = params as {
+          width?: number;
+          height?: number;
+          output_path?: string;
+          color_space?: string;
+        };
+        if (!p?.output_path) return badParams("missing output_path");
+        const width = p.width ?? 1024;
+        const height = p.height ?? 1024;
+        const colorSpace = p.color_space ?? "Srgb";
+        await ctx.session.render({
+          width,
+          height,
+          color_space: colorSpace,
+          output_path: p.output_path,
+        });
+        return {
+          ok: true,
+          result: {
+            output_path: p.output_path,
+            actual_color_space: colorSpace,
+          },
+        };
+      }
+      case "dispose": {
+        await ctx.session.clearVrm();
+        return { ok: true, result: {} };
+      }
+      default: {
+        const phase = PHASE_BY_RESERVED_METHOD[method];
+        if (phase) {
+          return {
+            ok: false,
+            error: {
+              code: -32000,
+              message: `${method}: not implemented in this adapter version`,
+              data: { phase },
+            },
+          };
+        }
+        return {
+          ok: false,
+          error: {
+            code: -32601,
+            message: `method not found: ${method}`,
+          },
+        };
+      }
+    }
+  } catch (e) {
+    const msg = (e as Error).message ?? String(e);
+    if (method === "load_vrm") {
+      return {
+        ok: false,
+        error: {
+          code: -32001,
+          message: "LoadFailed",
+          data: { reason: msg },
+        },
+      };
+    }
+    if (method === "render") {
+      return {
+        ok: false,
+        error: {
+          code: -32002,
+          message: "RenderFailed",
+          data: { reason: msg },
+        },
+      };
+    }
     return {
       ok: false,
       error: {
-        code: -32601,
-        message: `method not found: ${method}`,
+        code: -32603,
+        message: `internal error: ${msg}`,
       },
     };
   }
+}
+
+function badParams(reason: string): DispatchFailure {
   return {
     ok: false,
-    error: {
-      code: -32000,
-      message: `${method}: not implemented in this adapter version`,
-      data: { phase },
-    },
+    error: { code: -32602, message: `invalid params: ${reason}` },
   };
 }
 
 export function knownMethods(): string[] {
-  return Object.keys(PHASE_BY_METHOD);
+  return [
+    "load_vrm",
+    "set_camera",
+    "set_lighting",
+    "set_post_processing",
+    "render",
+    "dispose",
+    ...Object.keys(PHASE_BY_RESERVED_METHOD),
+  ];
 }

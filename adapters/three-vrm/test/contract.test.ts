@@ -56,15 +56,11 @@ test("unknown method returns -32601", async () => {
   }
 });
 
-test("phase 1 op (load_vrm) returns -32000 with phase v1.x", async () => {
+test("phase 1 op load_vrm with missing file returns LoadFailed (-32001)", async () => {
   const h = spawnAdapter();
   try {
-    const resp = await rpc(h, 2, "load_vrm", { path: "/tmp/whatever.vrm" });
-    assert.equal(resp.error?.code, -32000);
-    assert.equal(
-      (resp.error?.data as { phase?: string } | undefined)?.phase,
-      "v1.x",
-    );
+    const resp = await rpc(h, 2, "load_vrm", { path: "/nonexistent/file.vrm" });
+    assert.equal(resp.error?.code, -32001);
   } finally {
     h.stdin.end();
     await new Promise((r) => h.child.on("exit", r));
@@ -127,8 +123,8 @@ test("malformed JSON returns -32700 parse error with id null", async () => {
 test("multiple framed requests handled back-to-back", async () => {
   const h = spawnAdapter();
   try {
-    const r1 = await rpc(h, 1, "load_vrm", {});
-    const r2 = await rpc(h, 2, "render", {});
+    const r1 = await rpc(h, 1, "step_physics", {});
+    const r2 = await rpc(h, 2, "set_humanoid_pose", {});
     assert.equal(r1.error?.code, -32000);
     assert.equal(r2.error?.code, -32000);
   } finally {
