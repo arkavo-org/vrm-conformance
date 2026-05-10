@@ -88,3 +88,25 @@ pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
     std::fs::write(output, glb)?;
     Ok(())
 }
+
+use crate::sidecar::{build_default_test_plan, write_meta_json, write_test_yaml};
+
+/// Emits `<stem>.vrm`, `<stem>.meta.json`, and `<stem>.test.yaml` from a
+/// single MToonParams value.
+pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm(params, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(params, &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan = build_default_test_plan(params, &asset_relpath);
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}

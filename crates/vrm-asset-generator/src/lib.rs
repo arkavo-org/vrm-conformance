@@ -8,4 +8,5 @@ pub mod glb;
 pub mod humanoid;
 pub mod mesh;
 pub mod params;
+pub mod sidecar;
 pub mod vrm_ext;
