@@ -1,0 +1,65 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/vrm-ops",
+    "crates/vrm-validator-wrap",
+    "crates/vrm-test-plan",
+    "crates/vrm-asset-generator",
+    "crates/vrm-diff-engine",
+    "crates/vrm-runner",
+    "crates/vrm-s3",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+license = "Apache-2.0"
+repository = "https://github.com/arkavo-org/vrm-conformance"
+authors = ["Arkavo LLC <paul@arkavo.com>"]
+
+[workspace.dependencies]
+# Errors / logging
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Serde stack
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yml = "0.0.12"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# IO / filesystem
+camino = { version = "1.1", features = ["serde1"] }
+tempfile = "3.10"
+
+# Imaging
+image = "0.25"
+image-compare = "0.4"
+
+# glTF + math
+gltf = { version = "1.4", features = ["extras", "names", "utils"] }
+glam = { version = "0.27", features = ["serde"] }
+
+# Hashing — BLAKE3 for content-addressed refs (composes with iroh-blobs / TDF)
+blake3 = "1.5"
+hex = "0.4"
+
+# Async (only where needed: AWS SDK, child-process IO)
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util"] }
+
+# AWS
+aws-config = { version = "1.5", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.40"
+
+# Test
+insta = { version = "1.39", features = ["json", "yaml"] }
+pretty_assertions = "1.4"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
