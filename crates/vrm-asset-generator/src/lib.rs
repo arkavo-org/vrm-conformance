@@ -2,6 +2,7 @@
 //! `<asset>.vrm + <asset>.meta.json + <asset>.test.yaml` from a single
 //! parameter dictionary.
 
+pub mod buffer;
 pub mod glb;
 pub mod mesh;
 pub mod params;
