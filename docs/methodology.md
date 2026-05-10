@@ -30,6 +30,8 @@ Outlines render via separate pass (most), geometry shader (some), or screen-spac
 
 **Asset emission (Phase 2D-a)**: the asset generator's `emit-springbone` subcommand produces VRM 1.0 assets with `VRMC_springBone` chains attached to the head bone. Each chain is parametrized by `SpringBoneParams` (joint_count, segment_length_m, stiffness, drag_force, gravity_power, gravity_dir, hit_radius). The renderer-side `step_physics` / `reset_physics` / `animate_root_transform` ops that exercise these assets land in 2D-b.
 
+**Sweep emission (Phase 2D-c)**: `emit-springbone-sweep` produces the full one-axis-at-a-time parameter sweep (~18 assets) so a regression in any single dimension (joints, stiffness, drag, gravity, segment length) can be pinned without confounding. Default MToon is held constant across all variants; the spring-bone axis is what is under test.
+
 ## Spring bone initial state
 
 Renderers initialize spring positions differently from a fresh load. The `reset_physics(settle_steps)` operation pins the convention: every spring-bone test runs N settling steps from rest pose before measurement begins.
