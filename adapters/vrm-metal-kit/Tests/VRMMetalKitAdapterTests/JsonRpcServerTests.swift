@@ -120,12 +120,14 @@ final class JsonRpcServerTests: XCTestCase {
         XCTAssertEqual(err["code"] as? Int, -32602)
     }
 
-    func testStillDeferredPhysicsOpReturnsL3Deferral() throws {
-        // After L3-c, every Phase 1 op has a real handler. The remaining
-        // deferred ops are the spring-bone physics set (animate_root_transform,
-        // step_physics, reset_physics) — they land in L3-e. This is the
-        // regression guard against accidental promotion.
-        let request = #"{"jsonrpc":"2.0","id":42,"method":"step_physics","params":{}}"#
+    func testStepPhysicsOnUnknownSessionReturnsInvalidParams() throws {
+        // L3-e promoted step_physics out of the L3 deferral list. Calling
+        // it with an unknown session_id returns -32602 (the request shape
+        // is well-formed; we just can't find the session). This is the
+        // regression guard against accidentally re-deferring the op.
+        let request = #"""
+        {"jsonrpc":"2.0","id":42,"method":"step_physics","params":{"session_id":"no-such","dt_seconds":0.016,"count":1}}
+        """#
         let reader = MemoryReader(frame(request))
         let writer = MemoryWriter()
         let log = MemoryWriter()
@@ -134,10 +136,23 @@ final class JsonRpcServerTests: XCTestCase {
 
         let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
         let err = try XCTUnwrap(resp["error"] as? [String: Any])
-        XCTAssertEqual(err["code"] as? Int, -32000)
-        XCTAssertEqual(err["message"] as? String, "Unimplemented")
-        let data = try XCTUnwrap(err["data"] as? [String: Any])
-        XCTAssertEqual(data["phase"] as? String, "L3 (VRMMetalKit integration deferred)")
+        XCTAssertEqual(err["code"] as? Int, -32602)
+    }
+
+    func testAnimateRootTransformOnUnknownSessionReturnsInvalidParams() throws {
+        // animate_root_transform: L3-e promoted, regression guard.
+        let request = #"""
+        {"jsonrpc":"2.0","id":43,"method":"animate_root_transform","params":{"session_id":"no-such","translation_start":[0,0,0],"translation_end":[0.15,0,0],"duration_seconds":0.25,"fps":60}}
+        """#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
     }
 
     func testSetCameraOnUnknownSessionReturnsInvalidParams() throws {

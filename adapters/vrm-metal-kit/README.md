@@ -19,7 +19,7 @@ test session and drives it through the operation set (`load_vrm`,
 | L3-b — `load_vrm` + `dispose` against VRMMetalKit | implemented |
 | L3-c — `set_camera` + `set_lighting` + `set_post_processing` + `render` | implemented |
 | L3-d — MSAA 4x render path | implemented |
-| L3-e — physics ops (`step_physics`, `reset_physics`, `animate_root_transform`) | not yet |
+| L3-e — physics ops (`step_physics`, `reset_physics`, `animate_root_transform`) | implemented |
 
 Every Phase 1 op now produces real output. `load_vrm` constructs a
 `VRMRenderer`, calls `renderer.loadModel(model)`, and stashes both in a
@@ -46,6 +46,26 @@ reserved ops (`set_environment`, `set_expression`, `set_humanoid_pose`,
 `set_root_transform`) keep their original phase labels. Unknown methods
 return `-32601`.
 
+L3-e physics-op semantics:
+
+- `step_physics(count)` calls `renderer.warmupPhysics(steps: count)`.
+  `dt_seconds` is ignored — VRMMetalKit's spring-bone simulation uses
+  fixed 120Hz substeps. No-op for models without spring-bone data.
+- `reset_physics(settle_steps)` calls `warmupPhysics` too — that one
+  function both zeros velocity and runs N settle steps, which is exactly
+  reset-then-settle.
+- `animate_root_transform(start, end, duration_seconds, fps)` runs the
+  full per-frame loop: mutates each root node's translation, sets
+  `characterVelocity` to the constant root velocity (so the
+  inertia-compensation kernel applies trailing force), and issues a
+  64×64 single-sample `drawOffscreenHeadless` to a `.private`
+  throwaway target each frame. The render call drives
+  `SpringBoneComputeSystem.update` via VRMMetalKit's internal path; GPU
+  commit overhead provides natural pacing for the renderer's
+  `CACurrentMediaTime`-based deltaTime. After the loop completes,
+  `characterVelocity` is restored to zero so the next render doesn't
+  inherit phantom motion.
+
 **Known limitations** (revisit before declaring L3 complete):
 
 - **MSAA pinned to 4x.** `RendererConfig.sampleCount` is set at
@@ -63,6 +83,16 @@ return `-32601`.
   `rgba8Unorm_srgb`. CG doesn't embed a color profile in the output PNG;
   downstream diff is pixel-exact within a single color space, which is
   what the operation contract guarantees.
+- **Spring-bone visual signal hidden in current corpus.** The
+  asset-generator's `emit-springbone-*` subcommands produce VRMs whose
+  visible mesh (a sphere) is parented to the head node, **not skinned
+  to the spring chain joints**. Spring-bone physics tick correctly in
+  the adapter (verified via stderr `spring-bone: N springs, M joints`
+  log per session), but the rendered pixels don't change because the
+  visible geometry isn't deformed by chain motion. Cross-renderer
+  visual diffing against three-vrm produces the same null result for
+  the same asset-side reason. Adding a chain-skinned cylinder/ribbon
+  mesh is a separate corpus-extension task.
 
 ## Build
 

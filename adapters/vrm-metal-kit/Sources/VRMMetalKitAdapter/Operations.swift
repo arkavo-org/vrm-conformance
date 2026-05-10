@@ -42,18 +42,14 @@ final class Operations: @unchecked Sendable {
     ]
 
     /// Reserved ops — declared by every adapter, return Unimplemented in v0.1.
-    /// Phase labels match `docs/operation-contract.md`. Physics ops
-    /// (`step_physics`, `reset_physics`, `animate_root_transform`) are
-    /// implemented in three-vrm and the mock but stay deferred here until
-    /// the L3-e spring-bone integration lands.
+    /// Phase labels match `docs/operation-contract.md`. L3-e promoted the
+    /// three Phase 2 physics ops out of the deferral block; they now have
+    /// real handlers backed by VRMMetalKit's spring-bone GPU system.
     static let reservedPhases: [String: String] = [
         "set_environment":         "v1.x",
         "set_expression":          "Phase 3",
         "set_humanoid_pose":       "Phase 2",
         "set_root_transform":      "Phase 2",
-        "animate_root_transform":  "L3 (VRMMetalKit integration deferred)",
-        "step_physics":            "L3 (VRMMetalKit integration deferred)",
-        "reset_physics":           "L3 (VRMMetalKit integration deferred)",
     ]
 
     /// Phase label for the still-deferred Phase 2 ops.
@@ -135,12 +131,15 @@ final class Operations: @unchecked Sendable {
 
     func dispatch(method: String, params: JSONValue?) -> OpOutcome {
         switch method {
-        case "load_vrm":             return handleLoadVrm(params: params)
-        case "set_camera":           return handleSetCamera(params: params)
-        case "set_lighting":         return handleSetLighting(params: params)
-        case "set_post_processing":  return handleSetPostProcessing(params: params)
-        case "render":               return handleRender(params: params)
-        case "dispose":              return handleDispose(params: params)
+        case "load_vrm":                return handleLoadVrm(params: params)
+        case "set_camera":              return handleSetCamera(params: params)
+        case "set_lighting":            return handleSetLighting(params: params)
+        case "set_post_processing":     return handleSetPostProcessing(params: params)
+        case "render":                  return handleRender(params: params)
+        case "step_physics":            return handleStepPhysics(params: params)
+        case "reset_physics":           return handleResetPhysics(params: params)
+        case "animate_root_transform":  return handleAnimateRootTransform(params: params)
+        case "dispose":                 return handleDispose(params: params)
         default:
             if let phase = Operations.reservedPhases[method] {
                 return .error(
@@ -192,12 +191,31 @@ final class Operations: @unchecked Sendable {
             config.strict = .off
             let renderer = VRMRenderer(device: device, config: config)
             renderer.loadModel(model)
+            // Enable spring-bone physics during draws. No-op for models
+            // without VRMC_springBone data (drawCore guards on
+            // `model.springBone != nil`). VRMMetalKit's loadModel already
+            // populated the spring-bone GPU buffers + ran 30 warmup steps;
+            // we just need to flip the runtime toggle.
+            renderer.enableSpringBone = true
 
             stateLock.lock()
             sessionCounter += 1
             let id = "vrm-metal-kit-\(sessionCounter)"
             sessions[id] = Session(renderer: renderer, model: model)
             stateLock.unlock()
+
+            // Surface spring-bone interop status on stderr so smoke tests
+            // can see whether VRMMetalKit picked up the VRMC_springBone
+            // data. Cheap one-line check — disambiguates "physics op is
+            // a no-op because no spring-bone data was present" from a
+            // real handler bug. (springBoneBuffers.numBones is internal;
+            // we count joints across springs as a public proxy.)
+            let nSprings = model.springBone?.springs.count ?? 0
+            let nJoints = model.springBone?.springs.reduce(0) { $0 + $1.joints.count } ?? 0
+            FileHandle.standardError.write(Data(
+                "vrm-metal-kit-adapter: loaded \(id) — spring-bone: \(nSprings) springs, \(nJoints) joints\n".utf8
+            ))
+
             return .ok(.object(["session_id": .string(id)]))
         }
     }
@@ -460,6 +478,199 @@ final class Operations: @unchecked Sendable {
             "output_path": .string(outputPath),
             "actual_color_space": .string(colorSpace),
         ]))
+    }
+
+    // MARK: - Physics ops (L3-e)
+
+    /// Advance spring-bone physics by `count` steps. VRMMetalKit's public
+    /// physics-stepping API (`warmupPhysics`) zeros velocity at the end —
+    /// fine for "advance from settled state" semantics, which matches the
+    /// mock-renderer's deterministic no-op handling. Test plans that need
+    /// velocity-accumulating motion use `animate_root_transform` instead.
+    ///
+    /// `dt_seconds` is accepted for protocol compliance but ignored:
+    /// VRMMetalKit's spring-bone simulation uses fixed 120Hz substeps (per
+    /// the `.ultra` quality preset) regardless of the requested dt.
+    private func handleStepPhysics(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else {
+            return invalidParams("missing session_id")
+        }
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+        let count: Int = {
+            if case .number(let n) = obj["count"], let i = Int(exactly: n) { return max(0, i) }
+            return 1
+        }()
+        if session.model.springBone == nil {
+            // No-op for non-spring-bone models — matches the mock + three-vrm.
+            return .ok(.object([:]))
+        }
+        MainActor.assumeIsolated {
+            session.renderer.warmupPhysics(steps: count)
+        }
+        return .ok(.object([:]))
+    }
+
+    /// Reset spring-bone physics to a settled rest pose: zero velocity and
+    /// run `settle_steps` silent physics steps so the chain hangs naturally
+    /// before measurement. VRMMetalKit's `warmupPhysics(steps:)` already
+    /// does both — it resets state at entry, runs N steps, and zeros
+    /// velocity at exit so subsequent renders start from clean equilibrium.
+    private func handleResetPhysics(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else {
+            return invalidParams("missing session_id")
+        }
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+        let settleSteps: Int = {
+            if case .number(let n) = obj["settle_steps"], let i = Int(exactly: n) { return max(0, i) }
+            return 30
+        }()
+        if session.model.springBone == nil {
+            return .ok(.object([:]))
+        }
+        MainActor.assumeIsolated {
+            session.renderer.warmupPhysics(steps: settleSteps)
+        }
+        return .ok(.object([:]))
+    }
+
+    /// Linearly translate the avatar root over `duration_seconds` and run
+    /// spring-bone physics per frame so the chain trails behind the motion.
+    ///
+    /// Per VRMMetalKit's HairFlutterTrajectoryTests pattern: physics
+    /// stepping outside of `drawCore` requires issuing per-frame renders
+    /// (drawCore is what ticks `SpringBoneComputeSystem.update`). We render
+    /// each frame into a 64×64 throwaway target — the GPU commit overhead
+    /// provides natural pacing for the renderer's CACurrentMediaTime-based
+    /// deltaTime calculation, and the chain reads the model's per-frame
+    /// root positions through VRMMetalKit's internal animatedPositions path.
+    ///
+    /// `characterVelocity` is set to the constant root velocity over the
+    /// animation so the inertia-compensation kernel applies the right
+    /// trailing force. Restored to zero at end so subsequent renders don't
+    /// inherit phantom motion.
+    private func handleAnimateRootTransform(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else {
+            return invalidParams("missing session_id")
+        }
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+        guard let startV = parseVec3(obj["translation_start"]),
+              let endV = parseVec3(obj["translation_end"]),
+              let duration = parseFloat(obj["duration_seconds"])
+        else {
+            return invalidParams("translation_start/translation_end/duration_seconds required")
+        }
+        let fps: Int = {
+            if case .number(let n) = obj["fps"], let i = Int(exactly: n), i > 0 { return i }
+            return 60
+        }()
+        if session.model.springBone == nil {
+            // Non-spring-bone models have nothing to excite; treat as no-op
+            // for protocol compliance.
+            return .ok(.object([:]))
+        }
+        guard let device = device, let commandQueue = commandQueue else {
+            return renderFailed("no Metal device or command queue available")
+        }
+
+        // Total frames in the animation. Always at least 1 so a zero-duration
+        // request still produces a final-frame state without divide-by-zero.
+        let totalFrames = max(1, Int((duration * Float(fps)).rounded()))
+        let velocity: SIMD3<Float> = duration > 0
+            ? (endV - startV) / duration
+            : .zero
+
+        // Find root nodes (parent == nil) and snapshot their original
+        // translations. The animation overlays an offset; setting
+        // `node.translation` outright would collapse multi-root avatars to
+        // the same point.
+        let rootNodes: [VRMNode] = session.model.nodes.filter { $0.parent == nil }
+        let originalTranslations: [SIMD3<Float>] = rootNodes.map { $0.translation }
+
+        // 64×64 throwaway color + depth (single-sample, .private). MSAA
+        // adds setup cost without affecting the physics step, so the
+        // animation loop uses a cheap single-sample target — the final
+        // render() after animate_root_transform uses the full MSAA path.
+        let colorDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: 64, height: 64, mipmapped: false
+        )
+        colorDesc.usage = [.renderTarget]
+        colorDesc.storageMode = .private
+        let depthDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .depth32Float, width: 64, height: 64, mipmapped: false
+        )
+        depthDesc.usage = [.renderTarget]
+        depthDesc.storageMode = .private
+        guard let dummyColor = device.makeTexture(descriptor: colorDesc),
+              let dummyDepth = device.makeTexture(descriptor: depthDesc)
+        else {
+            return renderFailed("animation: failed to create throwaway physics-step target")
+        }
+
+        // Renderer's pipelines were built for MSAA 4x at load_vrm. Since
+        // our dummy targets are single-sample, we need a fresh single-sample
+        // VRMRenderer for the animation loop. But spawning a second
+        // VRMRenderer shares the same VRMModel — they coexist fine.
+        var singleSampleConfig = RendererConfig()
+        singleSampleConfig.sampleCount = 1
+        singleSampleConfig.strict = .off
+        let physicsRenderer = VRMRenderer(device: device, config: singleSampleConfig)
+        physicsRenderer.loadModel(session.model)
+        physicsRenderer.enableSpringBone = true
+        physicsRenderer.characterVelocity = velocity
+
+        for i in 1...totalFrames {
+            let t = Float(i) / Float(totalFrames)
+            let offset = startV + (endV - startV) * t
+            for (idx, root) in rootNodes.enumerated() {
+                root.translation = originalTranslations[idx] + offset
+                root.updateWorldTransform()
+            }
+
+            guard let cb = commandQueue.makeCommandBuffer() else {
+                return renderFailed("animation: failed to make command buffer at frame \(i)")
+            }
+            let rpd = MTLRenderPassDescriptor()
+            rpd.colorAttachments[0].texture = dummyColor
+            rpd.colorAttachments[0].loadAction = .clear
+            rpd.colorAttachments[0].storeAction = .store
+            rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+            rpd.depthAttachment.texture = dummyDepth
+            rpd.depthAttachment.loadAction = .clear
+            rpd.depthAttachment.storeAction = .dontCare
+            rpd.depthAttachment.clearDepth = 1.0
+
+            MainActor.assumeIsolated {
+                physicsRenderer.drawOffscreenHeadless(
+                    to: dummyColor,
+                    depth: dummyDepth,
+                    commandBuffer: cb,
+                    renderPassDescriptor: rpd
+                )
+            }
+            let sem = DispatchSemaphore(value: 0)
+            cb.addCompletedHandler { _ in sem.signal() }
+            cb.commit()
+            sem.wait()
+            if let err = cb.error {
+                return renderFailed("animation: GPU error at frame \(i): \(err)")
+            }
+        }
+
+        // Clear inertia hint so subsequent renders don't see phantom motion.
+        physicsRenderer.characterVelocity = .zero
+        return .ok(.object([:]))
     }
 
     // MARK: - Helpers
