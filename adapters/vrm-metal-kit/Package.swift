@@ -34,6 +34,9 @@ let package = Package(
                 // .product(name: "VRMMetalKit", package: "VRMMetalKit"),
             ]
         ),
-        // L2 adds: .testTarget(name: "VRMMetalKitAdapterTests", ...)
+        .testTarget(
+            name: "VRMMetalKitAdapterTests",
+            dependencies: ["VRMMetalKitAdapter"]
+        ),
     ]
 )

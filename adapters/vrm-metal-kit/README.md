@@ -64,9 +64,14 @@ full operation set, JSON shapes, and error envelope.
 
 ## Caveats
 
-- The `Package.swift` declares a dependency on `arkavo-org/VRMMetalKit` so
-  L3 has it ready. The actual product/target name vended by upstream needs
-  confirmation; if resolution fails in your environment the dep can be
-  temporarily commented out — L1 + L2 do not import it.
+- `Package.swift` currently has the `arkavo-org/VRMMetalKit` dependency
+  **commented out**. As of this commit, the upstream `main` branch declares
+  a `.macOS(.v26)` platform floor incompatible with this adapter's
+  `.macOS(.v14)` target. L1 + L2 do not import VRMMetalKit from any source
+  file, so commenting out the dep is harmless. L3 must re-enable the dep
+  (search for `TODO(L3)` in `Package.swift`) and either bump the deployment
+  target or pin a compatible VRMMetalKit revision.
+- The actual product/target name vended by upstream still needs confirmation
+  at L3 time; the assumption in `Package.swift` is `VRMMetalKit`.
 - Spring-bone determinism is a known methodology hazard; the adapter must
   expose deterministic stepping when L3 wires in physics ops.
