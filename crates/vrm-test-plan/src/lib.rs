@@ -20,6 +20,23 @@ pub struct TestPlan {
     pub ignore_renderers: Vec<String>,
     #[serde(default)]
     pub properties: Vec<PropertyAssertion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physics: Option<PhysicsConfig>,
+}
+
+/// Optional physics-stepping config for spring-bone / collider tests.
+/// When present, the runner calls `reset_physics(settle_steps)` between
+/// `set_post_processing` and `render`. Defaults to 30 steps at 60 Hz
+/// (0.5 s) per `docs/methodology.md` "Spring bone initial state".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PhysicsConfig {
+    pub settle_steps: u32,
+}
+
+impl Default for PhysicsConfig {
+    fn default() -> Self {
+        Self { settle_steps: 30 }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

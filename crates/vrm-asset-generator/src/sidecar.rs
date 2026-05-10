@@ -78,6 +78,7 @@ pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> Tes
         },
         ignore_renderers: Vec::new(),
         properties: default_properties(params),
+        physics: None,
     }
 }
 

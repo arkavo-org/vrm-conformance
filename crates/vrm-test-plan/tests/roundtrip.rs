@@ -87,3 +87,97 @@ diff:
     ));
     assert_eq!(plan.post_processing.exposure, 1.0);
 }
+
+#[test]
+fn parses_plan_with_physics_block() {
+    let yaml = r#"
+id: physics_test
+spec_section: VRMC_springBone
+asset: physics.vrm
+camera:
+  position: [0.0, 1.4, 1.5]
+  target: [0.0, 1.4, 0.0]
+  up: [0.0, 1.0, 0.0]
+  fov_degrees: 30.0
+lighting:
+  directional:
+    dir: [0.0, -1.0, 0.0]
+    color: [1.0, 1.0, 1.0]
+    intensity: 1.0
+  ambient:
+    color: [0.5, 0.5, 0.5]
+    intensity: 0.3
+  cast_shadows: false
+  receive_shadows: false
+output:
+  width: 256
+  height: 256
+  color_space: linear
+  msaa: 4
+diff:
+  mode: ssim
+  threshold: 0.985
+  reference_renderer: vrm-metal-kit
+physics:
+  settle_steps: 30
+"#;
+
+    let plan: vrm_test_plan::TestPlan = serde_yml::from_str(yaml).unwrap();
+    let physics = plan
+        .physics
+        .as_ref()
+        .expect("physics block should be parsed");
+    assert_eq!(physics.settle_steps, 30);
+}
+
+#[test]
+fn plan_without_physics_serializes_without_field() {
+    use vrm_test_plan::*;
+    let plan = TestPlan {
+        id: "no_phys".into(),
+        spec_section: "x".into(),
+        asset: "a.vrm".into(),
+        camera: Camera {
+            position: [0.0, 0.0, 1.0],
+            target: [0.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_degrees: 30.0,
+        },
+        lighting: Lighting {
+            directional: DirectionalLight {
+                dir: [0.0, -1.0, 0.0],
+                color: [1.0, 1.0, 1.0],
+                intensity: 1.0,
+            },
+            ambient: AmbientLight {
+                color: [0.5, 0.5, 0.5],
+                intensity: 0.3,
+            },
+            cast_shadows: false,
+            receive_shadows: false,
+        },
+        post_processing: PostProcessing {
+            tone_mapping: ToneMapping::None,
+            exposure: 1.0,
+        },
+        output: Output {
+            width: 256,
+            height: 256,
+            color_space: ColorSpace::Linear,
+            msaa: 4,
+        },
+        diff: Diff {
+            mode: DiffMode::Ssim,
+            threshold: 0.985,
+            reference_renderer: "x".into(),
+        },
+        ignore_renderers: Vec::new(),
+        properties: Vec::new(),
+        physics: None,
+    };
+    let yaml = serde_yml::to_string(&plan).unwrap();
+    assert!(
+        !yaml.contains("physics"),
+        "physics field should be omitted when None, got: {yaml}"
+    );
+}
