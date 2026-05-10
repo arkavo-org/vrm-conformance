@@ -2,3 +2,4 @@
 //! stdio JSON-RPC loop on top of this.
 
 pub mod render;
+pub mod session;
