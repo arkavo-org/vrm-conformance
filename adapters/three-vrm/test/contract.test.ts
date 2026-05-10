@@ -67,12 +67,12 @@ test("phase 1 op load_vrm with missing file returns LoadFailed (-32001)", async 
   }
 });
 
-test("reserved phase-2 op (step_physics) returns phase Phase 2", async () => {
+test("reserved phase-2 op (set_humanoid_pose) returns phase Phase 2", async () => {
   const h = spawnAdapter();
   try {
-    const resp = await rpc(h, 3, "step_physics", {
-      dt_seconds: 0.016,
-      count: 1,
+    const resp = await rpc(h, 3, "set_humanoid_pose", {
+      session_id: "x",
+      bone_rotations: {},
     });
     assert.equal(resp.error?.code, -32000);
     assert.equal(
@@ -123,7 +123,7 @@ test("malformed JSON returns -32700 parse error with id null", async () => {
 test("multiple framed requests handled back-to-back", async () => {
   const h = spawnAdapter();
   try {
-    const r1 = await rpc(h, 1, "step_physics", {});
+    const r1 = await rpc(h, 1, "set_root_transform", {});
     const r2 = await rpc(h, 2, "set_humanoid_pose", {});
     assert.equal(r1.error?.code, -32000);
     assert.equal(r2.error?.code, -32000);

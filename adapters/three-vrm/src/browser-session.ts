@@ -124,6 +124,24 @@ export class BrowserSession {
     );
   }
 
+  async stepPhysics(params: unknown): Promise<void> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (p) => (window as any).__stepPhysics(p),
+      params,
+    );
+  }
+
+  async resetPhysics(params: unknown): Promise<void> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (p) => (window as any).__resetPhysics(p),
+      params,
+    );
+  }
+
   async render(params: {
     width: number;
     height: number;
