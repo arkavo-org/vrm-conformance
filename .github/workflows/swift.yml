@@ -10,19 +10,22 @@ on:
 
 jobs:
   build:
-    # macos-latest is currently macOS 26 (Apple Silicon) on GitHub-hosted
-    # runners, which is what VRMMetalKit's `.macOS(.v26)` floor + Swift 6.2
-    # toolchain require. Pinning the explicit `macos-26-arm64` label
-    # backed up in the runner queue (40+ minutes during L3 development);
-    # `macos-latest` picks up faster and auto-rolls when GitHub bumps.
-    # If GitHub demotes macos-latest below macOS 26, swift build will
-    # fail fast with the package-floor error and we can re-pin.
+    # macos-latest currently maps to macos-15 (Sequoia) on Apple Silicon —
+    # its default toolchain is Swift 6.1 / Xcode 16.4, but VRMMetalKit
+    # pins .macOS(.v26) + Swift 6.2 and needs Xcode 26 to build. The
+    # GitHub-hosted runner ships Xcode 26.3 preinstalled at
+    # /Applications/Xcode_26.3.app; we just have to select it before
+    # `swift build`. macos-latest is preferable to the explicit
+    # `macos-26-arm64` label because the latter backed up in the runner
+    # queue for 40+ minutes during L3 development.
     runs-on: macos-latest
     defaults:
       run:
         working-directory: adapters/vrm-metal-kit
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
       - name: Swift + Xcode versions
         run: |
           swift --version
