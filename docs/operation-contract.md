@@ -134,6 +134,36 @@ Required to be **declared** by every adapter (`describe` lists them) but may ret
 - `set_root_transform`, `animate_root_transform` — Phase 2
 - `step_physics`, `reset_physics` — Phase 2
 
+## Runner-only operations
+
+These are exposed by `vrm-runner` but not by renderer adapters. They orchestrate adapter calls and produce derived artifacts.
+
+### `diff`
+
+```json
+{
+  "input": {
+    "plan":          "string (path to test plan YAML)",
+    "render":        "string (path to render PNG)",
+    "reference":     "string (path to reference PNG)",
+    "renderer_name": "string"
+  },
+  "output": {
+    "test_id":            "string",
+    "renderer":           "string",
+    "reference_renderer": "string",
+    "ssim":               "number",
+    "ssim_threshold":     "number",
+    "ssim_passed":        "boolean",
+    "properties":         "array of PropertyResult"
+  }
+}
+```
+
+`diff` runs SSIM between `render` and `reference`, then evaluates each property assertion in the plan against the render image. Exits non-zero when `overall_passed` (i.e., `ssim_passed && all properties pass`) is false; agents and CI use the exit code as the pass/fail signal.
+
+`execute-test-plan` accepts an optional `--reference` flag that runs `diff` inline after the render and includes the `DiffResult` (plus an `overall_passed` boolean) in its JSON output. Its exit code is unchanged: 0 means "the pipeline ran"; pass/fail is signaled via `overall_passed` in the JSON. Callers who want exit-gating use the standalone `diff` subcommand.
+
 ## Output types
 
 `output_type` on `render`:
