@@ -105,6 +105,16 @@ pub fn reset_physics(
     Ok(ops::UnitResult {})
 }
 
+/// Mock has no physics state; deterministic synthesis is unaffected by
+/// root-transform animation. Acknowledge so plans carrying `animation`
+/// blocks can run against the mock for protocol coverage.
+pub fn animate_root_transform(
+    _registry: &mut SessionRegistry,
+    _params: serde_json::Value,
+) -> Result<ops::UnitResult, RpcError> {
+    Ok(ops::UnitResult {})
+}
+
 fn invalid_session(id: &str) -> RpcError {
     RpcError {
         code: -32602,

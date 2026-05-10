@@ -32,6 +32,27 @@ fn render_response_deserializes() {
 }
 
 #[test]
+fn animate_root_transform_round_trips() {
+    let params = AnimateRootTransformParams {
+        session_id: "sess-7".into(),
+        translation_start: [0.0, 0.0, 0.0],
+        translation_end: [0.2, 0.0, 0.0],
+        duration_seconds: 0.5,
+        fps: 60,
+    };
+    let req = JsonRpcRequest::new(2, "animate_root_transform", params);
+    let s = serde_json::to_string(&req).unwrap();
+    assert!(s.contains(r#""method":"animate_root_transform""#));
+    assert!(s.contains(r#""duration_seconds":0.5"#));
+    assert!(s.contains(r#""fps":60"#));
+
+    let req2: JsonRpcRequest<AnimateRootTransformParams> = serde_json::from_str(&s).unwrap();
+    assert_eq!(req2.method, "animate_root_transform");
+    assert_eq!(req2.params.translation_end, [0.2, 0.0, 0.0]);
+    assert_eq!(req2.params.fps, 60);
+}
+
+#[test]
 fn unimplemented_error_round_trips() {
     let err = RpcError::unimplemented("step_physics", "v1.x");
     let s = serde_json::to_string(&err).unwrap();

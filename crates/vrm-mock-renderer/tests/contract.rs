@@ -189,6 +189,34 @@ fn step_physics_returns_ok_result_not_unimplemented() {
 }
 
 #[test]
+fn animate_root_transform_returns_ok_result() {
+    let mut child = spawn_mock();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let resp = rpc(
+        &mut stdin,
+        &mut stdout,
+        1,
+        "animate_root_transform",
+        serde_json::json!({
+            "session_id": "ignored",
+            "translation_start": [0.0, 0.0, 0.0],
+            "translation_end": [0.2, 0.0, 0.0],
+            "duration_seconds": 0.5,
+            "fps": 60,
+        }),
+    );
+    assert!(
+        resp.get("result").is_some(),
+        "animate_root_transform should succeed in mock, got: {resp:#?}"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
 fn reset_physics_returns_ok_result() {
     let mut child = spawn_mock();
     let mut stdin = child.stdin.take().unwrap();

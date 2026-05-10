@@ -116,6 +116,25 @@ pub struct ResetPhysicsParams {
     pub settle_steps: u32,
 }
 
+/// Drives a linear root-transform animation so spring-bone chains experience
+/// inertia/drag, not just gravity settling. The adapter is expected to
+/// step physics at `fps` Hz over `duration_seconds`, interpolating the root
+/// translation from `translation_start` to `translation_end` and calling
+/// the renderer's physics update between samples. After the call returns,
+/// a subsequent `render` captures whatever post-animation pose resulted.
+///
+/// Translation-only in v0.1 — rotation excitation lands when there's a real
+/// test case calling for it. Methodology: `docs/methodology.md`,
+/// "Spring bone excitation".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnimateRootTransformParams {
+    pub session_id: String,
+    pub translation_start: [f32; 3],
+    pub translation_end: [f32; 3],
+    pub duration_seconds: f32,
+    pub fps: u32,
+}
+
 /// Empty result type for ops that return no payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitResult {}
