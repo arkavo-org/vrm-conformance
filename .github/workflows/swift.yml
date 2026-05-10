@@ -10,10 +10,14 @@ on:
 
 jobs:
   build:
-    # macOS 26 required: VRMMetalKit pins its platform floor at macOS 26
-    # (Swift 6.2 toolchain). Apple-Silicon runner so the Metal device
-    # probe in main.swift can boot a real GPU.
-    runs-on: macos-26-arm64
+    # macos-latest is currently macOS 26 (Apple Silicon) on GitHub-hosted
+    # runners, which is what VRMMetalKit's `.macOS(.v26)` floor + Swift 6.2
+    # toolchain require. Pinning the explicit `macos-26-arm64` label
+    # backed up in the runner queue (40+ minutes during L3 development);
+    # `macos-latest` picks up faster and auto-rolls when GitHub bumps.
+    # If GitHub demotes macos-latest below macOS 26, swift build will
+    # fail fast with the package-floor error and we can re-pin.
+    runs-on: macos-latest
     defaults:
       run:
         working-directory: adapters/vrm-metal-kit
