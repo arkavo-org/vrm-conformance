@@ -166,6 +166,31 @@ if [ "${RUN_THREE_VRM:-0}" = "1" ] && [ "$SKIP_RENDER" != "1" ]; then
     fi
 fi
 
+# ---- step 4d: optional three-vrm spring-bone exercise --------------------
+if [ "${RUN_THREE_VRM:-0}" = "1" ] && [ "$SKIP_RENDER" != "1" ] && [ -f "$THREE_VRM_DIR/dist/main.js" ]; then
+    echo "==> Running three-vrm spring-bone settle + render"
+    SB_ID="smoke_spring"
+    cargo run --release -p vrm-asset-generator -- emit-springbone \
+        --id "$SB_ID" \
+        --output-dir "$ASSETS" \
+        --json
+    SB_OUT="$OUTPUTS/${SB_ID}_three-vrm-sb.png"
+    if cargo run --release -p vrm-runner -- execute-test-plan \
+            --plan "$ASSETS/${SB_ID}.test.yaml" \
+            --adapter-bin node \
+            --adapter-args "$THREE_VRM_DIR/dist/main.js" \
+            --asset-dir "$ASSETS" \
+            --output-dir "$OUTPUTS" \
+            --renderer-name three-vrm-sb \
+            --json; then
+        if [ -f "$SB_OUT" ]; then
+            echo "    three-vrm spring-bone produced: $SB_OUT ($(wc -c < "$SB_OUT" | tr -d ' ') bytes)"
+        fi
+    else
+        echo "    three-vrm spring-bone runner step exited non-zero (continuing)" >&2
+    fi
+fi
+
 # ---- step 5: optional S3 upload -------------------------------------------
 if [ -n "${VRM_GOLDENS_BUCKET:-}" ]; then
     if [ -f "$PNG" ] && [ "$SKIP_RENDER" != "1" ]; then
