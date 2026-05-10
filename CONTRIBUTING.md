@@ -46,6 +46,28 @@ Each submission must include the metadata schema enforced by CI:
 
 PRs missing or malformed metadata are auto-rejected.
 
+## Pulling goldens for offline diff
+
+If you want to run the diff engine locally against the published golden corpus without re-rendering, pull every PNG to a local mirror:
+
+```bash
+./scripts/pull-goldens.sh /tmp/goldens-mirror
+```
+
+This reads `goldens/manifest.json`, downloads each entry from S3 to `/tmp/goldens-mirror/<test_id>/<renderer_name>.png`, and verifies BLAKE3 content addressing. A hash mismatch exits non-zero with a clear pointer at the bad entry.
+
+Then drive the runner's diff against a local render:
+
+```bash
+cargo run -p vrm-runner -- diff \
+  --plan path/to/plan.yaml \
+  --render path/to/your-render.png \
+  --reference /tmp/goldens-mirror/<test_id>/<renderer_name>.png \
+  --json
+```
+
+Requires AWS credentials with `s3:GetObject` on the bucket(s) referenced by the manifest. Reviewers without write access can request a read-only IAM role.
+
 ## RFCs
 
 Architectural decisions go through RFCs in `rfcs/`. Use `rfcs/template.md` to draft a new one.
