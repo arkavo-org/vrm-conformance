@@ -88,7 +88,7 @@ pub fn run(cli: Cli) -> Result<()> {
             });
             match format {
                 DescribeFormat::Json => println!("{}", serde_json::to_string_pretty(&catalog)?),
-                DescribeFormat::Text => println!("{:#?}", catalog),
+                DescribeFormat::Text => println!("{catalog:#?}"),
             }
             Ok(())
         }
