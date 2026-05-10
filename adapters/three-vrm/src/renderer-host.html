@@ -143,6 +143,42 @@
         return dataUrl;
       };
 
+      window.__stepPhysics = async function (params) {
+        if (!state.vrm) return;
+        ensureRenderer(state.canvas?.width ?? 1024, state.canvas?.height ?? 1024);
+        const dt = (typeof params.dt_seconds === "number" ? params.dt_seconds : 1 / 60);
+        const count = (typeof params.count === "number" ? params.count : 1);
+        for (let i = 0; i < count; i++) {
+          state.vrm.update(dt);
+        }
+      };
+
+      // Re-loads the most recently-loaded VRM (the BrowserSession serves it
+      // via the page.route interceptor at https://app.local/asset), giving
+      // a fresh chain at rest pose. Then runs `settle_steps` updates so the
+      // chain reaches a stable hanging position before rendering.
+      window.__resetPhysics = async function (params) {
+        ensureRenderer(state.canvas?.width ?? 1024, state.canvas?.height ?? 1024);
+        const settle = (typeof params.settle_steps === "number" ? params.settle_steps : 0);
+
+        if (state.vrm) {
+          state.scene.remove(state.vrm.scene);
+          state.vrm = null;
+          const loader = new GLTFLoader();
+          loader.register((parser) => new VRMLoaderPlugin(parser));
+          const gltf = await loader.loadAsync("https://app.local/asset");
+          const vrm = gltf.userData.vrm;
+          state.vrm = vrm;
+          state.scene.add(vrm.scene);
+        }
+
+        if (state.vrm && settle > 0) {
+          for (let i = 0; i < settle; i++) {
+            state.vrm.update(1 / 60);
+          }
+        }
+      };
+
       window.__dispose = function () {
         if (state.vrm) {
           state.scene.remove(state.vrm.scene);
