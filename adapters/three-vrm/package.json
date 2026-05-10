@@ -9,7 +9,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/renderer-host.html dist/renderer-host.html",
     "start": "tsx src/main.ts",
     "test": "node --import tsx --test test/*.test.ts"
   },
