@@ -10,7 +10,22 @@ use vrm_validator_wrap::{validate, ValidatorConfig};
 #[test]
 #[ignore = "slow; run via cargo test -- --ignored"]
 fn full_sweep_validates_clean() {
-    let cfg = ValidatorConfig::from_env().expect("install validator first");
+    // Match the skip-gracefully convention used by vrm-validator-wrap's tests:
+    // CI may run from the workspace root while cargo's cwd is the crate dir,
+    // so the default `.tools/vrm-validator-cli` relative path may not resolve
+    // even when the shim is installed. Skip cleanly and tell the operator how
+    // to retry; do NOT panic.
+    let cfg = match ValidatorConfig::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "SKIP: validator shim not reachable ({e}). Set VRM_VALIDATOR_BIN to an absolute path \
+                 (e.g. VRM_VALIDATOR_BIN=$(git rev-parse --show-toplevel)/.tools/vrm-validator-cli) \
+                 or run scripts/install-validator.sh from the workspace root."
+            );
+            return;
+        }
+    };
 
     let dir = tempfile::tempdir().unwrap();
     let out_dir = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();

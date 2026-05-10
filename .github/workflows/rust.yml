@@ -26,4 +26,10 @@ jobs:
       - name: Install validator shim
         run: ./scripts/install-validator.sh
       - name: Run validator-gated integration tests
+        env:
+          # Cargo runs each test from its crate dir, so the default
+          # ".tools/vrm-validator-cli" relative lookup misses. Pin an
+          # absolute path so corpus_validation actually exercises the
+          # validator instead of skipping.
+          VRM_VALIDATOR_BIN: ${{ github.workspace }}/.tools/vrm-validator-cli
         run: cargo test --workspace -- --ignored
