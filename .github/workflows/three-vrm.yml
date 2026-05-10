@@ -5,23 +5,36 @@ on:
     paths:
       - 'adapters/three-vrm/**'
       - '.github/workflows/three-vrm.yml'
+      # render.test.ts shells out to vrm-asset-generator; rerun on its changes too.
+      - 'crates/vrm-asset-generator/**'
   push:
     branches: [main]
     paths:
       - 'adapters/three-vrm/**'
       - '.github/workflows/three-vrm.yml'
+      - 'crates/vrm-asset-generator/**'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: adapters/three-vrm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm ci
-      - run: npm run build
-      - run: npm test
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build asset-generator (used by render.test.ts)
+        run: cargo build --release -p vrm-asset-generator
+      - name: Install adapter deps
+        run: npm ci
+        working-directory: adapters/three-vrm
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: adapters/three-vrm
+      - name: Build adapter
+        run: npm run build
+        working-directory: adapters/three-vrm
+      - name: Run tests
+        run: npm test
+        working-directory: adapters/three-vrm

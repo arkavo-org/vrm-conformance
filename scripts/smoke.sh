@@ -13,6 +13,9 @@ set -euo pipefail
 #   - AWS credentials in env (or default profile) with VRM_GOLDENS_BUCKET set
 #       (S3 upload is gated on $VRM_GOLDENS_BUCKET — unset means "skip")
 #   - cargo, node, python3 available
+#
+# Optional: RUN_THREE_VRM=1 to also exercise the three-vrm adapter (slow:
+# requires Playwright Chromium installed via `npx playwright install chromium`).
 #       (python3 is used only by the diff-loop self-test JSON parse;
 #        see step 4b below.)
 #
@@ -132,6 +135,35 @@ print(f'    SSIM={d[\"ssim\"]:.4f}, properties={len(d[\"properties\"])}, overall
 "
 else
     echo "    (skipped: no plan at $DIFF_PLAN)"
+fi
+
+# ---- step 4c: optional three-vrm exercise ---------------------------------
+if [ "${RUN_THREE_VRM:-0}" = "1" ] && [ "$SKIP_RENDER" != "1" ]; then
+    echo "==> Running three-vrm adapter (RUN_THREE_VRM=1)"
+    THREE_VRM_DIR=$ROOT/adapters/three-vrm
+    (cd "$THREE_VRM_DIR" \
+        && npm install --silent \
+        && npm run build --silent \
+        && npx --yes playwright install chromium >/dev/null 2>&1) \
+        || { echo "    three-vrm setup failed (continuing without it)" >&2; }
+
+    if [ -f "$THREE_VRM_DIR/dist/main.js" ]; then
+        THREE_VRM_OUT="$OUTPUTS/smoke_default_three-vrm.png"
+        if cargo run --release -p vrm-runner -- execute-test-plan \
+                --plan "$ASSETS/smoke_default.test.yaml" \
+                --adapter-bin node \
+                --adapter-args "$THREE_VRM_DIR/dist/main.js" \
+                --asset-dir "$ASSETS" \
+                --output-dir "$OUTPUTS" \
+                --renderer-name three-vrm \
+                --json; then
+            if [ -f "$THREE_VRM_OUT" ]; then
+                echo "    three-vrm produced: $THREE_VRM_OUT ($(wc -c < "$THREE_VRM_OUT" | tr -d ' ') bytes)"
+            fi
+        else
+            echo "    three-vrm runner step exited non-zero (continuing)" >&2
+        fi
+    fi
 fi
 
 # ---- step 5: optional S3 upload -------------------------------------------

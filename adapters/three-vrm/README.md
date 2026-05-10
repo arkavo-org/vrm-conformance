@@ -7,9 +7,19 @@ TypeScript renderer adapter for the [VRM conformance suite](https://github.com/a
 | Phase | Scope | State |
 |---|---|---|
 | 2C-a | TS scaffold + JSON-RPC framing + Unimplemented dispatch | shipped |
-| 2C-b | three-vrm + Playwright headless WebGL2 + real Phase 1 ops | not started |
+| 2C-b | three-vrm + Playwright headless WebGL2 + real Phase 1 ops | shipped |
 
-Until Phase 2C-b lands, every Phase 1 op returns `Unimplemented` with `data.phase = "v1.x"`. Reserved Phase 2+ ops return `Unimplemented` with the appropriate phase label.
+Phase 1 ops are real: `load_vrm`, `set_camera`, `set_lighting`, `set_post_processing`, `render`, `dispose`. Reserved Phase 2+ ops still return `Unimplemented` with the appropriate phase label.
+
+## Browser dependency
+
+This adapter spawns a headless Chromium instance via [Playwright](https://playwright.dev/) and runs three.js + three-vrm inside the browser context. The Chromium binary is **not** included in `node_modules`; install it once after `npm install`:
+
+```bash
+npx playwright install chromium
+```
+
+Disk: ~250 MB cached at `~/Library/Caches/ms-playwright/` (macOS) or `~/.cache/ms-playwright/` (Linux). RAM at runtime: ~50 MB per running adapter.
 
 ## Build
 
