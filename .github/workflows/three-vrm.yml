@@ -1,0 +1,27 @@
+name: three-vrm
+
+on:
+  pull_request:
+    paths:
+      - 'adapters/three-vrm/**'
+      - '.github/workflows/three-vrm.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'adapters/three-vrm/**'
+      - '.github/workflows/three-vrm.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: adapters/three-vrm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build
+      - run: npm test

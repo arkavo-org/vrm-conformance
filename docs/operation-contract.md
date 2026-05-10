@@ -128,6 +128,7 @@ These cover MToon material tests and must be implemented by every renderer adapt
 
 - **`vrm-mock-renderer`** (in-tree, Rust). A deterministic CPU adapter that satisfies the Phase 1 op contract. Renders are a stable function of `MToonParams` — identical params produce byte-identical PNGs, so self-diff is SSIM 1.0 by construction. Used as the default smoke-test adapter; not a real renderer.
 - **`adapters/vrm-metal-kit/`** (in-tree, Swift). Real macOS / Metal renderer scaffold. JSON-RPC framing is implemented; the actual VRMMetalKit integration (L3) is deferred.
+- **`adapters/three-vrm/`** (in-tree, TypeScript). Node-based renderer scaffold for the [pixiv/three-vrm](https://github.com/pixiv/three-vrm) library. JSON-RPC framing is implemented (Phase 2C-a); real headless-WebGL2 rendering via Playwright lands in Phase 2C-b. All ops currently return `Unimplemented`.
 
 ## Reserved operations (Phase 2+)
 
