@@ -179,6 +179,30 @@
         }
       };
 
+      // Drive a linear root-transform animation so spring-bone chains see
+      // inertia, not just gravity settling. We translate vrm.scene.position
+      // from translation_start to translation_end in steps of 1/fps seconds,
+      // calling vrm.update(dt) each step so the chain trails behind.
+      window.__animateRootTransform = async function (params) {
+        if (!state.vrm) return;
+        ensureRenderer(state.canvas?.width ?? 1024, state.canvas?.height ?? 1024);
+        const start = params.translation_start ?? [0, 0, 0];
+        const end = params.translation_end ?? [0, 0, 0];
+        const fps = typeof params.fps === "number" && params.fps > 0 ? params.fps : 60;
+        const duration = typeof params.duration_seconds === "number" ? params.duration_seconds : 0;
+        const steps = Math.max(1, Math.round(duration * fps));
+        const dt = 1 / fps;
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          state.vrm.scene.position.set(
+            start[0] + (end[0] - start[0]) * t,
+            start[1] + (end[1] - start[1]) * t,
+            start[2] + (end[2] - start[2]) * t,
+          );
+          state.vrm.update(dt);
+        }
+      };
+
       window.__dispose = function () {
         if (state.vrm) {
           state.scene.remove(state.vrm.scene);

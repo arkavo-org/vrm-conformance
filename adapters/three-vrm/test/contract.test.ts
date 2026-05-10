@@ -103,6 +103,28 @@ test("reserved phase-3 op (set_expression) returns phase Phase 3", async () => {
   }
 });
 
+test("animate_root_transform without a loaded VRM returns ok (no longer reserved)", async () => {
+  const h = spawnAdapter();
+  try {
+    const resp = await rpc(h, 5, "animate_root_transform", {
+      session_id: "no-vrm-yet",
+      translation_start: [0, 0, 0],
+      translation_end: [0.2, 0, 0],
+      duration_seconds: 0.1,
+      fps: 60,
+    });
+    assert.equal(
+      resp.error,
+      undefined,
+      `expected ok; got: ${JSON.stringify(resp)}`,
+    );
+    assert.ok(resp.result, `expected result; got: ${JSON.stringify(resp)}`);
+  } finally {
+    h.stdin.end();
+    await new Promise((r) => h.child.on("exit", r));
+  }
+});
+
 test("malformed JSON returns -32700 parse error with id null", async () => {
   const h = spawnAdapter();
   try {

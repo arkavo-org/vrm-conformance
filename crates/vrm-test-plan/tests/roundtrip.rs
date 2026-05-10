@@ -174,10 +174,15 @@ fn plan_without_physics_serializes_without_field() {
         ignore_renderers: Vec::new(),
         properties: Vec::new(),
         physics: None,
+        animation: None,
     };
     let yaml = serde_yml::to_string(&plan).unwrap();
     assert!(
         !yaml.contains("physics"),
         "physics field should be omitted when None, got: {yaml}"
+    );
+    assert!(
+        !yaml.contains("animation"),
+        "animation field should be omitted when None, got: {yaml}"
     );
 }

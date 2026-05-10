@@ -68,4 +68,6 @@ Two test files:
 
 ## Reserved (Unimplemented in v0.1, v1.x, Phase 2, Phase 3)
 
-`set_environment` (v1.x), `set_humanoid_pose` (Phase 2), `set_root_transform` (Phase 2), `animate_root_transform` (Phase 2), `step_physics` (Phase 2), `reset_physics` (Phase 2), `set_expression` (Phase 3).
+`set_environment` (v1.x), `set_humanoid_pose` (Phase 2), `set_root_transform` (Phase 2), `set_expression` (Phase 3).
+
+Implemented Phase 2 ops: `step_physics`, `reset_physics`, `animate_root_transform`.

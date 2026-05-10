@@ -23,6 +23,9 @@ image.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 image.workspace = true
+# Used by tests/animation_e2e.rs to build TestPlans + meta sidecars without
+# duplicating the type-level boilerplate; the bin is invoked at runtime.
+vrm-asset-generator = { path = "../vrm-asset-generator" }
 
 [[bin]]
 name = "vrm-runner"

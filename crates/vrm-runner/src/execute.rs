@@ -88,6 +88,26 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
             .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
     }
 
+    if let Some(animation) = &plan.animation {
+        if let Some(root) = &animation.root_transform {
+            progress(
+                opts,
+                "animate_root_transform",
+                &plan.id,
+                json!({
+                    "duration_seconds": root.duration_seconds,
+                    "fps": root.fps,
+                }),
+            );
+            let _: ops::UnitResult = adapter
+                .call(
+                    "animate_root_transform",
+                    animate_root_transform_params(&session_id, root),
+                )
+                .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+        }
+    }
+
     let png = opts
         .output_dir
         .join(format!("{}_{}.png", plan.id, opts.renderer_name));

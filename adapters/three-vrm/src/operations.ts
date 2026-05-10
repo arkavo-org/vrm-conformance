@@ -23,7 +23,6 @@ const PHASE_BY_RESERVED_METHOD: Record<string, string> = {
   set_expression: "Phase 3",
   set_humanoid_pose: "Phase 2",
   set_root_transform: "Phase 2",
-  animate_root_transform: "Phase 2",
 };
 
 export interface DispatchSuccess<T = unknown> {
@@ -101,6 +100,10 @@ export async function dispatch(
         await ctx.session.resetPhysics(params);
         return { ok: true, result: {} };
       }
+      case "animate_root_transform": {
+        await ctx.session.animateRootTransform(params);
+        return { ok: true, result: {} };
+      }
       default: {
         const phase = PHASE_BY_RESERVED_METHOD[method];
         if (phase) {
@@ -171,6 +174,7 @@ export function knownMethods(): string[] {
     "dispose",
     "step_physics",
     "reset_physics",
+    "animate_root_transform",
     ...Object.keys(PHASE_BY_RESERVED_METHOD),
   ];
 }

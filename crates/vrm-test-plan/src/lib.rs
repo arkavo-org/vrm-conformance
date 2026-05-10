@@ -22,6 +22,8 @@ pub struct TestPlan {
     pub properties: Vec<PropertyAssertion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub physics: Option<PhysicsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animation: Option<AnimationConfig>,
 }
 
 /// Optional physics-stepping config for spring-bone / collider tests.
@@ -37,6 +39,29 @@ impl Default for PhysicsConfig {
     fn default() -> Self {
         Self { settle_steps: 30 }
     }
+}
+
+/// Optional root-transform animation block. When present, the runner calls
+/// `animate_root_transform` between `reset_physics` (if any) and `render`,
+/// so the spring-bone chain experiences inertia/drag rather than only the
+/// gravity settle. See `docs/methodology.md` "Spring bone excitation".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnimationConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_transform: Option<RootTransformAnimation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RootTransformAnimation {
+    pub translation_start: [f32; 3],
+    pub translation_end: [f32; 3],
+    pub duration_seconds: f32,
+    #[serde(default = "default_animation_fps")]
+    pub fps: u32,
+}
+
+fn default_animation_fps() -> u32 {
+    60
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

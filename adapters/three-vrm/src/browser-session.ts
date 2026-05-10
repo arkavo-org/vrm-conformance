@@ -142,6 +142,15 @@ export class BrowserSession {
     );
   }
 
+  async animateRootTransform(params: unknown): Promise<void> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (p) => (window as any).__animateRootTransform(p),
+      params,
+    );
+  }
+
   async render(params: {
     width: number;
     height: number;

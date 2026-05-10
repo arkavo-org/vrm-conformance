@@ -48,6 +48,19 @@ pub fn post_processing_params(
     }
 }
 
+pub fn animate_root_transform_params(
+    session_id: &str,
+    a: &plan::RootTransformAnimation,
+) -> ops::AnimateRootTransformParams {
+    ops::AnimateRootTransformParams {
+        session_id: session_id.into(),
+        translation_start: a.translation_start,
+        translation_end: a.translation_end,
+        duration_seconds: a.duration_seconds,
+        fps: a.fps,
+    }
+}
+
 pub fn render_params(session_id: &str, p: &plan::Output, output_path: String) -> ops::RenderParams {
     let color_space = match p.color_space {
         plan::ColorSpace::Linear => ops::ColorSpace::Linear,
