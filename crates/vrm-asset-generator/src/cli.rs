@@ -35,6 +35,17 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit one `.vrm` carrying both default MToon material and a default
+    /// VRMC_springBone chain attached to the head.
+    EmitSpringbone {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -120,6 +131,37 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitSpringbone {
+            id,
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_with_sidecars_spring_bone;
+            use crate::spring_bone::SpringBoneParams;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let stem = output_dir.join(&id);
+            let mtoon = MToonParams::defaults(&id);
+            let spring = SpringBoneParams::defaults(&id);
+            emit_with_sidecars_spring_bone(&mtoon, &spring, &stem)?;
+
+            if emit_json {
+                let result = json!({
+                    "ok": true,
+                    "outputs": {
+                        "vrm": stem.with_extension("vrm"),
+                        "meta": stem.with_extension("meta.json"),
+                        "test_plan": stem.with_extension("test.yaml")
+                    }
+                });
+                println!("{}", serde_json::to_string(&result)?);
+            } else {
+                println!("emitted: {}", stem.with_extension("vrm"));
+                println!("emitted: {}", stem.with_extension("meta.json"));
+                println!("emitted: {}", stem.with_extension("test.yaml"));
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -170,6 +212,31 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "count": { "type": "integer" },
                                 "output_dir": { "type": "string" },
                                 "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-springbone": {
+                        "summary": "Emit one .vrm with default MToon + default VRMC_springBone chain",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["id", "output_dir"],
+                            "properties": {
+                                "id": { "type": "string" },
+                                "output_dir": { "type": "string" }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "outputs": {
+                                    "type": "object",
+                                    "properties": {
+                                        "vrm": { "type": "string" },
+                                        "meta": { "type": "string" },
+                                        "test_plan": { "type": "string" }
+                                    }
+                                }
                             }
                         }
                     }
