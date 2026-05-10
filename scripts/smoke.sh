@@ -117,6 +117,35 @@ fi
 
 cargo run --release -p vrm-diff-engine --example self_diff -- "$PNG"
 
+# ---- step 4b: runner diff CLI sanity --------------------------------------
+echo "==> Running runner diff loop (self-diff via vrm-runner diff)"
+RUNNER_RENDER="$OUTPUTS/runner_diff_render.png"
+RUNNER_REF="$OUTPUTS/runner_diff_reference.png"
+cp "$PNG" "$RUNNER_RENDER"
+cp "$PNG" "$RUNNER_REF"
+
+DIFF_PLAN="$ASSETS/smoke_default.test.yaml"
+if [ -f "$DIFF_PLAN" ]; then
+    DIFF_OUT=$(cargo run --release -p vrm-runner -- diff \
+        --plan "$DIFF_PLAN" \
+        --render "$RUNNER_RENDER" \
+        --reference "$RUNNER_REF" \
+        --renderer-name smoke-test \
+        --json) || {
+        echo "    runner diff failed (unexpected — should self-diff to SSIM~1)" >&2
+        exit 1
+    }
+    echo "$DIFF_OUT" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['ssim_passed'], f'expected ssim_passed=True, got {d}'
+assert d['ssim'] > 0.99, f'expected SSIM ~1, got {d[\"ssim\"]}'
+print(f'    SSIM={d[\"ssim\"]:.4f}, properties={len(d[\"properties\"])}, overall PASS')
+"
+else
+    echo "    (skipped: no plan at $DIFF_PLAN)"
+fi
+
 # ---- step 5: optional S3 upload -------------------------------------------
 if [ -n "${VRM_GOLDENS_BUCKET:-}" ]; then
     if [ -f "$PNG" ] && [ "$SKIP_RENDER" != "1" ]; then
