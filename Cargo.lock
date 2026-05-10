@@ -3202,9 +3202,18 @@ name = "vrm-runner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "tempfile",
+ "thiserror 1.0.69",
  "tracing",
  "tracing-subscriber",
+ "vrm-diff-engine",
+ "vrm-ops",
+ "vrm-test-plan",
 ]
 
 [[package]]
