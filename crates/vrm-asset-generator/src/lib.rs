@@ -10,5 +10,6 @@ pub mod humanoid;
 pub mod mesh;
 pub mod params;
 pub mod sidecar;
+pub mod spring_bone;
 pub mod sweep;
 pub mod vrm_ext;
