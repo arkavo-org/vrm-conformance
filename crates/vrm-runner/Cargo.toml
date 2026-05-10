@@ -1,0 +1,18 @@
+[package]
+name = "vrm-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[[bin]]
+name = "vrm-runner"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
