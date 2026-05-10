@@ -47,20 +47,22 @@ pub fn mtoon_basic_sweep() -> Vec<MToonParams> {
         OutlineWidthMode::WorldCoordinates,
         OutlineWidthMode::ScreenCoordinates,
     ] {
+        let mode_str = match mode {
+            OutlineWidthMode::None => "none",
+            OutlineWidthMode::WorldCoordinates => "world",
+            OutlineWidthMode::ScreenCoordinates => "screen",
+        };
+        if matches!(mode, OutlineWidthMode::None) {
+            // Single None baseline; width is meaningless when outlines are off.
+            let mut p = MToonParams::defaults("mtoon_outline_none");
+            p.outline_width_mode = mode;
+            out.push(p);
+            continue;
+        }
         for &w in &[0.01_f32, 0.03, 0.05, 0.10] {
-            let mode_str = match mode {
-                OutlineWidthMode::None => "none",
-                OutlineWidthMode::WorldCoordinates => "world",
-                OutlineWidthMode::ScreenCoordinates => "screen",
-            };
             let mut p =
                 MToonParams::defaults(format!("mtoon_outline_{mode_str}_{w}", w = fmt_num(w)));
             p.outline_width_mode = mode;
-            // For mode == None, width is meaningless but we emit a single
-            // baseline. Skip the width loop's 3 trailing variants.
-            if matches!(mode, OutlineWidthMode::None) && w != 0.01 {
-                continue;
-            }
             p.outline_width_factor = w;
             p.outline_color_factor = [0.0, 0.0, 0.0];
             out.push(p);

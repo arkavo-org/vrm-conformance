@@ -18,7 +18,10 @@ fn full_sweep_validates_clean() {
     let mut failures = Vec::new();
     for (i, p) in mtoon_basic_sweep().iter().enumerate() {
         let stem = out_dir.join(&p.id);
-        emit_with_sidecars(p, &stem).expect("emission must succeed");
+        if let Err(e) = emit_with_sidecars(p, &stem) {
+            failures.push((p.id.clone(), format!("emission failed: {e}")));
+            continue;
+        }
         let vrm = stem.with_extension("vrm");
 
         let report = match validate(&cfg, &vrm) {
@@ -38,8 +41,9 @@ fn full_sweep_validates_clean() {
                 .collect::<Vec<_>>()
                 .join("; ");
             failures.push((p.id.clone(), summary));
+        } else {
+            eprintln!("[{:3}] {} OK", i, p.id);
         }
-        eprintln!("[{:3}] {} OK", i, p.id);
     }
 
     if !failures.is_empty() {
