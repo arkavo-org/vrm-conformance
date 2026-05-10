@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Phase 1 v0.1 hello-world end-to-end smoke. Requires:
-#   - Validator shim installed (.tools/vrm-validator-cli)
-#   - VRMMetalKit adapter built (adapters/vrm-metal-kit/.build/release/vrm-metal-kit-adapter)
-#       NOTE: as of v0.1 the adapter returns Unimplemented for every op (L3 deferred);
-#             the runner step is therefore expected to fail at load_vrm. Pass --skip-render
-#             or `SMOKE_SKIP_RENDER=1` to bypass.
+# Phase 1+2A+2B end-to-end smoke. Requires:
+#   - Validator shim installed (.tools/vrm-validator-cli) — optional; only
+#       affects asset-validator gating.
+#   - vrm-mock-renderer binary (cargo will build it in step 2 below)
+#       The mock is a deterministic CPU adapter that satisfies the Phase 1
+#       op contract without GPU or VRMMetalKit dependencies. The real Swift
+#       adapter (adapters/vrm-metal-kit/) remains an L3 stretch target; the
+#       smoke uses the mock so the full runner → diff → S3 → site loop runs
+#       green by default.
 #   - AWS credentials in env (or default profile) with VRM_GOLDENS_BUCKET set
 #       (S3 upload is gated on $VRM_GOLDENS_BUCKET — unset means "skip")
-#   - cargo, swift, node, python3 available
-#       (python3 is used to synthesize a placeholder PNG when the render step
-#        is skipped or fails; see step 4 below.)
+#   - cargo, node, python3 available
+#       (python3 is used only by the diff-loop self-test JSON parse;
+#        see step 4b below.)
 #
 # Usage:
 #   scripts/smoke.sh                      # full pipeline (will hit known L3 failure)
@@ -52,8 +55,7 @@ ASSETS=$ROOT/assets/generated
 OUTPUTS=$ROOT/.smoke/renders
 mkdir -p "$ASSETS" "$OUTPUTS"
 
-ADAPTER=$ROOT/adapters/vrm-metal-kit/.build/release/vrm-metal-kit-adapter
-PNG="$OUTPUTS/smoke_default_vrm-metal-kit.png"
+PNG="$OUTPUTS/smoke_default_vrm-mock.png"
 
 # ---- step 1: generate asset ------------------------------------------------
 echo "==> Generating asset (vrm-asset-generator emit-default)"
@@ -61,38 +63,24 @@ cargo run --release -p vrm-asset-generator -- emit-default \
     --id smoke_default \
     --output-dir "$ASSETS"
 
-# ---- step 2: build Swift adapter (best effort) ----------------------------
-if [ "$SKIP_RENDER" = "1" ]; then
-    echo "==> Skipping Swift adapter build + runner step (--skip-render)"
-else
-    echo "==> Building Swift adapter (release)"
-    if (cd adapters/vrm-metal-kit && swift build --configuration release); then
-        :
-    else
-        echo "    Swift build failed — falling back to --skip-render mode" >&2
-        SKIP_RENDER=1
-    fi
-fi
+# ---- step 2: build mock renderer ------------------------------------------
+echo "==> Building mock renderer (cargo build --release -p vrm-mock-renderer)"
+cargo build --release -p vrm-mock-renderer
 
-# ---- step 3: runner (known-blocked on L3) ---------------------------------
-if [ "$SKIP_RENDER" != "1" ]; then
-    echo "==> Running test plan against vrm-metal-kit adapter"
-    echo "    NOTE: L3 (real Metal rendering) is deferred for v0.1."
-    echo "          The adapter returns Unimplemented for load_vrm; the runner is"
-    echo "          expected to error here. Re-run with --skip-render to bypass."
-    if cargo run --release -p vrm-runner -- execute-test-plan \
-            --plan "$ASSETS/smoke_default.test.yaml" \
-            --adapter-bin "$ADAPTER" \
-            --asset-dir "$ASSETS" \
-            --output-dir "$OUTPUTS" \
-            --renderer-name vrm-metal-kit \
-            --json; then
-        echo "    runner succeeded (unexpected — L3 must have landed!)"
-    else
-        rc=$?
-        echo "    runner exited with status $rc — this is the known L3-blocked checkpoint." >&2
-        echo "    Continuing with downstream smoke steps using a placeholder PNG." >&2
-    fi
+ADAPTER=$ROOT/target/release/vrm-mock-renderer
+
+# ---- step 3: runner drives mock adapter -----------------------------------
+if [ "$SKIP_RENDER" = "1" ]; then
+    echo "==> Skipping runner step (--skip-render)"
+else
+    echo "==> Running test plan against mock adapter (vrm-mock-renderer)"
+    cargo run --release -p vrm-runner -- execute-test-plan \
+        --plan "$ASSETS/smoke_default.test.yaml" \
+        --adapter-bin "$ADAPTER" \
+        --asset-dir "$ASSETS" \
+        --output-dir "$OUTPUTS" \
+        --renderer-name vrm-mock \
+        --json
 fi
 
 # ---- step 4: self-diff sanity ---------------------------------------------
@@ -167,6 +155,6 @@ echo
 if [ "$SKIP_RENDER" = "1" ]; then
     echo "OK — smoke complete (render step skipped). Open site/dist/index.html in a browser."
 else
-    echo "OK — smoke complete (render step blocked on L3, downstream steps green)."
+    echo "OK — smoke complete (mock adapter rendered, all stages green)."
     echo "     Open site/dist/index.html in a browser to view."
 fi
