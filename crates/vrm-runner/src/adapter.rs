@@ -25,7 +25,9 @@ pub enum AdapterError {
 
 pub struct Adapter {
     child: Child,
-    stdin: ChildStdin,
+    // `Option` so we can `take()` and drop stdin on shutdown despite `Drop`
+    // forbidding moves out of fields. `None` means stdin has been closed.
+    stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     next_id: u64,
 }
@@ -43,7 +45,7 @@ impl Adapter {
         let stdout = BufReader::new(child.stdout.take().expect("stdout piped"));
         Ok(Adapter {
             child,
-            stdin,
+            stdin: Some(stdin),
             stdout,
             next_id: 1,
         })
@@ -59,8 +61,14 @@ impl Adapter {
 
         let req = JsonRpcRequest::new(id, method, params);
         let body = serde_json::to_vec(&req)?;
-        write_message(&mut self.stdin, &body)?;
-        self.stdin.flush()?;
+        let stdin = self.stdin.as_mut().ok_or_else(|| {
+            AdapterError::Io(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "adapter stdin already closed",
+            ))
+        })?;
+        write_message(stdin, &body)?;
+        stdin.flush()?;
 
         let resp_bytes = read_message(&mut self.stdout)?;
         let resp: JsonRpcResponse<R> = serde_json::from_slice(&resp_bytes)?;
@@ -69,8 +77,48 @@ impl Adapter {
 
     pub fn shutdown(mut self) -> Result<(), AdapterError> {
         // Closing stdin signals adapters to exit gracefully.
-        drop(self.stdin);
-        let _ = self.child.wait()?;
-        Ok(())
+        // We give the adapter a bounded grace period (5 seconds) to exit on its
+        // own; if it ignores stdin EOF and hangs, we kill it so CI can never
+        // deadlock here. The exact bound is an implementation detail — tests
+        // must not depend on this timing.
+        self.stdin.take();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match self.child.try_wait()? {
+                Some(_status) => return Ok(()),
+                None => {
+                    if std::time::Instant::now() >= deadline {
+                        // Adapter is hung; kill and reap. Ignore errors —
+                        // best-effort cleanup, child may exit between calls.
+                        let _ = self.child.kill();
+                        let _ = self.child.wait();
+                        return Ok(());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Adapter {
+    fn drop(&mut self) {
+        // Best-effort subprocess cleanup. Ensures that if `execute_plan` (or
+        // any caller) bails via `?` between `spawn` and an explicit
+        // `shutdown()`, the renderer subprocess is killed and reaped instead
+        // of being orphaned/zombied.
+        //
+        // When `shutdown()` ran in the happy path, the child has already
+        // exited; `kill()` will then return Err, which we deliberately
+        // swallow. The same applies to `wait()` if the child is already
+        // reaped.
+        //
+        // Drop stdin first (if still held) so the child sees EOF; then kill
+        // unconditionally as a safety net. `kill()` on an already-exited
+        // child returns Err on some platforms — we deliberately swallow it.
+        // `wait()` reaps the process so we don't leave a zombie.
+        self.stdin.take();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
