@@ -32,7 +32,7 @@ jobs:
       - name: Stage manifest under site dist
         run: |
           mkdir -p site/dist/goldens
-          cp goldens/manifest.json site/dist/goldens/manifest.json || echo "{}" > site/dist/goldens/manifest.json
+          cp goldens/manifest.json site/dist/goldens/manifest.json || echo '{"version": 1, "entries": []}' > site/dist/goldens/manifest.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/dist

@@ -4,7 +4,7 @@
 // pipes, no GPU). Validates:
 //
 // 1. A framed request through the dispatcher comes back as a framed response.
-// 2. Phase 1 ops produce Unimplemented (-32000) with `data.phase = "v1.x"`.
+// 2. Phase 1 ops produce Unimplemented (-32000) with the L3 deferral phase label.
 // 3. Reserved Phase 2 ops produce Unimplemented (-32000) with the right phase.
 // 4. Unknown methods produce -32601.
 // 5. Multiple requests on one stream are framed correctly back-to-back.
@@ -81,9 +81,10 @@ final class JsonRpcServerTests: XCTestCase {
         XCTAssertEqual(err["code"] as? Int, -32601)
     }
 
-    func testPhaseOneOpsReturnUnimplementedV1x() throws {
+    func testPhaseOneOpsReportL3Deferral() throws {
         // load_vrm is a Phase 1 op; in this scaffolding pass it must return
-        // -32000 Unimplemented with phase="v1.x".
+        // -32000 Unimplemented with a phase label indicating the L3 deferral
+        // (distinct from the contract-reserved "v1.x" tag used for HDRI).
         let request = #"{"jsonrpc":"2.0","id":42,"method":"load_vrm","params":{"path":"/tmp/x.vrm"}}"#
         let reader = MemoryReader(frame(request))
         let writer = MemoryWriter()
@@ -97,7 +98,7 @@ final class JsonRpcServerTests: XCTestCase {
         XCTAssertEqual(err["code"] as? Int, -32000)
         XCTAssertEqual(err["message"] as? String, "Unimplemented")
         let data = try XCTUnwrap(err["data"] as? [String: Any])
-        XCTAssertEqual(data["phase"] as? String, "v1.x")
+        XCTAssertEqual(data["phase"] as? String, "L3 (VRMMetalKit integration deferred)")
     }
 
     func testReservedPhase2OpReportsPhase2() throws {

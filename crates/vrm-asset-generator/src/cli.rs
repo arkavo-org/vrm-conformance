@@ -134,6 +134,20 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "id": { "type": "string" },
                                 "output_dir": { "type": "string" }
                             }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "outputs": {
+                                    "type": "object",
+                                    "properties": {
+                                        "vrm": { "type": "string" },
+                                        "meta": { "type": "string" },
+                                        "test_plan": { "type": "string" }
+                                    }
+                                }
+                            }
                         }
                     },
                     "emit-sweep": {
@@ -147,6 +161,15 @@ pub fn run(cli: Cli) -> Result<()> {
                                     "type": "boolean",
                                     "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
                                 }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
                             }
                         }
                     }

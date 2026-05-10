@@ -38,8 +38,10 @@ enum Operations {
     static func phase(for method: String) -> String? {
         if phaseOneMethods.contains(method) {
             // Phase 1 ops are not yet implemented in this scaffolding pass.
-            // L3 replaces these with real handlers.
-            return "v1.x"
+            // L3 replaces these with real handlers. The label is distinct from
+            // the contract-reserved "v1.x" tag (which means HDRI / future spec
+            // work) so consumers can tell the two apart.
+            return "L3 (VRMMetalKit integration deferred)"
         }
         if let reserved = reservedPhases[method] {
             return reserved

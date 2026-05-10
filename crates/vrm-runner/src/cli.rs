@@ -124,10 +124,37 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "asset_dir": { "type": "string" },
                                 "output_dir": { "type": "string" }
                             }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "test_id": { "type": "string" },
+                                "renderer": { "type": "string" },
+                                "output_png": { "type": "string" },
+                                "actual_color_space": { "type": "string" }
+                            }
                         }
                     },
                     "plan-test-plan": {
-                        "summary": "Cost-preview a test plan without executing"
+                        "summary": "Cost-preview a test plan without executing",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["plan"],
+                            "properties": {
+                                "plan": { "type": "string" }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "test_id": { "type": "string" },
+                                "estimated_renders": { "type": "integer" },
+                                "estimated_seconds": { "type": "number" },
+                                "outputs": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
                     }
                 }
             });
