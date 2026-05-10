@@ -120,3 +120,39 @@ pub fn base_material(p: &MToonParams) -> Value {
         }
     })
 }
+
+use crate::spring_bone::SpringBoneParams;
+
+/// Build a VRMC_springBone extension JSON object given the joint node
+/// indices (in chain order, head-to-tail) and the per-spring params.
+///
+/// Spec reference: https://github.com/vrm-c/vrm-specification/tree/master/specification/VRMC_springBone-1.0
+///
+/// v0.1 emits one named spring with no colliders. Multi-chain and
+/// collider scenarios are out of scope for 2D-a.
+pub fn vrmc_spring_bone(joint_nodes: &[usize], params: &SpringBoneParams) -> Value {
+    let joints: Vec<Value> = joint_nodes
+        .iter()
+        .map(|&node| {
+            json!({
+                "node": node,
+                "hitRadius": params.hit_radius,
+                "stiffness": params.stiffness,
+                "gravityPower": params.gravity_power,
+                "gravityDir": params.gravity_dir,
+                "dragForce": params.drag_force,
+            })
+        })
+        .collect();
+
+    json!({
+        "specVersion": "1.0",
+        "colliders": [],
+        "colliderGroups": [],
+        "springs": [{
+            "name": params.spring_name,
+            "joints": joints,
+            "colliderGroups": [],
+        }],
+    })
+}
