@@ -9,7 +9,9 @@ set -euo pipefail
 #             or `SMOKE_SKIP_RENDER=1` to bypass.
 #   - AWS credentials in env (or default profile) with VRM_GOLDENS_BUCKET set
 #       (S3 upload is gated on $VRM_GOLDENS_BUCKET — unset means "skip")
-#   - cargo, swift, node available
+#   - cargo, swift, node, python3 available
+#       (python3 is used to synthesize a placeholder PNG when the render step
+#        is skipped or fails; see step 4 below.)
 #
 # Usage:
 #   scripts/smoke.sh                      # full pipeline (will hit known L3 failure)
@@ -23,6 +25,15 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
+
+# ---- preflight: required tools --------------------------------------------
+# swift is checked separately because it's only needed when not skipping render.
+for tool in cargo node python3; do
+    command -v "$tool" >/dev/null 2>&1 || {
+        echo "smoke: missing required tool: $tool" >&2
+        exit 1
+    }
+done
 
 # ---- arg parsing -----------------------------------------------------------
 SKIP_RENDER="${SMOKE_SKIP_RENDER:-0}"
