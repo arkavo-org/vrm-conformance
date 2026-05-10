@@ -126,9 +126,8 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
 /// wired here yet — see the chain_mesh module docs. The wiring was
 /// drafted and locally smoke-tested: three-vrm renders both meshes
 /// correctly, but VRMMetalKit's renderer drops the non-skinned mesh
-/// when any skin is present in the document, producing an effectively
-/// invisible avatar for the property-assertion tests. Resolving that
-/// interop quirk is a separate task.
+/// when any skin is present in the document
+/// ([arkavo-org/VRMMetalKit#181](https://github.com/arkavo-org/VRMMetalKit/issues/181)).
 pub fn emit_vrm_with_spring_bone(
     mtoon: &MToonParams,
     spring_bone: &SpringBoneParams,

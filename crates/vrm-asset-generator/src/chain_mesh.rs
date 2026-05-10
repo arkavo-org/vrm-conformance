@@ -21,9 +21,11 @@
 //! glTF document, even with the sphere annotated as `firstPerson.type
 //! = "both"` and parented under hips — so adding the chain skin to the
 //! spring-bone emit path regresses the avg_luminance property assertions
-//! (the sphere is what they measure). Until the VRMMetalKit interop is
-//! understood (likely a renderer-side fix in arkavo-org/VRMMetalKit, or
-//! a different glTF scene-graph layout that VRMMetalKit recognizes),
+//! (the sphere is what they measure).
+//!
+//! Filed upstream as
+//! [arkavo-org/VRMMetalKit#181](https://github.com/arkavo-org/VRMMetalKit/issues/181)
+//! (non-skinned meshes dropped when skin is present). Until that lands,
 //! `emit_vrm_with_spring_bone` keeps the sphere-only mesh. The chain
 //! geometry + IBM packing here is unit-tested standalone and ready to
 //! wire when the upstream issue is resolved.

@@ -210,6 +210,13 @@ final class Operations: @unchecked Sendable {
             // a no-op because no spring-bone data was present" from a
             // real handler bug. (springBoneBuffers.numBones is internal;
             // we count joints across springs as a public proxy.)
+            //
+            // NOTE: this counts the POST-EXPANSION spring + joint tally.
+            // For VRM 1.0 assets a 1-spring/4-joint declaration is reported
+            // here as 3 springs / 9 joints because
+            // expandVRM0SpringBoneChains() runs unconditionally — filed
+            // upstream as
+            // https://github.com/arkavo-org/VRMMetalKit/issues/182
             let nSprings = model.springBone?.springs.count ?? 0
             let nJoints = model.springBone?.springs.reduce(0) { $0 + $1.joints.count } ?? 0
             FileHandle.standardError.write(Data(
