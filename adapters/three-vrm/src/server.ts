@@ -3,7 +3,7 @@
 
 import type { Readable, Writable } from "node:stream";
 import { readMessage, writeMessage, FrameError } from "./framing.js";
-import { dispatch } from "./operations.js";
+import { dispatch, type AdapterContext } from "./operations.js";
 
 interface JsonRpcRequest {
   jsonrpc: string;
@@ -19,17 +19,18 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown };
 }
 
-export async function run(input: Readable, output: Writable): Promise<void> {
+export async function run(
+  ctx: AdapterContext,
+  input: Readable,
+  output: Writable,
+): Promise<void> {
   while (true) {
     let body: Buffer;
     try {
       body = await readMessage(input);
     } catch (e) {
-      // EOF or framing error → exit cleanly. We treat any read failure here
-      // as "the runner closed the pipe"; partial-frame errors are surfaced
-      // via console.error for diagnostics but don't keep the loop alive.
       if (e instanceof FrameError && /content-length/i.test(e.message)) {
-        // Likely just EOF on a clean shutdown.
+        // EOF on a clean shutdown.
       } else {
         process.stderr.write(
           `three-vrm: read failed: ${(e as Error).message}\n`,
@@ -55,7 +56,7 @@ export async function run(input: Readable, output: Writable): Promise<void> {
     }
 
     const id = req.id ?? null;
-    const outcome = dispatch(req.method, req.params);
+    const outcome = await dispatch(ctx, req.method, req.params);
 
     const resp: JsonRpcResponse = outcome.ok
       ? { jsonrpc: "2.0", id, result: outcome.result }
