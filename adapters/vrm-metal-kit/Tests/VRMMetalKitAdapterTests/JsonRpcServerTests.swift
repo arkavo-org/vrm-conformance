@@ -81,11 +81,12 @@ final class JsonRpcServerTests: XCTestCase {
         XCTAssertEqual(err["code"] as? Int, -32601)
     }
 
-    func testPhaseOneOpsReportL3Deferral() throws {
-        // load_vrm is a Phase 1 op; in this scaffolding pass it must return
-        // -32000 Unimplemented with a phase label indicating the L3 deferral
-        // (distinct from the contract-reserved "v1.x" tag used for HDRI).
-        let request = #"{"jsonrpc":"2.0","id":42,"method":"load_vrm","params":{"path":"/tmp/x.vrm"}}"#
+    func testLoadVrmMissingFileReturnsLoadFailed() throws {
+        // L3-b promoted load_vrm out of the L3-deferral block. A path that
+        // doesn't exist now hits the file-existence guard and returns
+        // -32001 LoadFailed per the operation contract.
+        let path = "/tmp/definitely-not-a-real-file-\(UUID().uuidString).vrm"
+        let request = #"{"jsonrpc":"2.0","id":42,"method":"load_vrm","params":{"path":"\#(path)"}}"#
         let reader = MemoryReader(frame(request))
         let writer = MemoryWriter()
         let log = MemoryWriter()
@@ -95,10 +96,61 @@ final class JsonRpcServerTests: XCTestCase {
         let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
         XCTAssertEqual(resp["id"] as? Int, 42)
         let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32001)
+        XCTAssertEqual(err["message"] as? String, "LoadFailed")
+        let data = try XCTUnwrap(err["data"] as? [String: Any])
+        let reason = try XCTUnwrap(data["reason"] as? String)
+        XCTAssertTrue(
+            reason.contains("file not found"),
+            "expected 'file not found' in reason, got: \(reason)"
+        )
+    }
+
+    func testLoadVrmMissingPathParamReturnsInvalidParams() throws {
+        // load_vrm without a "path" key must surface as -32602, not crash.
+        let request = #"{"jsonrpc":"2.0","id":43,"method":"load_vrm","params":{}}"#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+    }
+
+    func testStillDeferredPhaseOneOpReturnsL3Deferral() throws {
+        // set_camera is still L3-deferred (lands in L3-c). Regression guard:
+        // if it accidentally falls through to a stateful handler, this fails.
+        let request = #"{"jsonrpc":"2.0","id":42,"method":"set_camera","params":{"session_id":"x"}}"#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
         XCTAssertEqual(err["code"] as? Int, -32000)
         XCTAssertEqual(err["message"] as? String, "Unimplemented")
         let data = try XCTUnwrap(err["data"] as? [String: Any])
         XCTAssertEqual(data["phase"] as? String, "L3 (VRMMetalKit integration deferred)")
+    }
+
+    func testDisposeUnknownSessionIsIdempotent() throws {
+        // dispose with an unknown session_id must succeed (matches the mock-
+        // renderer + three-vrm contract; dispose is a clean-up op).
+        let request = #"{"jsonrpc":"2.0","id":44,"method":"dispose","params":{"session_id":"never-existed"}}"#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        XCTAssertNil(resp["error"], "dispose of unknown session must not error")
+        XCTAssertNotNil(resp["result"], "dispose returns a result envelope")
     }
 
     func testReservedPhase2OpReportsPhase2() throws {
@@ -152,8 +204,11 @@ final class JsonRpcServerTests: XCTestCase {
     }
 
     func testFramingHonorsCaseInsensitiveContentLength() throws {
-        // Use lowercase "content-length:" plus a chatty extra header.
-        let body = Data(#"{"jsonrpc":"2.0","id":99,"method":"dispose","params":{}}"#.utf8)
+        // Use lowercase "content-length:" plus a chatty extra header. The
+        // dispatch outcome is not under test here — we just want a framed
+        // response back with the request's id, proving the parser accepted
+        // both the case-folded header and the extra X-Trace-Id line.
+        let body = Data(#"{"jsonrpc":"2.0","id":99,"method":"set_root_transform","params":{}}"#.utf8)
         var stream = Data()
         stream.append(Data("X-Trace-Id: hello\r\n".utf8))
         stream.append(Data("content-length: \(body.count)\r\n\r\n".utf8))
@@ -166,8 +221,11 @@ final class JsonRpcServerTests: XCTestCase {
 
         let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
         XCTAssertEqual(resp["id"] as? Int, 99)
+        // set_root_transform is reserved Phase 2 -> -32000 Unimplemented.
+        // The header-parsing test only cares that some framed response came
+        // back with the matching id.
         let err = try XCTUnwrap(resp["error"] as? [String: Any])
-        XCTAssertEqual(err["code"] as? Int, -32000)  // Phase 1 op -> Unimplemented
+        XCTAssertEqual(err["code"] as? Int, -32000)
     }
 
     func testFramingWriteFormat() throws {

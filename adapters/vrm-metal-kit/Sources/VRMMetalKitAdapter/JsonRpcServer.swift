@@ -227,6 +227,9 @@ final class JsonRpcServer {
         input: ByteReader,
         output: ByteWriter,
         log: ByteWriter,
+        // Default dispatcher routes through the shared `Operations` singleton,
+        // which owns the Metal device + session registry. Tests can pass a
+        // fresh closure to isolate state (e.g., `Operations().dispatch`).
         dispatcher: @escaping (String, JSONValue?) -> OpOutcome = Operations.dispatch
     ) {
         self.input = input

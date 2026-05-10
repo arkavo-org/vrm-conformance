@@ -15,25 +15,27 @@ test session and drives it through the operation set (`load_vrm`,
 |---|---|
 | L1 — package skeleton                          | implemented |
 | L2 — JSON-RPC stdio framing + dispatcher       | implemented (all ops return Unimplemented) |
-| L3-a — VRMMetalKit dependency wired + linked    | implemented (smoke import only; ops still Unimplemented) |
-| L3-b..e — Phase 1 + Phase 2 ops against VRMMetalKit | not yet |
+| L3-a — VRMMetalKit dependency wired + linked    | implemented |
+| L3-b — `load_vrm` + `dispose` against VRMMetalKit | implemented |
+| L3-c..e — `set_*` + `render` + physics ops      | not yet |
 
-Through L3-a, every Phase 1 operation still returns a structured
-`Unimplemented` error (JSON-RPC code `-32000`) with
-`data: { "phase": "L3 (VRMMetalKit integration deferred)" }`. Reserved Phase
-2+ operations (`set_environment`, `set_expression`, `set_humanoid_pose`,
-`set_root_transform`) likewise return `-32000` with the appropriate phase
-label. The Phase 2 physics ops (`step_physics`, `reset_physics`,
-`animate_root_transform`) are tracked separately and will be promoted out of
-Reserved when the corresponding L3 step lands. Unknown methods return
+`load_vrm` parses the path, checks file existence, calls
+`VRMModel.load(from:device:)` (bridging async→sync via `DispatchSemaphore`
+since the JSON-RPC dispatcher is sync), and allocates a session id
+`vrm-metal-kit-N`. The session registry holds the loaded `VRMModel` until
+`dispose` is called. Missing files surface as `-32001 LoadFailed`;
+malformed VRMs surface the same code with the underlying
+`VRMMetalKit.invalidGLBFormat(reason:)` (or analogous) error in
+`data.reason`. `dispose` is idempotent — disposing an unknown id returns
+ok, matching the three-vrm and mock-renderer contracts.
+
+The remaining Phase 1 ops (`set_camera`, `set_lighting`,
+`set_post_processing`, `render`) still return `-32000 Unimplemented` with
+`data: { "phase": "L3 (VRMMetalKit integration deferred)" }` and land in
+L3-c. The Phase 2 physics ops (`step_physics`, `reset_physics`,
+`animate_root_transform`) are also tracked under the L3 deferral label and
+move out when the L3 spring-bone integration lands. Unknown methods return
 `-32601`.
-
-The L3-a step bumps the package platform floor to `macOS 26`, pins
-`arkavo-org/VRMMetalKit` to a specific upstream revision, and imports
-`VRMMetalKit` from `main.swift`. The smoke probe verifies a Metal device
-boots and the dependency links — so subsequent L3-b work can dispatch
-straight into `VRMRenderer` / `VRMModel.load(...)` without re-litigating
-the toolchain story.
 
 ## Build
 
