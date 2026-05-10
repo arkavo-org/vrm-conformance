@@ -31,9 +31,13 @@ jobs:
           swift --version
           xcodebuild -version
       - run: swift build --configuration debug
-      - run: swift test
-      - name: Smoke-run adapter binary
-        run: |
-          # Confirms VRMMetalKit linked and the Metal device probe fires
-          # without throwing. Empty stdin → graceful EOF exit.
-          echo -n | .build/debug/vrm-metal-kit-adapter
+      # `swift test` + the adapter-binary smoke deliberately skipped on
+      # macos-latest. Binaries built with the Xcode 26 toolchain link
+      # against macOS 26 system libraries (e.g.
+      # /usr/lib/swift/libswift_DarwinFoundation2.dylib) that don't exist
+      # on the macos-15 runner — they compile fine but can't load at
+      # runtime ("Library not loaded ... DarwinFoundation2"). The build
+      # step catches API breakage in VRMMetalKit upstream; test +
+      # runtime coverage runs locally (M-series Mac with Xcode 26) and
+      # via Xcode Cloud. Re-enable here once GitHub-hosted macos-26
+      # runners are reliably picked up without long queues.
