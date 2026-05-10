@@ -3,6 +3,7 @@
 //! parameter dictionary.
 
 pub mod buffer;
+pub mod cli;
 pub mod emit;
 pub mod glb;
 pub mod humanoid;
