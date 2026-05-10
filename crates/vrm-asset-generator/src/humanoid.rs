@@ -162,3 +162,62 @@ pub fn minimal_skeleton() -> Skeleton {
         bone_to_node,
     }
 }
+
+/// Append N child nodes to the parent at `parent_node_index`, forming a
+/// linear chain. Each chain node carries `translation = (0, -segment_length_m, 0)`
+/// relative to its parent (the chain hangs straight down in rest pose).
+/// Returns the new chain node indices in head-to-tail order.
+///
+/// This mutates `skeleton.nodes_json` in place; the new nodes are appended
+/// to the end of the nodes array, and the parent's `children` array gains
+/// the index of the first chain node.
+pub fn append_spring_chain(
+    skeleton: &mut Skeleton,
+    parent_node_index: usize,
+    joint_count: u32,
+    segment_length_m: f32,
+) -> Vec<usize> {
+    if joint_count == 0 {
+        return Vec::new();
+    }
+
+    let nodes = skeleton
+        .nodes_json
+        .as_array_mut()
+        .expect("skeleton nodes_json must be an array");
+    let mut chain_indices = Vec::with_capacity(joint_count as usize);
+
+    let segment_translation = json!([0.0, -segment_length_m, 0.0]);
+
+    // Reserve indices and emit each chain node. The parent of the first
+    // chain node is parent_node_index; the parent of each subsequent chain
+    // node is the previous chain node.
+    for i in 0..joint_count {
+        let my_idx = nodes.len();
+        let mut node = json!({
+            "name": format!("spring_joint_{i}"),
+            "translation": segment_translation.clone(),
+        });
+        // All but the last chain joint will be assigned a `children`
+        // entry pointing at the next joint.
+        if i + 1 < joint_count {
+            node["children"] = json!([my_idx + 1]);
+        }
+        nodes.push(node);
+        chain_indices.push(my_idx);
+    }
+
+    // Wire the first chain node into the parent's children array.
+    let parent = nodes
+        .get_mut(parent_node_index)
+        .expect("parent_node_index out of range");
+    let mut parent_children = parent
+        .get("children")
+        .and_then(|c| c.as_array())
+        .cloned()
+        .unwrap_or_default();
+    parent_children.push(json!(chain_indices[0]));
+    parent["children"] = Value::Array(parent_children);
+
+    chain_indices
+}
