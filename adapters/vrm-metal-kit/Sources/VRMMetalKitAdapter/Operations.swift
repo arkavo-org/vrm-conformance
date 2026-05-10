@@ -59,6 +59,13 @@ final class Operations: @unchecked Sendable {
     /// Phase label for the still-deferred Phase 2 ops.
     private static let l3Deferral = "L3 (VRMMetalKit integration deferred)"
 
+    /// MSAA sample count for every render. Pinned to 4 per
+    /// `docs/methodology.md` ("Outline antialiasing — v1.0 standardizes on
+    /// MSAA 4x"). The render request's `msaa` field is accepted but does
+    /// not vary behavior — matching the three-vrm adapter, which similarly
+    /// configures antialiasing at canvas creation rather than per render.
+    static let msaaSampleCount: Int = 4
+
     /// Per-session state. Held as a reference type so set_* handlers can
     /// mutate fields without read-modify-write through the registry.
     private final class Session: @unchecked Sendable {
@@ -174,8 +181,14 @@ final class Operations: @unchecked Sendable {
             // for its lifetime. strict=.off so a malformed asset surfaces
             // as a render-time fallback instead of an immediate throw — the
             // diff engine will catch the visual difference downstream.
+            //
+            // sampleCount pinned to 4 per docs/methodology.md "Outline
+            // antialiasing — v1.0 standardizes on MSAA 4x". The render
+            // request's `msaa` field is read for protocol compliance but
+            // does not vary behavior (matches three-vrm's antialias=true
+            // canvas convention).
             var config = RendererConfig()
-            config.sampleCount = 1     // single-sample for L3-c; MSAA later
+            config.sampleCount = Operations.msaaSampleCount
             config.strict = .off
             let renderer = VRMRenderer(device: device, config: config)
             renderer.loadModel(model)
@@ -331,37 +344,66 @@ final class Operations: @unchecked Sendable {
             session.renderer.setAmbientColor(ambColor * ambIntensity)
         }
 
-        // ----- render targets -----
+        // ----- render targets (MSAA 4x) -----
+        // VRMMetalKit's pipeline state objects are built around
+        // config.sampleCount (set at load_vrm). To match, every render
+        // pass allocates a 4x-MSAA color + depth (private storage) and a
+        // single-sample resolve target that receives the resolved pixels
+        // via .multisampleResolve. CPU read-back happens from the resolve
+        // target.
+        //
         // Magenta clear color: matches the mock-renderer + three-vrm
         // sentinel so the diff engine's bbox-relative property assertions
         // can find the avatar against a known background.
         let colorPixelFormat: MTLPixelFormat = (colorSpace == "Srgb") ? .rgba8Unorm_srgb : .rgba8Unorm
-        let colorDesc = MTLTextureDescriptor.texture2DDescriptor(
+        let sampleCount = Operations.msaaSampleCount
+
+        // Multisample color attachment (.private — GPU only, not CPU-readable).
+        let msColorDesc = MTLTextureDescriptor()
+        msColorDesc.textureType = .type2DMultisample
+        msColorDesc.pixelFormat = colorPixelFormat
+        msColorDesc.width = width
+        msColorDesc.height = height
+        msColorDesc.sampleCount = sampleCount
+        msColorDesc.usage = [.renderTarget]
+        msColorDesc.storageMode = .private
+        guard let msColorTex = device.makeTexture(descriptor: msColorDesc) else {
+            return renderFailed("failed to create multisample color texture (\(width)×\(height) @ \(sampleCount)x)")
+        }
+
+        // Single-sample resolve target — receives the resolved pixels and
+        // is the CPU-readable surface we PNG-export from.
+        let resolveDesc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: colorPixelFormat,
             width: width, height: height, mipmapped: false
         )
-        colorDesc.usage = [.renderTarget, .shaderRead]
-        colorDesc.storageMode = .shared
-        guard let colorTex = device.makeTexture(descriptor: colorDesc) else {
-            return renderFailed("failed to create color texture (\(width)×\(height))")
+        resolveDesc.usage = [.renderTarget, .shaderRead]
+        resolveDesc.storageMode = .shared
+        guard let resolveTex = device.makeTexture(descriptor: resolveDesc) else {
+            return renderFailed("failed to create resolve color texture")
         }
 
-        let depthDesc = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .depth32Float,
-            width: width, height: height, mipmapped: false
-        )
-        depthDesc.usage = .renderTarget
-        depthDesc.storageMode = .shared
-        guard let depthTex = device.makeTexture(descriptor: depthDesc) else {
-            return renderFailed("failed to create depth texture")
+        // Multisample depth — must match the color attachment's sampleCount
+        // (Metal requires identical sample counts across attachments).
+        let depthDesc = MTLTextureDescriptor()
+        depthDesc.textureType = .type2DMultisample
+        depthDesc.pixelFormat = .depth32Float
+        depthDesc.width = width
+        depthDesc.height = height
+        depthDesc.sampleCount = sampleCount
+        depthDesc.usage = [.renderTarget]
+        depthDesc.storageMode = .private
+        guard let msDepthTex = device.makeTexture(descriptor: depthDesc) else {
+            return renderFailed("failed to create multisample depth texture")
         }
 
         let rpd = MTLRenderPassDescriptor()
-        rpd.colorAttachments[0].texture = colorTex
+        rpd.colorAttachments[0].texture = msColorTex
+        rpd.colorAttachments[0].resolveTexture = resolveTex
         rpd.colorAttachments[0].loadAction = .clear
-        rpd.colorAttachments[0].storeAction = .store
+        rpd.colorAttachments[0].storeAction = .multisampleResolve
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 1.0, green: 0.0, blue: 1.0, alpha: 1.0)
-        rpd.depthAttachment.texture = depthTex
+        rpd.depthAttachment.texture = msDepthTex
         rpd.depthAttachment.loadAction = .clear
         rpd.depthAttachment.storeAction = .dontCare
         rpd.depthAttachment.clearDepth = 1.0
@@ -381,9 +423,13 @@ final class Operations: @unchecked Sendable {
         // handleRender), so the runtime-isolation assertion never fires
         // off MainActor.
         MainActor.assumeIsolated {
+            // drawOffscreenHeadless's `to`/`depth` args are used only for
+            // size detection (`colorTexture.width/.height`); the actual
+            // render targets come from the renderPassDescriptor. Pass the
+            // multisample textures; size matches the resolve target.
             session.renderer.drawOffscreenHeadless(
-                to: colorTex,
-                depth: depthTex,
+                to: msColorTex,
+                depth: msDepthTex,
                 commandBuffer: commandBuffer,
                 renderPassDescriptor: rpd
             )
@@ -402,8 +448,10 @@ final class Operations: @unchecked Sendable {
         }
 
         // ----- PNG export -----
+        // The resolve target carries the resolved (anti-aliased) pixels in
+        // .shared storage, so it's directly CPU-readable via getBytes.
         do {
-            try writeTexturePng(colorTex, to: outputPath)
+            try writeTexturePng(resolveTex, to: outputPath)
         } catch {
             return renderFailed("PNG export failed: \(error)")
         }

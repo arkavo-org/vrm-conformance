@@ -18,6 +18,7 @@ test session and drives it through the operation set (`load_vrm`,
 | L3-a — VRMMetalKit dependency wired + linked    | implemented |
 | L3-b — `load_vrm` + `dispose` against VRMMetalKit | implemented |
 | L3-c — `set_camera` + `set_lighting` + `set_post_processing` + `render` | implemented |
+| L3-d — MSAA 4x render path | implemented |
 | L3-e — physics ops (`step_physics`, `reset_physics`, `animate_root_transform`) | not yet |
 
 Every Phase 1 op now produces real output. `load_vrm` constructs a
@@ -47,10 +48,13 @@ return `-32601`.
 
 **Known limitations** (revisit before declaring L3 complete):
 
-- **Single-sample.** `msaa` from the render request is currently ignored;
-  the offscreen color attachment is `sampleCount: 1`. Multisample
-  rendering requires a resolve target and adjustments to
-  `drawOffscreenHeadless`'s expectations; deferred.
+- **MSAA pinned to 4x.** `RendererConfig.sampleCount` is set at
+  `load_vrm` and the render pipeline state objects bake the sample count
+  in, so we can't vary MSAA per render. The render request's `msaa`
+  field is accepted for protocol compliance but does not change behavior
+  — matching three-vrm, which similarly configures antialiasing at
+  canvas creation. `docs/methodology.md` pins MSAA to 4x as the v1.0
+  standard, so this is conformant for the current corpus.
 - **Tone mapping.** VRMMetalKit doesn't expose tone mapping on its public
   API. The handler accepts `tone_mapping` but only "None" matches the
   rendered output. Test plans for MToon math pin this to "None" per
