@@ -116,24 +116,8 @@ pub enum DiffMode {
     Consensus,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PropertyAssertion {
-    pub name: String,
-    pub region: BboxRegion,
-    pub expected: f32,
-    pub tolerance: f32,
-}
-
-/// Bounding-box-relative regions, robust to small FOV / projection
-/// variation across renderers.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BboxRegion {
-    BboxFull,
-    BboxLowerLeftQuadrant,
-    BboxLowerRightQuadrant,
-    BboxUpperLeftQuadrant,
-    BboxUpperRightQuadrant,
-    BboxCenterStripHorizontal,
-    BboxCenterStripVertical,
-}
+// Property assertions and bbox regions are defined in `vrm-diff-engine`
+// (the consumer of these types) and re-exported here so test-plan YAML
+// authors can use the canonical names without a direct diff-engine
+// dependency leaking through.
+pub use vrm_diff_engine::property::{BboxRegion, PropertyAssertion};

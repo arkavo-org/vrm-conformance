@@ -11,6 +11,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 camino.workspace = true
 
+vrm-diff-engine = { path = "../vrm-diff-engine" }
+
 [dev-dependencies]
 insta.workspace = true
 pretty_assertions.workspace = true
