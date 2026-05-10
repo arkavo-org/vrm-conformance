@@ -115,6 +115,20 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
 
 /// Emit a `.vrm` GLB containing both MToon material data and a single
 /// VRMC_springBone chain attached to the head bone.
+///
+/// **Visibility caveat**: the chain joints declared in VRMC_springBone are
+/// not currently driving any visible mesh — the head-mounted sphere is
+/// the only renderable, and it's parented to the head node, not skinned
+/// to the chain. Spring-bone physics still ticks correctly inside both
+/// renderer adapters; it just doesn't produce a pixel-space signal. The
+/// `chain_mesh` + `buffer::pack_sphere_and_chain` infrastructure that
+/// would skin a cylinder to the chain joints exists in-tree but isn't
+/// wired here yet — see the chain_mesh module docs. The wiring was
+/// drafted and locally smoke-tested: three-vrm renders both meshes
+/// correctly, but VRMMetalKit's renderer drops the non-skinned mesh
+/// when any skin is present in the document, producing an effectively
+/// invisible avatar for the property-assertion tests. Resolving that
+/// interop quirk is a separate task.
 pub fn emit_vrm_with_spring_bone(
     mtoon: &MToonParams,
     spring_bone: &SpringBoneParams,

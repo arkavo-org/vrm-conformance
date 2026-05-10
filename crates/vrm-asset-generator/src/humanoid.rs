@@ -125,6 +125,25 @@ fn bones() -> &'static [B] {
     ]
 }
 
+/// Sum of bone translations from the root down to `target_bone`, giving
+/// the bone's rest-pose world position. Used to compute inverse-bind
+/// matrices for the spring-bone chain (the chain joints' world Y at rest
+/// is `world_y(head) - i * segment_length`).
+pub fn rest_pose_world_position(target_bone: &str) -> [f32; 3] {
+    let bs = bones();
+    let by_name: std::collections::BTreeMap<&str, &B> = bs.iter().map(|b| (b.name, b)).collect();
+    let mut pos = [0.0_f32; 3];
+    let mut cur = Some(target_bone);
+    while let Some(name) = cur {
+        let b = by_name[name];
+        pos[0] += b.t[0];
+        pos[1] += b.t[1];
+        pos[2] += b.t[2];
+        cur = b.parent;
+    }
+    pos
+}
+
 pub fn minimal_skeleton() -> Skeleton {
     let bones = bones();
     let mut bone_to_node = BTreeMap::new();
