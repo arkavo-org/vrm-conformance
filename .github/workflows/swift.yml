@@ -10,11 +10,23 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    # macOS 26 required: VRMMetalKit pins its platform floor at macOS 26
+    # (Swift 6.2 toolchain). Apple-Silicon runner so the Metal device
+    # probe in main.swift can boot a real GPU.
+    runs-on: macos-26-arm64
     defaults:
       run:
         working-directory: adapters/vrm-metal-kit
     steps:
       - uses: actions/checkout@v4
+      - name: Swift + Xcode versions
+        run: |
+          swift --version
+          xcodebuild -version
       - run: swift build --configuration debug
       - run: swift test
+      - name: Smoke-run adapter binary
+        run: |
+          # Confirms VRMMetalKit linked and the Metal device probe fires
+          # without throwing. Empty stdin → graceful EOF exit.
+          echo -n | .build/debug/vrm-metal-kit-adapter

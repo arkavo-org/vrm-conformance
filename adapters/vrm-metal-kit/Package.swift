@@ -1,37 +1,35 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.2
 import PackageDescription
 
-// NOTE: The VRMMetalKit upstream dependency is intentionally commented out
-// for L1 + L2. L1+L2 stand up the Swift package layout and the JSON-RPC
-// stdio framing only — no source file imports VRMMetalKit yet.
+// VRMMetalKit pins its platform floor at macOS 26 / iOS 26 (matching the
+// Swift 6.3 / Xcode 26 toolchain). Our adapter follows the same floor so
+// SPM can resolve the dependency without a `requires macos N, but depends
+// on product requiring macos M` error.
 //
-// VRMMetalKit's `main` branch currently advertises `platforms: [.macOS(.v26)]`,
-// which is incompatible with this adapter's `.macOS(.v14)` deployment target.
-// Re-enabling the dependency without bumping the platform floor produces:
-//
-//   error: the executable 'VRMMetalKitAdapter' requires macos 14.0, but
-//   depends on the product 'VRMMetalKit' which requires macos 26.0
-//
-// TODO(L3): re-enable the dependency block + the `.product(...)` line in the
-// executable target's `dependencies:` once the Swift dev confirms which
-// VRMMetalKit branch/tag and which deployment target the adapter should bind
-// to. Either bump `.macOS(.v14)` here or pin a VRMMetalKit revision whose
-// platform floor matches the rest of the conformance toolchain.
+// If we need to relax this — to support older macOS hosts for diff-only
+// workflows — we'd have to vendor a subset of VRMMetalKit rather than
+// re-platform the entire library.
 
 let package = Package(
     name: "vrm-metal-kit-adapter",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v26)],
     products: [
         .executable(name: "vrm-metal-kit-adapter", targets: ["VRMMetalKitAdapter"]),
     ],
     dependencies: [
-        // .package(url: "https://github.com/arkavo-org/VRMMetalKit", branch: "main"),
+        // Pinned to a specific upstream revision so renderer regressions can be
+        // bisected without library churn surprising us. Bump this revision when
+        // a deliberate VRMMetalKit upgrade is part of the change.
+        .package(
+            url: "https://github.com/arkavo-org/VRMMetalKit",
+            revision: "50cfd7dd4b8d64a6e4f77f6f9e0fa22c5aaaf4ae"
+        ),
     ],
     targets: [
         .executableTarget(
             name: "VRMMetalKitAdapter",
             dependencies: [
-                // .product(name: "VRMMetalKit", package: "VRMMetalKit"),
+                .product(name: "VRMMetalKit", package: "VRMMetalKit"),
             ]
         ),
         .testTarget(

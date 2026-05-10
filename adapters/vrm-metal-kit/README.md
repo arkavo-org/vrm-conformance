@@ -15,14 +15,25 @@ test session and drives it through the operation set (`load_vrm`,
 |---|---|
 | L1 — package skeleton                          | implemented |
 | L2 — JSON-RPC stdio framing + dispatcher       | implemented (all ops return Unimplemented) |
-| L3 — Phase 1 ops against VRMMetalKit's API     | not yet — needs Swift dev with VRMMetalKit access |
+| L3-a — VRMMetalKit dependency wired + linked    | implemented (smoke import only; ops still Unimplemented) |
+| L3-b..e — Phase 1 + Phase 2 ops against VRMMetalKit | not yet |
 
-Until L3 lands, every Phase 1 operation returns a structured `Unimplemented`
-error (JSON-RPC code `-32000`) with `data: { "phase": "v1.x" }`. Reserved
-Phase 2+ operations (`set_environment`, `set_expression`, `set_humanoid_pose`,
-`set_root_transform`, `animate_root_transform`, `step_physics`,
-`reset_physics`) likewise return `-32000` with the appropriate phase label.
-Unknown methods return `-32601`.
+Through L3-a, every Phase 1 operation still returns a structured
+`Unimplemented` error (JSON-RPC code `-32000`) with
+`data: { "phase": "L3 (VRMMetalKit integration deferred)" }`. Reserved Phase
+2+ operations (`set_environment`, `set_expression`, `set_humanoid_pose`,
+`set_root_transform`) likewise return `-32000` with the appropriate phase
+label. The Phase 2 physics ops (`step_physics`, `reset_physics`,
+`animate_root_transform`) are tracked separately and will be promoted out of
+Reserved when the corresponding L3 step lands. Unknown methods return
+`-32601`.
+
+The L3-a step bumps the package platform floor to `macOS 26`, pins
+`arkavo-org/VRMMetalKit` to a specific upstream revision, and imports
+`VRMMetalKit` from `main.swift`. The smoke probe verifies a Metal device
+boots and the dependency links — so subsequent L3-b work can dispatch
+straight into `VRMRenderer` / `VRMModel.load(...)` without re-litigating
+the toolchain story.
 
 ## Build
 
@@ -64,14 +75,8 @@ full operation set, JSON shapes, and error envelope.
 
 ## Caveats
 
-- `Package.swift` currently has the `arkavo-org/VRMMetalKit` dependency
-  **commented out**. As of this commit, the upstream `main` branch declares
-  a `.macOS(.v26)` platform floor incompatible with this adapter's
-  `.macOS(.v14)` target. L1 + L2 do not import VRMMetalKit from any source
-  file, so commenting out the dep is harmless. L3 must re-enable the dep
-  (search for `TODO(L3)` in `Package.swift`) and either bump the deployment
-  target or pin a compatible VRMMetalKit revision.
-- The actual product/target name vended by upstream still needs confirmation
-  at L3 time; the assumption in `Package.swift` is `VRMMetalKit`.
+- The adapter inherits VRMMetalKit's `.macOS(.v26)` platform floor (Swift
+  6.2 / Xcode 26). Older macOS hosts can't run this adapter; they can still
+  consume golden images downloaded with `scripts/pull-goldens.sh`.
 - Spring-bone determinism is a known methodology hazard; the adapter must
   expose deterministic stepping when L3 wires in physics ops.
