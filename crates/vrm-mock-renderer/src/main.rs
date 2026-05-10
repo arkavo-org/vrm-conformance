@@ -92,16 +92,16 @@ fn dispatch(
         }
         "render" => json_result(handlers::render(registry, deser(params)?)),
         "dispose" => json_result(handlers::dispose(registry, deser(params)?)),
+        "step_physics" => json_result(handlers::step_physics(registry, params)),
+        "reset_physics" => json_result(handlers::reset_physics(registry, params)),
 
         // Reserved-but-declared ops: return Unimplemented with the phase
         // the operation belongs to. Matches the Swift adapter's labels.
         "set_environment" => Err(handlers::unimplemented(method, "v1.x")),
         "set_expression" => Err(handlers::unimplemented(method, "Phase 3")),
-        "set_humanoid_pose"
-        | "set_root_transform"
-        | "animate_root_transform"
-        | "step_physics"
-        | "reset_physics" => Err(handlers::unimplemented(method, "Phase 2")),
+        "set_humanoid_pose" | "set_root_transform" | "animate_root_transform" => {
+            Err(handlers::unimplemented(method, "Phase 2"))
+        }
 
         _ => Err(RpcError {
             code: -32601,

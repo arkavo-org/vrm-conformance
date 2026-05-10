@@ -88,6 +88,23 @@ pub fn unimplemented(method: &str, phase: &str) -> RpcError {
     RpcError::unimplemented(method, phase)
 }
 
+/// Mock has no physics state. The deterministic synthesis is the same
+/// before and after stepping; we just acknowledge the op so test plans
+/// with a `physics:` block can run against the mock.
+pub fn step_physics(
+    _registry: &mut SessionRegistry,
+    _params: serde_json::Value,
+) -> Result<ops::UnitResult, RpcError> {
+    Ok(ops::UnitResult {})
+}
+
+pub fn reset_physics(
+    _registry: &mut SessionRegistry,
+    _params: serde_json::Value,
+) -> Result<ops::UnitResult, RpcError> {
+    Ok(ops::UnitResult {})
+}
+
 fn invalid_session(id: &str) -> RpcError {
     RpcError {
         code: -32602,

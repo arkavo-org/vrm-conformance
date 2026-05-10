@@ -156,11 +156,55 @@ fn reserved_phase_2_op_returns_unimplemented_phase_2() {
         &mut stdin,
         &mut stdout,
         1,
-        "step_physics",
-        serde_json::json!({ "dt_seconds": 0.016, "count": 1 }),
+        "set_humanoid_pose",
+        serde_json::json!({ "session_id": "x", "bone_rotations": {} }),
     );
     assert_eq!(resp["error"]["code"], -32000);
     assert_eq!(resp["error"]["data"]["phase"], "Phase 2");
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn step_physics_returns_ok_result_not_unimplemented() {
+    let mut child = spawn_mock();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let resp = rpc(
+        &mut stdin,
+        &mut stdout,
+        1,
+        "step_physics",
+        serde_json::json!({ "session_id": "ignored", "dt_seconds": 0.016, "count": 30 }),
+    );
+    assert!(
+        resp.get("result").is_some(),
+        "step_physics should succeed, got: {resp:#?}"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn reset_physics_returns_ok_result() {
+    let mut child = spawn_mock();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let resp = rpc(
+        &mut stdin,
+        &mut stdout,
+        1,
+        "reset_physics",
+        serde_json::json!({ "session_id": "ignored", "settle_steps": 30 }),
+    );
+    assert!(
+        resp.get("result").is_some(),
+        "reset_physics should succeed, got: {resp:#?}"
+    );
 
     drop(stdin);
     let _ = child.wait();
