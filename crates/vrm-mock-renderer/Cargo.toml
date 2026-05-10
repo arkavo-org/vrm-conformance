@@ -14,9 +14,13 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 vrm-ops = { path = "../vrm-ops" }
+vrm-asset-generator = { path = "../vrm-asset-generator" }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[lib]
+path = "src/lib.rs"
 
 [[bin]]
 name = "vrm-mock-renderer"
