@@ -130,6 +130,41 @@ These cover MToon material tests and must be implemented by every renderer adapt
 - **`adapters/vrm-metal-kit/`** (in-tree, Swift). Real macOS / Metal renderer scaffold. JSON-RPC framing is implemented; the actual VRMMetalKit integration (L3) is deferred.
 - **`adapters/three-vrm/`** (in-tree, TypeScript). Node-based renderer for the [pixiv/three-vrm](https://github.com/pixiv/three-vrm) library. Phase 1 ops (`load_vrm`, `set_camera`, `set_lighting`, `set_post_processing`, `render`, `dispose`) drive a Playwright headless Chromium WebGL2 context with three.js + three-vrm running inside. Reserved Phase 2+ ops return `Unimplemented`. Requires `npx playwright install chromium` after `npm install`.
 
+## Physics operations
+
+These ops are required for renderer adapters that support `VRMC_springBone`. Adapters without spring-bone support may implement them as no-ops (the mock does this).
+
+### `step_physics`
+
+```json
+{
+  "input": {
+    "session_id": "string",
+    "dt_seconds": 0.016666666,
+    "count": 1
+  },
+  "output": {}
+}
+```
+
+Advances the renderer's internal physics state by `count` steps of `dt_seconds`. For spring-bone determinism, callers always pass `dt_seconds = 1/60` (16.66ms).
+
+### `reset_physics`
+
+```json
+{
+  "input": {
+    "session_id": "string",
+    "settle_steps": 30
+  },
+  "output": {}
+}
+```
+
+Resets all spring-bone chains to their rest pose, then advances physics by `settle_steps` frames so the chain reaches a stable hanging position before measurement. Default `settle_steps = 30` (0.5 s at 60 Hz) is documented in `docs/methodology.md` as the convention.
+
+The runner calls `reset_physics({ settle_steps })` after `set_post_processing` and before `render` whenever the test plan has a `physics:` block.
+
 ## Reserved operations (Phase 2+)
 
 Required to be **declared** by every adapter (`describe` lists them) but may return a structured `Unimplemented` error in v0.1:
@@ -138,7 +173,6 @@ Required to be **declared** by every adapter (`describe` lists them) but may ret
 - `set_expression` — Phase 3
 - `set_humanoid_pose` — Phase 2
 - `set_root_transform`, `animate_root_transform` — Phase 2
-- `step_physics`, `reset_physics` — Phase 2
 
 ## Runner-only operations
 
