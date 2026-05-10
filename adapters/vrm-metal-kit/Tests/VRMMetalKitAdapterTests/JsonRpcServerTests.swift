@@ -120,10 +120,12 @@ final class JsonRpcServerTests: XCTestCase {
         XCTAssertEqual(err["code"] as? Int, -32602)
     }
 
-    func testStillDeferredPhaseOneOpReturnsL3Deferral() throws {
-        // set_camera is still L3-deferred (lands in L3-c). Regression guard:
-        // if it accidentally falls through to a stateful handler, this fails.
-        let request = #"{"jsonrpc":"2.0","id":42,"method":"set_camera","params":{"session_id":"x"}}"#
+    func testStillDeferredPhysicsOpReturnsL3Deferral() throws {
+        // After L3-c, every Phase 1 op has a real handler. The remaining
+        // deferred ops are the spring-bone physics set (animate_root_transform,
+        // step_physics, reset_physics) — they land in L3-e. This is the
+        // regression guard against accidental promotion.
+        let request = #"{"jsonrpc":"2.0","id":42,"method":"step_physics","params":{}}"#
         let reader = MemoryReader(frame(request))
         let writer = MemoryWriter()
         let log = MemoryWriter()
@@ -136,6 +138,23 @@ final class JsonRpcServerTests: XCTestCase {
         XCTAssertEqual(err["message"] as? String, "Unimplemented")
         let data = try XCTUnwrap(err["data"] as? [String: Any])
         XCTAssertEqual(data["phase"] as? String, "L3 (VRMMetalKit integration deferred)")
+    }
+
+    func testSetCameraOnUnknownSessionReturnsInvalidParams() throws {
+        // L3-c promoted set_camera out of the L3 deferral list. Calling it
+        // before load_vrm (or with a stale session_id) returns -32602.
+        let request = #"""
+        {"jsonrpc":"2.0","id":42,"method":"set_camera","params":{"session_id":"no-such","position":[0,1.4,1.5],"target":[0,1.4,0],"up":[0,1,0],"fov_degrees":30}}
+        """#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
     }
 
     func testDisposeUnknownSessionIsIdempotent() throws {

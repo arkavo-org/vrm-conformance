@@ -17,25 +17,48 @@ test session and drives it through the operation set (`load_vrm`,
 | L2 — JSON-RPC stdio framing + dispatcher       | implemented (all ops return Unimplemented) |
 | L3-a — VRMMetalKit dependency wired + linked    | implemented |
 | L3-b — `load_vrm` + `dispose` against VRMMetalKit | implemented |
-| L3-c..e — `set_*` + `render` + physics ops      | not yet |
+| L3-c — `set_camera` + `set_lighting` + `set_post_processing` + `render` | implemented |
+| L3-e — physics ops (`step_physics`, `reset_physics`, `animate_root_transform`) | not yet |
 
-`load_vrm` parses the path, checks file existence, calls
-`VRMModel.load(from:device:)` (bridging async→sync via `DispatchSemaphore`
-since the JSON-RPC dispatcher is sync), and allocates a session id
-`vrm-metal-kit-N`. The session registry holds the loaded `VRMModel` until
-`dispose` is called. Missing files surface as `-32001 LoadFailed`;
-malformed VRMs surface the same code with the underlying
-`VRMMetalKit.invalidGLBFormat(reason:)` (or analogous) error in
-`data.reason`. `dispose` is idempotent — disposing an unknown id returns
-ok, matching the three-vrm and mock-renderer contracts.
+Every Phase 1 op now produces real output. `load_vrm` constructs a
+`VRMRenderer`, calls `renderer.loadModel(model)`, and stashes both in a
+per-session entry. `set_camera` / `set_lighting` / `set_post_processing`
+park their params on the session; the projection matrix is built at
+`render` time once aspect = width/height is known. `render` allocates a
+single-sample `rgba8Unorm` color target and a `depth32Float` depth
+target, calls `VRMRenderer.drawOffscreenHeadless(...)` (wrapped in
+`MainActor.assumeIsolated` since that method is `@MainActor`-isolated),
+waits for GPU completion via a semaphore, and writes a PNG via
+`CGImageDestination`. The clear color is magenta `[255, 0, 255]` so the
+diff engine's bbox-relative property assertions can detect the avatar
+against a known sentinel — same convention as the mock and three-vrm.
 
-The remaining Phase 1 ops (`set_camera`, `set_lighting`,
-`set_post_processing`, `render`) still return `-32000 Unimplemented` with
-`data: { "phase": "L3 (VRMMetalKit integration deferred)" }` and land in
-L3-c. The Phase 2 physics ops (`step_physics`, `reset_physics`,
-`animate_root_transform`) are also tracked under the L3 deferral label and
-move out when the L3 spring-bone integration lands. Unknown methods return
-`-32601`.
+Smoke-verified locally on Apple M4 Max:
+- `cargo run -p vrm-asset-generator -- emit-default --id smoke --output-dir $D`
+- Drive the adapter through `load_vrm → set_camera → set_lighting → set_post_processing → render → dispose` with the standard MToon test plan camera/lighting.
+- Produced 256×256 PNG: ~3200 bytes, 45% non-magenta pixels (the head-mounted sphere), 55% magenta background.
+
+Phase 2 physics ops (`step_physics`, `reset_physics`,
+`animate_root_transform`) still return `-32000 Unimplemented` with
+`data: { "phase": "L3 (VRMMetalKit integration deferred)" }`. Other
+reserved ops (`set_environment`, `set_expression`, `set_humanoid_pose`,
+`set_root_transform`) keep their original phase labels. Unknown methods
+return `-32601`.
+
+**Known limitations** (revisit before declaring L3 complete):
+
+- **Single-sample.** `msaa` from the render request is currently ignored;
+  the offscreen color attachment is `sampleCount: 1`. Multisample
+  rendering requires a resolve target and adjustments to
+  `drawOffscreenHeadless`'s expectations; deferred.
+- **Tone mapping.** VRMMetalKit doesn't expose tone mapping on its public
+  API. The handler accepts `tone_mapping` but only "None" matches the
+  rendered output. Test plans for MToon math pin this to "None" per
+  `docs/methodology.md`, so this is conformant for the current corpus.
+- **Color space.** `Linear` requests use `rgba8Unorm`, `Srgb` requests use
+  `rgba8Unorm_srgb`. CG doesn't embed a color profile in the output PNG;
+  downstream diff is pixel-exact within a single color space, which is
+  what the operation contract guarantees.
 
 ## Build
 
