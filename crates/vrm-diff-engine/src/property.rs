@@ -41,6 +41,8 @@ pub struct PropertyResult {
 pub enum PropertyError {
     #[error("avatar bbox is empty (image is all-background)")]
     EmptyBbox,
+    #[error("region sampled zero non-background pixels (region falls outside avatar)")]
+    EmptyRegion,
 }
 
 pub fn compute_avatar_bbox(img: &RgbImage) -> Option<(u32, u32, u32, u32)> {
@@ -92,8 +94,18 @@ pub fn region_pixel_range(bbox: (u32, u32, u32, u32), region: BboxRegion) -> (u3
         BboxRegion::BboxUpperRightQuadrant => (mid_x, y0, x1, mid_y),
         BboxRegion::BboxLowerLeftQuadrant => (x0, mid_y, mid_x, y1),
         BboxRegion::BboxLowerRightQuadrant => (mid_x, mid_y, x1, y1),
-        BboxRegion::BboxCenterStripHorizontal => (x0, mid_y - strip_y, x1, mid_y + strip_y),
-        BboxRegion::BboxCenterStripVertical => (mid_x - strip_x, y0, mid_x + strip_x, y1),
+        BboxRegion::BboxCenterStripHorizontal => (
+            x0,
+            mid_y.saturating_sub(strip_y),
+            x1,
+            (mid_y + strip_y).min(y1),
+        ),
+        BboxRegion::BboxCenterStripVertical => (
+            mid_x.saturating_sub(strip_x),
+            y0,
+            (mid_x + strip_x).min(x1),
+            y1,
+        ),
     }
 }
 
@@ -119,7 +131,10 @@ pub fn eval_property(
             count += 1;
         }
     }
-    let actual = if count == 0 { 0.0 } else { sum / count as f64 };
+    if count == 0 {
+        return Err(PropertyError::EmptyRegion);
+    }
+    let actual = sum / count as f64;
     let actual = actual as f32;
 
     let passed = (actual - pa.expected).abs() <= pa.tolerance;
