@@ -1,2 +1,10 @@
-// Placeholder; replaced in Task C2 with the real entrypoint.
-process.stderr.write("three-vrm adapter not yet implemented (Phase 2C-a scaffold)\n");
+// Entry point: wire stdin/stdout into the JSON-RPC server loop.
+
+import { run } from "./server.js";
+
+process.stderr.write("three-vrm adapter starting\n");
+
+run(process.stdin, process.stdout).catch((err) => {
+  process.stderr.write(`three-vrm adapter fatal: ${err}\n`);
+  process.exit(1);
+});
