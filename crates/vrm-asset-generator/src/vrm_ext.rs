@@ -145,14 +145,14 @@ pub fn vrmc_spring_bone(joint_nodes: &[usize], params: &SpringBoneParams) -> Val
         })
         .collect();
 
+    // The validator rejects empty arrays for `colliders`, `colliderGroups`
+    // (top-level) and per-spring `colliderGroups`. The spec allows omitting
+    // them entirely, so we do — v0.1 has no colliders.
     json!({
         "specVersion": "1.0",
-        "colliders": [],
-        "colliderGroups": [],
         "springs": [{
             "name": params.spring_name,
             "joints": joints,
-            "colliderGroups": [],
         }],
     })
 }
