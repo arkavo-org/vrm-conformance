@@ -8,7 +8,7 @@ Cross-renderer conformance and render-fidelity infrastructure for the [VRM 1.0](
 
 ## What this is
 
-- A **parametric VRM asset generator** that emits a deterministic test corpus covering the MToon material spec, spring bone behaviors, constraints, and expressions.
+- A **parametric VRM asset generator** that emits a deterministic test corpus. v0.1: full MToon material parameter sweep + single-chain VRMC_springBone scenarios (validator-clean). Constraints + expressions land in later phases.
 - An **agent-first conformance runner** that drives every supported renderer through the same test plan via a uniform operation catalog, then diffs the result (SSIM + bbox-relative property assertions) against a reference PNG to produce a pass/fail signal — structured CLI with `--json` mode + thin MCP wrapper, both backed by one core.
 - A **golden-image comparison site** that displays renders from each renderer side-by-side, with SSIM diff + property-assertion overlays.
 
