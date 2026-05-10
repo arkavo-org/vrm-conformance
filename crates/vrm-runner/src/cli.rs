@@ -37,6 +37,19 @@ pub enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Diff a render PNG against a reference PNG using a test plan.
+    Diff {
+        #[arg(long)]
+        plan: Utf8PathBuf,
+        #[arg(long)]
+        render: Utf8PathBuf,
+        #[arg(long)]
+        reference: Utf8PathBuf,
+        #[arg(long, default_value = "vrm-metal-kit")]
+        renderer_name: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the operation catalog.
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -107,6 +120,42 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Diff {
+            plan,
+            render,
+            reference,
+            renderer_name,
+            json: emit_json,
+        } => {
+            use crate::diff::diff_one;
+
+            let plan_value = load_plan(&plan)?;
+            let result = diff_one(&plan_value, &render, &reference, &renderer_name)?;
+            let passed = result.overall_passed();
+
+            if emit_json {
+                println!("{}", serde_json::to_string(&result)?);
+            } else {
+                println!(
+                    "{}: SSIM={:.4} (threshold {:.4}, {}), {} property assertion(s) {}",
+                    result.test_id,
+                    result.ssim,
+                    result.ssim_threshold,
+                    if result.ssim_passed { "PASS" } else { "FAIL" },
+                    result.properties.len(),
+                    if result.properties.iter().all(|p| p.passed) {
+                        "PASS"
+                    } else {
+                        "FAIL"
+                    },
+                );
+            }
+
+            if !passed {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-runner",
@@ -153,6 +202,31 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "estimated_renders": { "type": "integer" },
                                 "estimated_seconds": { "type": "number" },
                                 "outputs": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "diff": {
+                        "summary": "Diff a render PNG against a reference PNG using a test plan; emit DiffResult JSON. Exit non-zero when overall_passed is false.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["plan", "render", "reference"],
+                            "properties": {
+                                "plan": { "type": "string" },
+                                "render": { "type": "string" },
+                                "reference": { "type": "string" },
+                                "renderer_name": { "type": "string" }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "test_id": { "type": "string" },
+                                "renderer": { "type": "string" },
+                                "reference_renderer": { "type": "string" },
+                                "ssim": { "type": "number" },
+                                "ssim_threshold": { "type": "number" },
+                                "ssim_passed": { "type": "boolean" },
+                                "properties": { "type": "array" }
                             }
                         }
                     }
