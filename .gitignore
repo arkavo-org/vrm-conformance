@@ -7,10 +7,15 @@ Cargo.lock.bak
 assets/generated/
 test-plans/generated/
 
-# Swift / Xcode
+# Swift / Xcode (adapters/<adapter>/.build/ is also Swift)
 adapters/*/.build/
 adapters/*/.swiftpm/
 adapters/*/Package.resolved
+
+# Node (TS adapter projects under adapters/)
+adapters/*/node_modules/
+adapters/*/dist/
+adapters/*/package-lock.json.bak
 xcuserdata/
 *.hmap
 *.ipa
