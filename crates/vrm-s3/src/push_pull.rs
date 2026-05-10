@@ -92,6 +92,22 @@ fn now_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
+/// Verify that `bytes` hash to the BLAKE3 ref `expected` (shape:
+/// `"blake3:<64-hex-chars>"`). Returns Err with a descriptive message on
+/// mismatch or malformed input.
+pub fn verify_blake3(bytes: &[u8], expected: &str) -> Result<()> {
+    let hex = expected
+        .strip_prefix("blake3:")
+        .ok_or_else(|| anyhow::anyhow!("expected blake3: prefix, got: {expected}"))?;
+    let actual = blake3::hash(bytes);
+    let actual_hex = actual.to_hex();
+    if actual_hex.as_str() == hex {
+        Ok(())
+    } else {
+        anyhow::bail!("blake3 hash mismatch: expected {hex}, got {actual_hex}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
