@@ -58,3 +58,50 @@ impl SpringBoneParams {
         }
     }
 }
+
+/// One-axis-at-a-time sweep over the spring-bone parameter dictionary, same
+/// methodology as `mtoon_basic_sweep`. Each variant changes exactly one
+/// parameter from the baseline so a renderer regression can be pinned to a
+/// single axis. Cell count is intentionally bounded (~20) so the corpus
+/// stays small enough for per-PR diffing.
+pub fn spring_bone_basic_sweep() -> Vec<SpringBoneParams> {
+    let mut out = Vec::new();
+    out.push(SpringBoneParams::defaults("springbone_default"));
+
+    for j in [2_u32, 8, 16] {
+        let mut p = SpringBoneParams::defaults(format!("springbone_joints_{j}"));
+        p.joint_count = j;
+        out.push(p);
+    }
+
+    for &len in &[0.02_f32, 0.10, 0.20] {
+        let mut p = SpringBoneParams::defaults(format!("springbone_segment_{}", fmt_num(len)));
+        p.segment_length_m = len;
+        out.push(p);
+    }
+
+    for &s in &[0.0_f32, 0.2, 0.8, 1.0] {
+        let mut p = SpringBoneParams::defaults(format!("springbone_stiffness_{}", fmt_num(s)));
+        p.stiffness = s;
+        out.push(p);
+    }
+
+    for &d in &[0.0_f32, 0.2, 0.8, 1.0] {
+        let mut p = SpringBoneParams::defaults(format!("springbone_drag_{}", fmt_num(d)));
+        p.drag_force = d;
+        out.push(p);
+    }
+
+    for &g in &[0.0_f32, 1.0, 2.0] {
+        let mut p = SpringBoneParams::defaults(format!("springbone_gravity_{}", fmt_num(g)));
+        p.gravity_power = g;
+        out.push(p);
+    }
+
+    out
+}
+
+fn fmt_num(v: f32) -> String {
+    let s = format!("{v:.3}").replace('.', "p").replace('-', "neg");
+    s.trim_end_matches('0').trim_end_matches('p').to_string()
+}
