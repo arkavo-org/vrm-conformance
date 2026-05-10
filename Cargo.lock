@@ -3188,6 +3188,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "vrm-mock-renderer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "image",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "vrm-ops",
+]
+
+[[package]]
 name = "vrm-ops"
 version = "0.1.0"
 dependencies = [

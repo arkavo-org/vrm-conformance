@@ -6,6 +6,7 @@ members = [
     "crates/vrm-test-plan",
     "crates/vrm-asset-generator",
     "crates/vrm-diff-engine",
+    "crates/vrm-mock-renderer",
     "crates/vrm-runner",
     "crates/vrm-s3",
 ]
