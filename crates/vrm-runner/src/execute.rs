@@ -70,6 +70,24 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         )
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
 
+    if let Some(physics) = &plan.physics {
+        progress(
+            opts,
+            "reset_physics",
+            &plan.id,
+            json!({ "settle_steps": physics.settle_steps }),
+        );
+        let _: ops::UnitResult = adapter
+            .call(
+                "reset_physics",
+                ops::ResetPhysicsParams {
+                    session_id: session_id.clone(),
+                    settle_steps: physics.settle_steps,
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+    }
+
     let png = opts
         .output_dir
         .join(format!("{}_{}.png", plan.id, opts.renderer_name));

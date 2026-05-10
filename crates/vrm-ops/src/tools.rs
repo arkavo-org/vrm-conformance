@@ -103,6 +103,19 @@ pub struct DisposeParams {
     pub session_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepPhysicsParams {
+    pub session_id: String,
+    pub dt_seconds: f32,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetPhysicsParams {
+    pub session_id: String,
+    pub settle_steps: u32,
+}
+
 /// Empty result type for ops that return no payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitResult {}
