@@ -165,6 +165,27 @@ Resets all spring-bone chains to their rest pose, then advances physics by `sett
 
 The runner calls `reset_physics({ settle_steps })` after `set_post_processing` and before `render` whenever the test plan has a `physics:` block.
 
+### `animate_root_transform`
+
+```json
+{
+  "input": {
+    "session_id": "string",
+    "translation_start": [0.0, 0.0, 0.0],
+    "translation_end":   [0.2, 0.0, 0.0],
+    "duration_seconds": 0.5,
+    "fps": 60
+  },
+  "output": {}
+}
+```
+
+Linearly interpolates the avatar's root translation from `translation_start` to `translation_end` over `duration_seconds`, advancing the physics simulation by `1/fps` between samples. This is the canonical spring-bone excitation primitive: a static avatar under `step_physics` only exercises gravity settling; sideways/forward motion is what excites inertia and drag.
+
+Translation-only in v0.1 — rotation excitation lands when there's a real test calling for it. Adapters that lack a real physics engine (the mock) should acknowledge the call as a no-op so plan-level protocol coverage still passes.
+
+The runner calls `animate_root_transform` after `reset_physics` (so the chain starts from a settled rest pose) and before `render` whenever the test plan has an `animation.root_transform` block.
+
 ## Reserved operations (Phase 2+)
 
 Required to be **declared** by every adapter (`describe` lists them) but may return a structured `Unimplemented` error in v0.1:
@@ -172,7 +193,7 @@ Required to be **declared** by every adapter (`describe` lists them) but may ret
 - `set_environment` (HDRI) — v1.x
 - `set_expression` — Phase 3
 - `set_humanoid_pose` — Phase 2
-- `set_root_transform`, `animate_root_transform` — Phase 2
+- `set_root_transform` — Phase 2
 
 ## Runner-only operations
 

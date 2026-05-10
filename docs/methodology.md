@@ -40,7 +40,9 @@ Renderers initialize spring positions differently from a fresh load. The `reset_
 
 ## Spring bone excitation
 
-Static avatars under `step_physics` only exercise gravity settling. Testing inertia, drag, stiffness requires moving the avatar through space. The `animate_root_transform(start, end, duration)` operation drives this.
+Static avatars under `step_physics` only exercise gravity settling. Testing inertia, drag, stiffness requires moving the avatar through space. The `animate_root_transform(start, end, duration_seconds, fps)` operation drives this.
+
+**Implemented in Phase 2D-d**: the op is real in the three-vrm adapter (linear-interp root translation, `vrm.update(1/fps)` between samples) and acknowledged as a no-op by the mock. Test plans with an `animation.root_transform` block trigger the op between `reset_physics` and `render`, so the rendered frame captures the chain in motion rather than at the static settle.
 
 ## Render queue / transparency ordering
 
