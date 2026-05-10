@@ -7,7 +7,7 @@ use camino::Utf8Path;
 use serde_json::json;
 use vrm_test_plan::{
     AmbientLight, BboxRegion, Camera, ColorSpace, Diff, DiffMode, DirectionalLight, Lighting,
-    Output, PostProcessing, PropertyAssertion, TestPlan, ToneMapping,
+    Output, PhysicsConfig, PostProcessing, PropertyAssertion, TestPlan, ToneMapping,
 };
 
 pub fn write_meta_json(
@@ -80,6 +80,16 @@ pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> Tes
         properties: default_properties(params),
         physics: None,
     }
+}
+
+/// Same as `build_default_test_plan` but with `physics: { settle_steps: 30 }`
+/// — used by the spring-bone emit path so the runner knows to settle the
+/// chain before rendering.
+pub fn build_spring_bone_test_plan(params: &MToonParams, asset_relpath: &str) -> TestPlan {
+    let mut plan = build_default_test_plan(params, asset_relpath);
+    plan.physics = Some(PhysicsConfig { settle_steps: 30 });
+    plan.spec_section = "VRMC_materials_mtoon + VRMC_springBone".into();
+    plan
 }
 
 fn default_properties(_params: &MToonParams) -> Vec<PropertyAssertion> {

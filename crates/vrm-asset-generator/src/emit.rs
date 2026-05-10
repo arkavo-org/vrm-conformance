@@ -215,7 +215,7 @@ pub fn emit_with_sidecars_spring_bone(
         .file_name()
         .map(|n| n.to_string())
         .unwrap_or_default();
-    let plan = build_default_test_plan(mtoon, &asset_relpath);
+    let plan = crate::sidecar::build_spring_bone_test_plan(mtoon, &asset_relpath);
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
