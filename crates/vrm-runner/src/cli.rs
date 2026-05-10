@@ -27,6 +27,10 @@ pub enum Cmd {
         output_dir: Utf8PathBuf,
         #[arg(long, default_value = "vrm-metal-kit")]
         renderer_name: String,
+        /// Optional reference PNG; when set, the runner diffs the produced
+        /// render against it and includes a DiffResult in the JSON summary.
+        #[arg(long)]
+        reference: Option<Utf8PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -72,6 +76,7 @@ pub fn run(cli: Cli) -> Result<()> {
             asset_dir,
             output_dir,
             renderer_name,
+            reference,
             json: emit_json,
         } => {
             let plan_value = load_plan(&plan)?;
@@ -82,19 +87,36 @@ pub fn run(cli: Cli) -> Result<()> {
                 output_dir,
                 renderer_name,
                 emit_progress_ndjson: emit_json,
+                reference,
             };
             let result = execute_plan(&plan_value, &opts)?;
             if emit_json {
-                let summary = json!({
+                let mut summary = json!({
                     "ok": true,
                     "test_id": result.test_id,
                     "renderer": result.renderer,
                     "output_png": result.output_png,
                     "actual_color_space": format!("{:?}", result.actual_color_space)
                 });
+                if let Some(diff) = &result.diff {
+                    summary["diff"] = serde_json::to_value(diff)?;
+                    summary["overall_passed"] = serde_json::Value::Bool(diff.overall_passed());
+                }
                 println!("{}", serde_json::to_string(&summary)?);
             } else {
                 println!("rendered {} → {}", result.test_id, result.output_png);
+                if let Some(diff) = &result.diff {
+                    println!(
+                        "  diff: SSIM={:.4} ({}), overall {}",
+                        diff.ssim,
+                        if diff.ssim_passed { "PASS" } else { "FAIL" },
+                        if diff.overall_passed() {
+                            "PASS"
+                        } else {
+                            "FAIL"
+                        }
+                    );
+                }
             }
             Ok(())
         }
@@ -162,7 +184,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 "version": env!("CARGO_PKG_VERSION"),
                 "operations": {
                     "execute-test-plan": {
-                        "summary": "Execute a YAML test plan against one renderer adapter; emit a PNG and JSON status",
+                        "summary": "Execute a YAML test plan against one renderer adapter; optionally diff against a reference PNG",
                         "input_schema": {
                             "type": "object",
                             "required": ["plan", "adapter_bin", "asset_dir", "output_dir"],
@@ -171,7 +193,8 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "adapter_bin": { "type": "string" },
                                 "adapter_args": { "type": "array", "items": { "type": "string" } },
                                 "asset_dir": { "type": "string" },
-                                "output_dir": { "type": "string" }
+                                "output_dir": { "type": "string" },
+                                "reference": { "type": "string" }
                             }
                         },
                         "output_schema": {
@@ -181,7 +204,9 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "test_id": { "type": "string" },
                                 "renderer": { "type": "string" },
                                 "output_png": { "type": "string" },
-                                "actual_color_space": { "type": "string" }
+                                "actual_color_space": { "type": "string" },
+                                "diff": { "type": ["object", "null"] },
+                                "overall_passed": { "type": "boolean" }
                             }
                         }
                     },

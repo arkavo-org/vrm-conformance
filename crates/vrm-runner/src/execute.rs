@@ -16,6 +16,9 @@ pub struct ExecuteOptions {
     pub output_dir: Utf8PathBuf,
     pub renderer_name: String,
     pub emit_progress_ndjson: bool,
+    /// If provided, diff the produced render against this reference PNG and
+    /// include the result in `ExecuteResult::diff`.
+    pub reference: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +27,8 @@ pub struct ExecuteResult {
     pub renderer: String,
     pub output_png: Utf8PathBuf,
     pub actual_color_space: ops::ColorSpace,
+    /// Populated only when `ExecuteOptions::reference` was set.
+    pub diff: Option<vrm_diff_engine::result::DiffResult>,
 }
 
 pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteResult> {
@@ -87,11 +92,26 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         .shutdown()
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
 
+    let output_png = Utf8PathBuf::from(render.output_path);
+
+    let diff = if let Some(reference) = &opts.reference {
+        progress(opts, "diff", &plan.id, json!({ "reference": reference }));
+        Some(crate::diff::diff_one(
+            plan,
+            &output_png,
+            reference,
+            &opts.renderer_name,
+        )?)
+    } else {
+        None
+    };
+
     Ok(ExecuteResult {
         test_id: plan.id.clone(),
         renderer: opts.renderer_name.clone(),
-        output_png: Utf8PathBuf::from(render.output_path),
+        output_png,
         actual_color_space: render.actual_color_space,
+        diff,
     })
 }
 
