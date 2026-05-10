@@ -1,6 +1,8 @@
 use camino::Utf8PathBuf;
 use vrm_asset_generator::{
-    emit::emit_vrm_with_spring_bone, params::MToonParams, spring_bone::SpringBoneParams,
+    emit::emit_vrm_with_spring_bone,
+    params::MToonParams,
+    spring_bone::{spring_bone_basic_sweep, SpringBoneParams},
 };
 use vrm_validator_wrap::{validate, ValidatorConfig};
 
@@ -60,4 +62,50 @@ fn emits_validator_clean_vrm_with_stiff_spring_bone() {
         "stiff-variant VRM should validate clean. report: {:#?}",
         report.issues.messages
     );
+}
+
+/// Smoke-validate representative sweep cells — the edge cases most likely
+/// to trip the validator (single-joint, zero-stiffness/drag/gravity, very
+/// short and very long chains). If any of these flag errors, the full
+/// emit-springbone-sweep run will too.
+#[test]
+fn sweep_edge_cells_validate_clean() {
+    let Some(cfg) = config_or_skip() else {
+        return;
+    };
+
+    let sweep = spring_bone_basic_sweep();
+    let edge_ids = [
+        "springbone_default",
+        "springbone_joints_2",
+        "springbone_joints_16",
+        "springbone_segment_0p02",
+        "springbone_segment_0p2",
+        "springbone_stiffness_0",
+        "springbone_stiffness_1",
+        "springbone_drag_0",
+        "springbone_drag_1",
+        "springbone_gravity_0",
+        "springbone_gravity_2",
+    ];
+
+    let dir = tempfile::tempdir().unwrap();
+    for id in edge_ids {
+        let spring = sweep
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap_or_else(|| panic!("missing sweep cell: {id}"));
+        let mtoon = MToonParams::defaults(id);
+        let out = Utf8PathBuf::from_path_buf(dir.path().join(format!("{id}.vrm"))).unwrap();
+        emit_vrm_with_spring_bone(&mtoon, spring, &out)
+            .unwrap_or_else(|e| panic!("emission failed for {id}: {e}"));
+
+        let report =
+            validate(&cfg, &out).unwrap_or_else(|e| panic!("validator failed for {id}: {e}"));
+        assert_eq!(
+            report.issues.num_errors, 0,
+            "sweep cell {id} should validate clean. report: {:#?}",
+            report.issues.messages
+        );
+    }
 }
