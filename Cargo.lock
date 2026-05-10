@@ -3177,6 +3177,7 @@ dependencies = [
 name = "vrm-diff-engine"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "camino",
  "image",
  "image-compare",

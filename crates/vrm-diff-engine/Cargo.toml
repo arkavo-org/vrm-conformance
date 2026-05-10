@@ -14,3 +14,9 @@ camino.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+anyhow.workspace = true
+camino.workspace = true
+
+[[example]]
+name = "self_diff"
+path = "examples/self_diff.rs"
