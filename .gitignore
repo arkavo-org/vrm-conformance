@@ -35,6 +35,9 @@ site/.vite/
 # Local validator install (script writes here)
 .tools/
 
+# Smoke-test scratch output
+.smoke/
+
 # Local credentials
 .env
 .env.local
