@@ -26,6 +26,15 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the full MToon basic sweep (~50 assets) into output_dir/.
+    EmitSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        /// Emit JSON progress on stderr (NDJSON) and a final JSON summary on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -68,6 +77,49 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::sweep::mtoon_basic_sweep;
+            std::fs::create_dir_all(&output_dir)?;
+            let assets = mtoon_basic_sweep();
+            let total = assets.len();
+
+            let mut emitted = Vec::new();
+            for (i, p) in assets.iter().enumerate() {
+                if emit_json {
+                    // NDJSON progress on stderr
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": p.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+                }
+
+                let stem = output_dir.join(&p.id);
+                emit_with_sidecars(p, &stem)?;
+                emitted.push(stem);
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!("emitted {} assets to {}", emitted.len(), output_dir);
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -81,6 +133,20 @@ pub fn run(cli: Cli) -> Result<()> {
                             "properties": {
                                 "id": { "type": "string" },
                                 "output_dir": { "type": "string" }
+                            }
+                        }
+                    },
+                    "emit-sweep": {
+                        "summary": "Emit the full MToon basic sweep (~50 assets) into output_dir/",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
                             }
                         }
                     }
