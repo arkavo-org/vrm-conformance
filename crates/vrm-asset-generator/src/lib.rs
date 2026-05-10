@@ -3,7 +3,9 @@
 //! parameter dictionary.
 
 pub mod buffer;
+pub mod emit;
 pub mod glb;
 pub mod humanoid;
 pub mod mesh;
 pub mod params;
+pub mod vrm_ext;
