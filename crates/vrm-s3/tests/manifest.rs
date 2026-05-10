@@ -40,3 +40,30 @@ fn manifest_rejects_missing_required_fields() {
     let result: Result<Manifest, _> = serde_json::from_str(raw);
     assert!(result.is_err(), "should reject missing required fields");
 }
+
+/// Locks in `#[serde(flatten)]` on `metadata`: an entry that supplies every
+/// direct field of `ManifestEntry` but omits the flattened `SubmissionMetadata`
+/// fields must fail to deserialize.
+#[test]
+fn manifest_rejects_missing_flattened_metadata_fields() {
+    let raw = r#"{
+        "version": 1,
+        "entries": [
+            {
+                "test_id": "mtoon_default",
+                "renderer_name": "vrm-metal-kit",
+                "renderer_version": "0.5.2",
+                "git_hash": "deadbeef",
+                "image_url": "s3://b/x.png",
+                "image_blake3": "blake3:abcdef",
+                "byte_size": 12345,
+                "submitted_at": "2026-05-10T12:00:00Z"
+            }
+        ]
+    }"#;
+    let result: Result<Manifest, _> = serde_json::from_str(raw);
+    assert!(
+        result.is_err(),
+        "should reject missing flattened metadata fields (os/os_version/gpu_vendor/gpu_model/driver_version/build_flags)"
+    );
+}

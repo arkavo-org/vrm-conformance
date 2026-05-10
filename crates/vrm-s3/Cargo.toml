@@ -7,14 +7,11 @@ license.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
 camino.workspace = true
 blake3.workspace = true
-hex.workspace = true
 tokio.workspace = true
 aws-config.workspace = true
 aws-sdk-s3.workspace = true
-tracing.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 time.workspace = true

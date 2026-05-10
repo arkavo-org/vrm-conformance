@@ -75,6 +75,9 @@ fn parse_s3_url(url: &str) -> Result<(&str, &str)> {
     let (bucket, key) = stripped
         .split_once('/')
         .ok_or_else(|| anyhow::anyhow!("malformed s3 url: missing key: {url}"))?;
+    if key.is_empty() {
+        anyhow::bail!("malformed s3 url: empty key: {url}");
+    }
     Ok((bucket, key))
 }
 
@@ -87,4 +90,41 @@ fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_s3_url_rejects_bucket_only_no_slash() {
+        let err = parse_s3_url("s3://bucket-only").unwrap_err();
+        assert!(
+            err.to_string().contains("missing key"),
+            "expected missing-key error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_s3_url_rejects_bucket_only_trailing_slash() {
+        let err = parse_s3_url("s3://bucket-only/").unwrap_err();
+        assert!(
+            err.to_string().contains("empty key"),
+            "expected empty-key error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_s3_url_accepts_simple_key() {
+        let (bucket, key) = parse_s3_url("s3://bucket/key").unwrap();
+        assert_eq!(bucket, "bucket");
+        assert_eq!(key, "key");
+    }
+
+    #[test]
+    fn parse_s3_url_accepts_nested_path() {
+        let (bucket, key) = parse_s3_url("s3://bucket/path/with/slashes").unwrap();
+        assert_eq!(bucket, "bucket");
+        assert_eq!(key, "path/with/slashes");
+    }
 }
