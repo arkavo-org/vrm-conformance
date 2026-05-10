@@ -191,6 +191,31 @@ if [ "${RUN_THREE_VRM:-0}" = "1" ] && [ "$SKIP_RENDER" != "1" ] && [ -f "$THREE_
     fi
 fi
 
+# ---- step 4e: optional three-vrm swing (animate_root_transform) exercise --
+if [ "${RUN_THREE_VRM:-0}" = "1" ] && [ "$SKIP_RENDER" != "1" ] && [ -f "$THREE_VRM_DIR/dist/main.js" ]; then
+    echo "==> Running three-vrm spring-bone swing (animate_root_transform)"
+    SW_ID="smoke_swing"
+    cargo run --release -p vrm-asset-generator -- emit-springbone-swing \
+        --id "$SW_ID" \
+        --output-dir "$ASSETS" \
+        --json
+    SW_OUT="$OUTPUTS/${SW_ID}_three-vrm-swing.png"
+    if cargo run --release -p vrm-runner -- execute-test-plan \
+            --plan "$ASSETS/${SW_ID}.test.yaml" \
+            --adapter-bin node \
+            --adapter-args "$THREE_VRM_DIR/dist/main.js" \
+            --asset-dir "$ASSETS" \
+            --output-dir "$OUTPUTS" \
+            --renderer-name three-vrm-swing \
+            --json; then
+        if [ -f "$SW_OUT" ]; then
+            echo "    three-vrm swing produced: $SW_OUT ($(wc -c < "$SW_OUT" | tr -d ' ') bytes)"
+        fi
+    else
+        echo "    three-vrm swing runner step exited non-zero (continuing)" >&2
+    fi
+fi
+
 # ---- step 5: optional S3 upload -------------------------------------------
 if [ -n "${VRM_GOLDENS_BUCKET:-}" ]; then
     if [ -f "$PNG" ] && [ "$SKIP_RENDER" != "1" ]; then

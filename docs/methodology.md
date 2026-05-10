@@ -44,6 +44,8 @@ Static avatars under `step_physics` only exercise gravity settling. Testing iner
 
 **Implemented in Phase 2D-d**: the op is real in the three-vrm adapter (linear-interp root translation, `vrm.update(1/fps)` between samples) and acknowledged as a no-op by the mock. Test plans with an `animation.root_transform` block trigger the op between `reset_physics` and `render`, so the rendered frame captures the chain in motion rather than at the static settle.
 
+**Sweep corpus (Phase 2D-e)**: `emit-springbone-swing-sweep` emits a parallel 18-asset corpus where every plan carries an `animation.root_transform` block (15 cm sideways translation over 0.25 s @ 60 Hz, after the standard 30-step settle). The corpus exercises every spring-bone axis under inertia rather than only at equilibrium — a regression in any renderer's drag, stiffness, or chain-length handling now surfaces against the swing reference.
+
 ## Render queue / transparency ordering
 
 Z-write behavior under `transparentWithZWrite=true` plus `renderQueueOffsetNumber` is the most common source of real-world MToon visual bugs.

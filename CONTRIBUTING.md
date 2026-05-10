@@ -9,9 +9,11 @@ Thanks for your interest. This project builds cross-renderer conformance tooling
 cargo build --workspace
 cargo test --workspace
 
-# Emit the full MToon + spring-bone parameter sweeps (~70 assets) for local diff.
+# Emit the full MToon + spring-bone parameter sweeps (~90 assets) for local diff.
 cargo run -p vrm-asset-generator -- emit-sweep --output-dir /tmp/mtoon-sweep
 cargo run -p vrm-asset-generator -- emit-springbone-sweep --output-dir /tmp/springbone-sweep
+# Same chains, plus an animate_root_transform swing block in every test plan:
+cargo run -p vrm-asset-generator -- emit-springbone-swing-sweep --output-dir /tmp/springbone-swing-sweep
 
 # VRMMetalKit adapter (macOS only)
 cd adapters/vrm-metal-kit && swift build && swift test
