@@ -2,5 +2,6 @@
 
 pub mod adapter;
 pub mod cli;
+pub mod diff;
 pub mod execute;
 pub mod plan_to_ops;
