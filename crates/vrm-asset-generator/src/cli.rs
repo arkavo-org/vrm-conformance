@@ -56,6 +56,28 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit one .vrm with default MToon + default VRMC_springBone chain,
+    /// whose test.yaml triggers animate_root_transform mid-render so the
+    /// chain is captured mid-swing rather than at the gravity settle.
+    EmitSpringboneSwing {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Emit the swing-variant spring-bone sweep (~20 assets). Same axes
+    /// as emit-springbone-sweep; every emitted plan carries both a
+    /// physics block and an animation.root_transform block.
+    EmitSpringboneSwingSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -224,6 +246,91 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitSpringboneSwing {
+            id,
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_with_sidecars_spring_bone_swing;
+            use crate::spring_bone::SpringBoneParams;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let stem = output_dir.join(&id);
+            let mtoon = MToonParams::defaults(&id);
+            let spring = SpringBoneParams::defaults(&id);
+            emit_with_sidecars_spring_bone_swing(&mtoon, &spring, &stem)?;
+
+            if emit_json {
+                let result = json!({
+                    "ok": true,
+                    "outputs": {
+                        "vrm": stem.with_extension("vrm"),
+                        "meta": stem.with_extension("meta.json"),
+                        "test_plan": stem.with_extension("test.yaml")
+                    }
+                });
+                println!("{}", serde_json::to_string(&result)?);
+            } else {
+                println!("emitted: {}", stem.with_extension("vrm"));
+                println!("emitted: {}", stem.with_extension("meta.json"));
+                println!("emitted: {}", stem.with_extension("test.yaml"));
+            }
+            Ok(())
+        }
+        Cmd::EmitSpringboneSwingSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_with_sidecars_spring_bone_swing;
+            use crate::spring_bone::spring_bone_basic_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = spring_bone_basic_sweep();
+            let total = variants.len();
+
+            let mut emitted = Vec::new();
+            for (i, spring) in variants.iter().enumerate() {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-springbone-swing-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": spring.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, spring.id);
+                }
+
+                // Swing variants share the sweep ID with the settle-only
+                // sweep on purpose: the .vrm body is identical, only the
+                // test.yaml differs. The output dir should be different
+                // from emit-springbone-sweep's output dir or the .test.yaml
+                // files will overwrite. (`describe` documents this.)
+                let stem = output_dir.join(&spring.id);
+                let mtoon = MToonParams::defaults(&spring.id);
+                emit_with_sidecars_spring_bone_swing(&mtoon, spring, &stem)?;
+                emitted.push(stem);
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} swing spring-bone assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -304,6 +411,54 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-springbone-sweep": {
                         "summary": "Emit the full VRMC_springBone parameter sweep (~20 assets)",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-springbone-swing": {
+                        "summary": "Emit one .vrm with default MToon + spring-bone chain, with a swing animation block in the test plan",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["id", "output_dir"],
+                            "properties": {
+                                "id": { "type": "string" },
+                                "output_dir": { "type": "string" }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "outputs": {
+                                    "type": "object",
+                                    "properties": {
+                                        "vrm": { "type": "string" },
+                                        "meta": { "type": "string" },
+                                        "test_plan": { "type": "string" }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "emit-springbone-swing-sweep": {
+                        "summary": "Swing-variant spring-bone sweep (~20 assets). Same axes as emit-springbone-sweep; every test.yaml carries an animation.root_transform block. Use a different --output-dir than emit-springbone-sweep to avoid overwriting the settle-only test.yaml files.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],

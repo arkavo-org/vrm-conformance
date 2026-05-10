@@ -1,6 +1,6 @@
 use camino::Utf8PathBuf;
 use vrm_asset_generator::{
-    emit::emit_vrm_with_spring_bone,
+    emit::{emit_vrm_with_spring_bone, emit_with_sidecars_spring_bone_swing},
     params::MToonParams,
     spring_bone::{spring_bone_basic_sweep, SpringBoneParams},
 };
@@ -105,6 +105,45 @@ fn sweep_edge_cells_validate_clean() {
         assert_eq!(
             report.issues.num_errors, 0,
             "sweep cell {id} should validate clean. report: {:#?}",
+            report.issues.messages
+        );
+    }
+}
+
+/// Swing variants of the sweep share the .vrm body with the settle-only
+/// variants — only the .test.yaml differs — so validator-clean status is
+/// inherited. This regression-guard test confirms the emit-sidecars-swing
+/// path still produces clean assets for representative cells.
+#[test]
+fn swing_emit_keeps_vrm_validator_clean() {
+    let Some(cfg) = config_or_skip() else {
+        return;
+    };
+
+    let sweep = spring_bone_basic_sweep();
+    let probe_ids = [
+        "springbone_default",
+        "springbone_stiffness_0",
+        "springbone_drag_1",
+    ];
+
+    let dir = tempfile::tempdir().unwrap();
+    for id in probe_ids {
+        let spring = sweep
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap_or_else(|| panic!("missing sweep cell: {id}"));
+        let mtoon = MToonParams::defaults(id);
+        let stem = Utf8PathBuf::from_path_buf(dir.path().join(id)).unwrap();
+        emit_with_sidecars_spring_bone_swing(&mtoon, spring, &stem)
+            .unwrap_or_else(|e| panic!("swing emission failed for {id}: {e}"));
+
+        let vrm_out = stem.with_extension("vrm");
+        let report = validate(&cfg, &vrm_out)
+            .unwrap_or_else(|e| panic!("validator failed for swing {id}: {e}"));
+        assert_eq!(
+            report.issues.num_errors, 0,
+            "swing cell {id} VRM should validate clean. report: {:#?}",
             report.issues.messages
         );
     }
