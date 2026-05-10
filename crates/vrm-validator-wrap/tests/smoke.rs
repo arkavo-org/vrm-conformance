@@ -8,7 +8,9 @@ fn config_or_skip() -> Option<ValidatorConfig> {
     match ValidatorConfig::from_env() {
         Ok(c) => Some(c),
         Err(e) => {
-            eprintln!("SKIP: validator shim not installed ({e}). Run scripts/install-validator.sh.");
+            eprintln!(
+                "SKIP: validator shim not installed ({e}). Run scripts/install-validator.sh."
+            );
             None
         }
     }
@@ -16,14 +18,18 @@ fn config_or_skip() -> Option<ValidatorConfig> {
 
 #[test]
 fn validate_returns_error_for_nonexistent_file() {
-    let Some(config) = config_or_skip() else { return };
+    let Some(config) = config_or_skip() else {
+        return;
+    };
     let result = validate(&config, camino::Utf8Path::new("/nonexistent/file.vrm"));
     assert!(result.is_err(), "validation of missing file should error");
 }
 
 #[test]
 fn validate_minimal_glb_returns_clean_report() {
-    let Some(config) = config_or_skip() else { return };
+    let Some(config) = config_or_skip() else {
+        return;
+    };
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("minimal.glb");
@@ -33,7 +39,10 @@ fn validate_minimal_glb_returns_clean_report() {
     std::fs::write(&path, &glb_bytes).unwrap();
 
     let report = validate(&config, &path).expect("validator should produce a report");
-    assert_eq!(report.issues.num_errors, 0, "minimal valid GLB should have no errors");
+    assert_eq!(
+        report.issues.num_errors, 0,
+        "minimal valid GLB should have no errors"
+    );
     assert_eq!(
         report.mime_type.as_deref(),
         Some("model/gltf-binary"),
@@ -43,7 +52,9 @@ fn validate_minimal_glb_returns_clean_report() {
 
 #[test]
 fn validate_garbage_input_produces_internal_error() {
-    let Some(config) = config_or_skip() else { return };
+    let Some(config) = config_or_skip() else {
+        return;
+    };
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("garbage.glb");

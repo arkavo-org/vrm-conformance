@@ -81,6 +81,9 @@ diff:
   reference_renderer: x
 "#;
     let plan: TestPlan = serde_yml::from_str(yaml_without_post_processing).unwrap();
-    assert!(matches!(plan.post_processing.tone_mapping, vrm_test_plan::ToneMapping::None));
+    assert!(matches!(
+        plan.post_processing.tone_mapping,
+        vrm_test_plan::ToneMapping::None
+    ));
     assert_eq!(plan.post_processing.exposure, 1.0);
 }

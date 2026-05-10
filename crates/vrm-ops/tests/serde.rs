@@ -37,8 +37,5 @@ fn unimplemented_error_round_trips() {
     let s = serde_json::to_string(&err).unwrap();
     let parsed: RpcError = serde_json::from_str(&s).unwrap();
     assert_eq!(parsed.code, -32000);
-    assert_eq!(
-        parsed.data.unwrap()["phase"].as_str().unwrap(),
-        "v1.x"
-    );
+    assert_eq!(parsed.data.unwrap()["phase"].as_str().unwrap(), "v1.x");
 }
