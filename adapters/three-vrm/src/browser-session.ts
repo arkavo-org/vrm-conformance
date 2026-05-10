@@ -44,11 +44,11 @@ export class BrowserSession {
     this.browser = await chromium.launch({ headless: true });
     this.page = await this.browser.newPage();
 
-    // Intercept all requests; serve `app://asset` from `currentAsset.diskPath`,
+    // Intercept all requests; serve `https://app.local/asset` from `currentAsset.diskPath`,
     // let everything else fall through (including CDN imports).
     await this.page.route("**/*", (route: Route) => {
       const url = route.request().url();
-      if (url.startsWith("app://asset")) {
+      if (url.startsWith("https://app.local/asset")) {
         const asset = this.currentAsset;
         if (!asset) {
           return route.fulfill({
@@ -93,7 +93,7 @@ export class BrowserSession {
       ({ url }: { url: string }) =>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__loadVrm(url),
-      { url: "app://asset" },
+      { url: "https://app.local/asset" },
     );
   }
 
