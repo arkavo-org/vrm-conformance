@@ -124,6 +124,11 @@ These cover MToon material tests and must be implemented by every renderer adapt
 { "input": { "session_id": "string" }, "output": {} }
 ```
 
+## Reference implementations
+
+- **`vrm-mock-renderer`** (in-tree, Rust). A deterministic CPU adapter that satisfies the Phase 1 op contract. Renders are a stable function of `MToonParams` — identical params produce byte-identical PNGs, so self-diff is SSIM 1.0 by construction. Used as the default smoke-test adapter; not a real renderer.
+- **`adapters/vrm-metal-kit/`** (in-tree, Swift). Real macOS / Metal renderer scaffold. JSON-RPC framing is implemented; the actual VRMMetalKit integration (L3) is deferred.
+
 ## Reserved operations (Phase 2+)
 
 Required to be **declared** by every adapter (`describe` lists them) but may return a structured `Unimplemented` error in v0.1:
