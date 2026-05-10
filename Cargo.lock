@@ -677,6 +677,8 @@ version = "0.1.0"
 name = "vrm-ops"
 version = "0.1.0"
 dependencies = [
+ "insta",
+ "pretty_assertions",
  "serde",
  "serde_json",
  "thiserror",

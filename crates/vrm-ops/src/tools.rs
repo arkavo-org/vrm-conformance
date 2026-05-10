@@ -1,0 +1,108 @@
+//! Operation parameter and result types.
+//!
+//! These are the structured-CLI args (after `--json` parsing) and the
+//! JSON-RPC request `params` / response `result` payloads. Same types,
+//! same schemas, two transports.
+
+use serde::{Deserialize, Serialize};
+
+// ---- Phase 1 required operations ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadVrmParams {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadVrmResult {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetCameraParams {
+    pub session_id: String,
+    pub position: [f32; 3],
+    pub target: [f32; 3],
+    pub up: [f32; 3],
+    pub fov_degrees: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetLightingParams {
+    pub session_id: String,
+    pub directional: Directional,
+    pub ambient: Ambient,
+    #[serde(default)]
+    pub cast_shadows: bool,
+    #[serde(default)]
+    pub receive_shadows: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Directional {
+    pub dir: [f32; 3],
+    pub color: [f32; 3],
+    pub intensity: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ambient {
+    pub color: [f32; 3],
+    pub intensity: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPostProcessingParams {
+    pub session_id: String,
+    pub tone_mapping: ToneMapping,
+    pub exposure: f32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ToneMapping {
+    None,
+    Linear,
+    Reinhard,
+    Aces,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenderParams {
+    pub session_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub output_path: String,
+    pub color_space: ColorSpace,
+    pub msaa: u8,
+    pub output_type: OutputType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenderResult {
+    pub output_path: String,
+    pub actual_color_space: ColorSpace,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ColorSpace {
+    Linear,
+    Srgb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum OutputType {
+    Color,
+    Normal,
+    Depth,
+    Albedo,
+    MToonShadingMask,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisposeParams {
+    pub session_id: String,
+}
+
+/// Empty result type for ops that return no payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnitResult {}
