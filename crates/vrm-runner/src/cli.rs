@@ -82,9 +82,9 @@ pub enum Cmd {
 
 /// Parse one `name=path` value for the consensus-diff --render flag.
 fn parse_named_path(s: &str) -> Result<(String, Utf8PathBuf), String> {
-    let (name, path) = s.split_once('=').ok_or_else(|| {
-        format!("expected name=path, got '{s}' (missing '=' separator)")
-    })?;
+    let (name, path) = s
+        .split_once('=')
+        .ok_or_else(|| format!("expected name=path, got '{s}' (missing '=' separator)"))?;
     if name.is_empty() {
         return Err(format!("empty renderer name in '{s}'"));
     }
@@ -227,8 +227,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 })
                 .collect();
 
-            let result =
-                consensus_diff(&plan_value.id, &render_refs, effective_threshold)?;
+            let result = consensus_diff(&plan_value.id, &render_refs, effective_threshold)?;
 
             if emit_json {
                 println!("{}", serde_json::to_string(&result)?);

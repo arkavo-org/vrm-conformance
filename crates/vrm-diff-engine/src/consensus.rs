@@ -153,9 +153,18 @@ mod tests {
         let result = consensus_diff(
             "test",
             &[
-                RendererRender { name: "a".into(), png_path: &p_a },
-                RendererRender { name: "b".into(), png_path: &p_b },
-                RendererRender { name: "c".into(), png_path: &p_c },
+                RendererRender {
+                    name: "a".into(),
+                    png_path: &p_a,
+                },
+                RendererRender {
+                    name: "b".into(),
+                    png_path: &p_b,
+                },
+                RendererRender {
+                    name: "c".into(),
+                    png_path: &p_c,
+                },
             ],
             0.99,
         )
@@ -192,9 +201,18 @@ mod tests {
         let result = consensus_diff(
             "test",
             &[
-                RendererRender { name: "a".into(), png_path: &p_a },
-                RendererRender { name: "b".into(), png_path: &p_b },
-                RendererRender { name: "outlier".into(), png_path: &p_c },
+                RendererRender {
+                    name: "a".into(),
+                    png_path: &p_a,
+                },
+                RendererRender {
+                    name: "b".into(),
+                    png_path: &p_b,
+                },
+                RendererRender {
+                    name: "outlier".into(),
+                    png_path: &p_c,
+                },
             ],
             0.99,
         )
@@ -226,8 +244,14 @@ mod tests {
         let result = consensus_diff(
             "pair",
             &[
-                RendererRender { name: "a".into(), png_path: &p_a },
-                RendererRender { name: "b".into(), png_path: &p_b },
+                RendererRender {
+                    name: "a".into(),
+                    png_path: &p_a,
+                },
+                RendererRender {
+                    name: "b".into(),
+                    png_path: &p_b,
+                },
             ],
             0.99,
         )
@@ -247,7 +271,10 @@ mod tests {
 
         let err = consensus_diff(
             "solo",
-            &[RendererRender { name: "a".into(), png_path: &p_a }],
+            &[RendererRender {
+                name: "a".into(),
+                png_path: &p_a,
+            }],
             0.99,
         )
         .unwrap_err();
@@ -265,8 +292,14 @@ mod tests {
         let err = consensus_diff(
             "size-mismatch",
             &[
-                RendererRender { name: "a".into(), png_path: &p_a },
-                RendererRender { name: "b".into(), png_path: &p_b },
+                RendererRender {
+                    name: "a".into(),
+                    png_path: &p_a,
+                },
+                RendererRender {
+                    name: "b".into(),
+                    png_path: &p_b,
+                },
             ],
             0.99,
         )

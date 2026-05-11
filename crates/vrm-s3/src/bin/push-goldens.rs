@@ -72,9 +72,9 @@ async fn main() -> Result<()> {
             metadata,
         )?
     } else {
-        let bucket = a
-            .bucket
-            .ok_or_else(|| anyhow::anyhow!("missing --bucket / VRM_GOLDENS_BUCKET (or use --local)"))?;
+        let bucket = a.bucket.ok_or_else(|| {
+            anyhow::anyhow!("missing --bucket / VRM_GOLDENS_BUCKET (or use --local)")
+        })?;
         let opts = PushOptions {
             bucket,
             key_prefix: a.key_prefix,

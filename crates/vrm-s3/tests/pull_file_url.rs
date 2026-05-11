@@ -19,7 +19,9 @@ async fn pull_png_handles_file_url_by_copy() {
     std::fs::write(src.as_std_path(), &payload).unwrap();
 
     let url = format!("file://{src}");
-    pull_png(&url, &dest).await.expect("pull_png should succeed for file:// URL");
+    pull_png(&url, &dest)
+        .await
+        .expect("pull_png should succeed for file:// URL");
 
     let copied = std::fs::read(dest.as_std_path()).unwrap();
     assert_eq!(
