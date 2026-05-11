@@ -1,0 +1,69 @@
+name: godot-vrm
+
+# L1+L2 scaffold: Rust shim + GDScript dispatch. Tasks build the Rust
+# crate, install Godot 4 headless, run the GDScript unit tests, and run
+# the #[ignore]'d Rust integration test that spawns the shim + real Godot.
+#
+# Real renderer integration (L3) is a separate plan; this workflow
+# doesn't run any render pipeline yet.
+#
+# No untrusted-input usage: this workflow does not read PR titles, commit
+# messages, issue bodies, or any other user-controlled fields into run:
+# commands.
+
+on:
+  pull_request:
+    paths:
+      - 'adapters/godot-vrm/**'
+      - 'crates/vrm-godot-shim/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/godot-vrm.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'adapters/godot-vrm/**'
+      - 'crates/vrm-godot-shim/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/godot-vrm.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: 4.3-stable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache Godot binary
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/godot
+          key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
+
+      - name: Install Godot headless
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/bin
+          curl -L -o /tmp/godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          unzip -p /tmp/godot.zip > ~/.local/bin/godot
+          chmod +x ~/.local/bin/godot
+
+      - name: Make Godot reachable on PATH
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          ~/.local/bin/godot --version
+
+      - name: Build shim
+        run: cargo build -p vrm-godot-shim --release
+
+      - name: Run GDScript dispatch unit tests
+        run: godot --headless --path adapters/godot-vrm --script tests/run_gdscript_tests.gd
+
+      - name: Run Rust integration contract test
+        run: cargo test -p vrm-godot-shim --release --test contract -- --ignored
