@@ -113,28 +113,30 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
-/// Emit a `.vrm` GLB containing both MToon material data and a single
-/// VRMC_springBone chain attached to the head bone.
+/// Emit a `.vrm` GLB containing MToon material data, a VRMC_springBone
+/// chain attached to the head bone, **and a cylinder mesh skinned to
+/// the chain joints** so spring-bone physics is visible in pixel space.
 ///
-/// **Visibility caveat**: the chain joints declared in VRMC_springBone are
-/// not currently driving any visible mesh — the head-mounted sphere is
-/// the only renderable, and it's parented to the head node, not skinned
-/// to the chain. Spring-bone physics still ticks correctly inside both
-/// renderer adapters; it just doesn't produce a pixel-space signal. The
-/// `chain_mesh` + `buffer::pack_sphere_and_chain` infrastructure that
-/// would skin a cylinder to the chain joints exists in-tree but isn't
-/// wired here yet — see the chain_mesh module docs. The wiring was
-/// drafted and locally smoke-tested: three-vrm renders both meshes
-/// correctly, but VRMMetalKit's renderer drops the non-skinned mesh
-/// when any skin is present in the document
-/// ([arkavo-org/VRMMetalKit#181](https://github.com/arkavo-org/VRMMetalKit/issues/181)).
+/// Three renderables:
+///
+/// 1. A head-mounted sphere (the existing MToon material reference shape,
+///    parented to the head node, not skinned).
+/// 2. A vertical cylinder hanging from the head, weighted to the chain
+///    joints. When a renderer's spring-bone physics moves a joint, the
+///    cylinder bends with it.
+/// 3. The VRMC_springBone extension declaring the chain itself.
+///
+/// Wiring was previously deferred because vrm-metal-kit at our prior pin
+/// dropped non-skinned meshes when any skin was present
+/// ([VRMMetalKit#181](https://github.com/arkavo-org/VRMMetalKit/issues/181));
+/// the 0.13.1 release closes that, so the chain-skinned mesh now coexists
+/// with the head-mounted sphere across all renderers.
 pub fn emit_vrm_with_spring_bone(
     mtoon: &MToonParams,
     spring_bone: &SpringBoneParams,
     output: &Utf8Path,
 ) -> Result<()> {
     let mesh = sphere(0.3, 24, 48);
-    let packed = pack_mesh(&mesh);
 
     let mut skeleton = minimal_skeleton();
     let head_node = skeleton.bone_to_node["head"];
@@ -145,8 +147,43 @@ pub fn emit_vrm_with_spring_bone(
         spring_bone.segment_length_m,
     );
 
+    // Each chain joint's rest-pose world Y is head_world_y - (i+1)*segment_length.
+    // The cylinder runs from joint 0's Y (top) downward and is skinned to
+    // the chain joints by ring (see chain_mesh.rs).
+    let head_world = crate::humanoid::rest_pose_world_position("head");
+    let head_world_y = head_world[1];
+    let chain_top_y = head_world_y - spring_bone.segment_length_m;
+
+    let chain_mesh = crate::chain_mesh::build_chain_cylinder(
+        spring_bone.joint_count,
+        spring_bone.segment_length_m,
+        /* radius */ 0.025,
+        chain_top_y,
+        /* ring_segments */ 12,
+    );
+
+    // Inverse-bind matrices: each joint's bind-pose world transform is a
+    // pure translation to its rest-pose Y. Inverse = translation by
+    // negated Y. Stored column-major per the glTF Mat4 convention.
+    let inv_bind: Vec<[f32; 16]> = (0..spring_bone.joint_count)
+        .map(|i| {
+            let jy = head_world_y - ((i + 1) as f32) * spring_bone.segment_length_m;
+            #[rustfmt::skip]
+            let m = [
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, -jy, 0.0, 1.0,
+            ];
+            m
+        })
+        .collect();
+
+    let packed = crate::buffer::pack_sphere_and_chain(&mesh, &chain_mesh, &inv_bind);
+
     let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
 
+    // Sphere mesh node — child of head, identical to emit_vrm's wiring.
     let mesh_node_index = nodes.len();
     nodes.push(json!({
         "name": format!("{}_mesh", mtoon.id),
@@ -156,6 +193,20 @@ pub fn emit_vrm_with_spring_bone(
     let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
     head_children.push(json!(mesh_node_index));
     head["children"] = Value::Array(head_children);
+
+    // Chain-skinned node — child of hips so the scene stays single-rooted.
+    // Its own transform is ignored at draw time; skin.joints +
+    // inverseBindMatrices fully determine vertex positions.
+    let chain_mesh_node_index = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_chain_mesh", mtoon.id),
+        "mesh": 1,
+        "skin": 0
+    }));
+    let hips = &mut nodes[skeleton.root_node];
+    let mut hips_children = hips["children"].as_array().cloned().unwrap_or_default();
+    hips_children.push(json!(chain_mesh_node_index));
+    hips["children"] = Value::Array(hips_children);
 
     let mut doc = json!({
         "asset": {
@@ -172,22 +223,48 @@ pub fn emit_vrm_with_spring_bone(
         "scene": 0,
         "scenes": [{ "nodes": [skeleton.root_node] }],
         "nodes": nodes,
-        "meshes": [{
-            "name": format!("{}_geom", mtoon.id),
-            "primitives": [{
-                "attributes": {
-                    "POSITION": 0,
-                    "NORMAL": 1,
-                    "TEXCOORD_0": 2
-                },
-                "indices": 3,
-                "material": 0,
-                "mode": 4
-            }]
+        "meshes": [
+            // mesh 0: head-mounted sphere
+            {
+                "name": format!("{}_geom", mtoon.id),
+                "primitives": [{
+                    "attributes": {
+                        "POSITION": 0,
+                        "NORMAL": 1,
+                        "TEXCOORD_0": 2
+                    },
+                    "indices": 3,
+                    "material": 0,
+                    "mode": 4
+                }]
+            },
+            // mesh 1: chain cylinder (skinned to spring-bone joints)
+            {
+                "name": format!("{}_chain_geom", mtoon.id),
+                "primitives": [{
+                    "attributes": {
+                        "POSITION": 4,
+                        "NORMAL": 5,
+                        "TEXCOORD_0": 6,
+                        "JOINTS_0": 8,
+                        "WEIGHTS_0": 9
+                    },
+                    "indices": 7,
+                    "material": 0,
+                    "mode": 4
+                }]
+            }
+        ],
+        "skins": [{
+            "joints": chain_nodes,
+            "inverseBindMatrices": 10,
+            "skeleton": chain_nodes[0]
         }],
         "materials": [base_material(mtoon)],
         "extensions": {
-            "VRMC_vrm": vrmc_vrm(&mtoon.id, &skeleton.bone_to_node, mesh_node_index),
+            "VRMC_vrm": vrmc_vrm_with_chain_mesh(
+                &mtoon.id, &skeleton.bone_to_node, mesh_node_index, chain_mesh_node_index
+            ),
             "VRMC_springBone": vrmc_spring_bone(&chain_nodes, spring_bone),
         }
     });
@@ -207,6 +284,24 @@ pub fn emit_vrm_with_spring_bone(
     }
     std::fs::write(output, glb)?;
     Ok(())
+}
+
+/// VRMC_vrm helper that annotates BOTH the head mesh and the chain mesh
+/// in `firstPerson.meshAnnotations`. Both use `type: "both"` so they're
+/// unconditionally visible regardless of camera mode; the conformance
+/// test plans are always third-person renders.
+fn vrmc_vrm_with_chain_mesh(
+    meta_name: &str,
+    bone_to_node: &std::collections::BTreeMap<String, usize>,
+    sphere_mesh_node: usize,
+    chain_mesh_node: usize,
+) -> Value {
+    let mut ext = vrmc_vrm(meta_name, bone_to_node, sphere_mesh_node);
+    ext["firstPerson"]["meshAnnotations"] = json!([
+        { "node": sphere_mesh_node, "type": "both" },
+        { "node": chain_mesh_node,  "type": "both" }
+    ]);
+    ext
 }
 
 /// Emits `<stem>.vrm` (MToon + spring-bone), `<stem>.meta.json` (with

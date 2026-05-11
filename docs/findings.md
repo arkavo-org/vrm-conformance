@@ -120,6 +120,51 @@ This is also exactly why we pin the upstream revision in `Package.swift` rather 
 - **Did NOT validate end-to-end yet**: visible chain-skinned-mesh diffing. With #181 fixed, the chain_mesh.rs infrastructure in this repo can be re-wired into `emit_vrm_with_spring_bone`. That's a separate piece of work — it unblocks the spring-bone signal that's currently degenerate.
 - **Surfaced**: an outline-rendering regression that wasn't visible in any per-renderer unit test. Only the cross-renderer signal catches it.
 
+## Third run: chain-skinned mesh wired into emit (VRMMetalKit 0.13.1)
+
+**Trigger**: With [#181](https://github.com/arkavo-org/VRMMetalKit/issues/181) closed in 0.13.1, the deferred chain-skinned cylinder infrastructure (`chain_mesh.rs` + `buffer::pack_sphere_and_chain`) can finally be wired into `emit_vrm_with_spring_bone`. Locally smoke-verified before the corpus run: rendering `springbone_segment_0p2` (4 joints × 0.2 m chain, hangs well below the sphere bounding-box) shows the chain cylinder poking out at the bottom of the frame — sphere + chain coexist correctly on vrm-metal-kit 0.13.1.
+
+### Corpus-wide before/after
+
+| Metric | Run 2 (no chain) | Run 3 (with chain) | Δ |
+|---|---|---|---|
+| consensus_passed | 0 / 80 | 0 / 80 | unchanged |
+| mean pairwise SSIM | 0.7002 | **0.6994** | −0.0008 |
+| min pairwise SSIM | 0.1840 | 0.1840 | unchanged |
+| max pairwise SSIM | 0.9490 | 0.9490 | unchanged |
+
+The mean barely moved. Chain-cylinder pixels are a small fraction of the frame at default chain dimensions (~25 mm radius, ~0.2 m visible length on the longest variants), so even with the new geometry, outline divergence (the dominant component) still drives the corpus-wide signal.
+
+### What did change: spring-bone variants no longer degenerate
+
+In runs 1 and 2, every spring-bone test_id (both settle and swing) produced exactly 0.7105 SSIM — the chain physics had no visible effect, so all 36 variants collapsed to "identical sphere render plus zero chain pixels", and only the sphere shading (unchanged across variants) mattered.
+
+With the chain-skinned cylinder active, spring-bone variants now produce variant-specific SSIM scores. Top-15 sample from run 3:
+
+| spring-bone test_id | run 3 SSIM | previously |
+|---|---|---|
+| `swing_springbone_joints_16` | 0.7043 | 0.7105 (degenerate) |
+| `swing_springbone_joints_8`  | 0.7043 | 0.7105 (degenerate) |
+| `swing_springbone_segment_0p1` | 0.7053 | 0.7105 (degenerate) |
+| `swing_springbone_segment_0p2` | 0.7065 | 0.7105 (degenerate) |
+| `swing_springbone_default` | 0.7105 (settled) | 0.7105 |
+| `swing_springbone_drag_0` | 0.7105 | 0.7105 |
+| `swing_springbone_drag_1` | 0.7105 | 0.7105 |
+
+Joints-16 and joints-8 variants diverge most (longer chains = more visible deformation). segment-0p1 and segment-0p2 next (longer segments = more chain pokes below the sphere). Drag and gravity variants stay clustered with default because the chain length is the same (default joint count + default segment length) and only the physics dynamics differ — and the dynamics signal is small at the chain widths and frame sizes we're rendering.
+
+This is the **first time the spring-bone corpus produces a non-degenerate cross-renderer signal**. Renderer differences in chain physics now propagate to pixels.
+
+### Net result
+
+- Three upstream fixes worth of work landed across the three runs.
+- Chain-mesh asset infrastructure activated.
+- Two new upstream issues filed during run 2 ([VRMMetalKit#185](https://github.com/arkavo-org/VRMMetalKit/issues/185), [three-vrm#1839](https://github.com/pixiv/three-vrm/issues/1839)) for outline-rendering bugs.
+- Spring-bone signal moved from "degenerate" to "parameter-sensitive."
+- Outline rendering remains the dominant divergence — pending the two outline issues.
+
+The corpus-wide mean SSIM is now anchored around 0.70, with the cluster structure dominated by 8 outline tests at the bottom (0.18–0.52) and the rest of the corpus distributed around 0.70–0.95. To meaningfully raise the corpus-wide mean, the outline bugs need to land first. The remaining MToon shading divergence (~0.69 cluster) is still gated on [VRMMetalKit#183](https://github.com/arkavo-org/VRMMetalKit/issues/183).
+
 ### Open questions
 
 - **Should the corpus's default SSIM threshold be relaxed below 0.985?** v1.0 standardizes on 0.985 per `docs/methodology.md`, but the data shows that's currently unreachable for any test in the corpus. Two interpretations:
