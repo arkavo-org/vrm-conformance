@@ -55,6 +55,19 @@ pub async fn push_png(file: &Utf8Path, test_id: &str, opts: &PushOptions) -> Res
 }
 
 pub async fn pull_png(url: &str, dest: &Utf8Path) -> Result<()> {
+    // The bootstrap-goldens flow writes file:// URLs into the manifest when
+    // running without S3 credentials, so reviewers can mirror locally even
+    // before the canonical S3 corpus exists. A pull from file:// is just a
+    // copy — no network, no auth.
+    if let Some(local_path) = url.strip_prefix("file://") {
+        let src = std::path::Path::new(local_path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent.as_std_path())?;
+        }
+        std::fs::copy(src, dest.as_std_path())?;
+        return Ok(());
+    }
+
     let (bucket, key) = parse_s3_url(url)?;
     let cfg = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let client = aws_sdk_s3::Client::new(&cfg);
@@ -62,7 +75,8 @@ pub async fn pull_png(url: &str, dest: &Utf8Path) -> Result<()> {
     let obj = client.get_object().bucket(bucket).key(key).send().await?;
     let bytes = obj.body.collect().await?.into_bytes();
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent.as_std_path())?;
+        let parent_std: &std::path::Path = parent.as_std_path();
+        std::fs::create_dir_all(parent_std)?;
     }
     std::fs::write(dest.as_std_path(), bytes)?;
     Ok(())

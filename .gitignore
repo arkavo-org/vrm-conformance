@@ -7,6 +7,12 @@ Cargo.lock.bak
 assets/generated/
 test-plans/generated/
 
+# Local-bootstrap render cache (scripts/bootstrap-goldens.sh output).
+# PNGs and intermediate assets live here; they're machine-specific and
+# never belong in git. The canonical S3-backed manifest lives at
+# goldens/manifest.json — that one is committed.
+goldens-cache/
+
 # Swift / Xcode (adapters/<adapter>/.build/ is also Swift)
 adapters/*/.build/
 adapters/*/.swiftpm/
@@ -46,6 +52,9 @@ site/.vite/
 # Local credentials
 .env
 .env.local
+
+# Claude Code per-project runtime state (lockfiles, scheduled task records)
+.claude/
 
 # fastlane
 fastlane/report.xml

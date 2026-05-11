@@ -254,6 +254,13 @@ pub fn run(cli: Cli) -> Result<()> {
             use crate::emit::emit_with_sidecars_spring_bone_swing;
             use crate::spring_bone::SpringBoneParams;
 
+            // Swing variants share semantics with settle variants — same
+            // chain config, different test-plan kinematics — so the
+            // emitted ID is prefixed `swing_` to keep them distinct in
+            // the cross-renderer goldens manifest. Without this, the
+            // bootstrap loop overwrites the settle render for every
+            // (test_id, renderer) pair.
+            let id = format!("swing_{id}");
             std::fs::create_dir_all(&output_dir)?;
             let stem = output_dir.join(&id);
             let mtoon = MToonParams::defaults(&id);
@@ -290,27 +297,40 @@ pub fn run(cli: Cli) -> Result<()> {
 
             let mut emitted = Vec::new();
             for (i, spring) in variants.iter().enumerate() {
+                // Each cell ID gets a `swing_` prefix so it can't collide
+                // with the settle-sweep variant of the same parameter
+                // axis when both are rendered into the same goldens
+                // manifest. The underlying SpringBoneParams stays as the
+                // sweep generator produced it (the chain config is
+                // identical between settle and swing — only the test plan
+                // differs); only the emitted asset's filename + the
+                // test plan's `id` field carry the prefix.
+                let swing_id = format!("swing_{}", spring.id);
                 if emit_json {
                     let evt = json!({
                         "event": "progress",
                         "op": "emit-springbone-swing-sweep",
                         "index": i,
                         "total": total,
-                        "id": spring.id
+                        "id": swing_id
                     });
                     eprintln!("{}", serde_json::to_string(&evt)?);
                 } else {
-                    eprintln!("[{:3}/{}] {}", i + 1, total, spring.id);
+                    eprintln!("[{:3}/{}] {}", i + 1, total, swing_id);
                 }
 
-                // Swing variants share the sweep ID with the settle-only
-                // sweep on purpose: the .vrm body is identical, only the
-                // test.yaml differs. The output dir should be different
-                // from emit-springbone-sweep's output dir or the .test.yaml
-                // files will overwrite. (`describe` documents this.)
-                let stem = output_dir.join(&spring.id);
-                let mtoon = MToonParams::defaults(&spring.id);
-                emit_with_sidecars_spring_bone_swing(&mtoon, spring, &stem)?;
+                // Underlying SpringBoneParams stays as the sweep generator
+                // produced it (chain config is identical between settle and
+                // swing). Only the emitted asset's filename + the test
+                // plan's `id` field get the `swing_` prefix — that's what
+                // keeps the cross-renderer goldens manifest from collapsing
+                // settle and swing into the same entry.
+                let mut prefixed = spring.clone();
+                prefixed.id = swing_id.clone();
+                prefixed.spring_name = format!("{swing_id}_chain");
+                let stem = output_dir.join(&swing_id);
+                let mtoon = MToonParams::defaults(&swing_id);
+                emit_with_sidecars_spring_bone_swing(&mtoon, &prefixed, &stem)?;
                 emitted.push(stem);
             }
 
