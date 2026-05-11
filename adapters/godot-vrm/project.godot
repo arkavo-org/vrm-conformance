@@ -1,0 +1,17 @@
+; Godot 4.x project descriptor for the godot-vrm conformance adapter.
+; Headless-only — no main scene, no display server. Spawned by the
+; vrm-godot-shim Rust binary, which passes a TCP loopback port as the
+; first positional user arg after `--`. The adapter reads that port,
+; connects, and runs the NDJSON request loop in src/tcp_session.gd.
+
+config_version=5
+
+[application]
+
+config/name="vrm-godot-vrm-adapter"
+config/description="V-Sekai/godot-vrm renderer adapter for arkavo-org/vrm-conformance. L1+L2: dispatch scaffold; renderer integration deferred to L3."
+
+[debug]
+
+settings/stdout/print_fps=false
+settings/stdout/verbose_stdout=false
