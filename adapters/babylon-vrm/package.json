@@ -1,0 +1,22 @@
+{
+  "name": "vrm-babylon-vrm-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Babylon-VRM-Loader renderer adapter for arkavo-org/vrm-conformance. L1+L2: JSON-RPC scaffold; renderer integration deferred to L3.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/main.ts",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

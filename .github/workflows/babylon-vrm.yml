@@ -1,0 +1,39 @@
+name: babylon-vrm
+
+# L1+L2 scaffold: no Rust deps, no Playwright, no real renderer integration.
+# Pure Node + TypeScript build + framing/contract tests. Mirrors the
+# three-vrm.yml structure but without the Playwright + asset-generator
+# bootstrap (those are only needed once L3 lands).
+#
+# No untrusted-input usage: this workflow does not read PR titles, commit
+# messages, issue bodies, or any other user-controlled fields into run:
+# commands.
+
+on:
+  pull_request:
+    paths:
+      - 'adapters/babylon-vrm/**'
+      - '.github/workflows/babylon-vrm.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'adapters/babylon-vrm/**'
+      - '.github/workflows/babylon-vrm.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install adapter deps
+        run: npm ci
+        working-directory: adapters/babylon-vrm
+      - name: Build adapter
+        run: npm run build
+        working-directory: adapters/babylon-vrm
+      - name: Run tests
+        run: npm test
+        working-directory: adapters/babylon-vrm
