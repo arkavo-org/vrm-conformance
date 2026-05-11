@@ -36,11 +36,10 @@ where
         Ok(b) => b,
         // `vrm_ops::stdio::read_message` signals stream EOF (zero-byte read
         // before any header line) as `MissingContentLength`. Treat that as a
-        // clean shutdown rather than an error.
+        // clean shutdown; other framing errors — including a truncated body
+        // surfacing as `Io(UnexpectedEof)` from `read_exact` — surface to
+        // the caller as `BridgeError::Framing` so silent corruption is loud.
         Err(FrameError::MissingContentLength) => return Ok(false),
-        Err(FrameError::Io(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-            return Ok(false)
-        }
         Err(e) => return Err(BridgeError::Framing(e)),
     };
     tcp.write_all(&body)?;
