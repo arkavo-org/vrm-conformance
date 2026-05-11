@@ -48,9 +48,11 @@ impl Drop for GodotChild {
 }
 
 /// Spawn Godot headless against `project_dir`, passing `port` as a
-/// positional user arg after `--`. Stdout/stderr are inherited from the
-/// parent so Godot's startup banner goes to the runner's stderr (where
-/// it's already tolerated for tracing).
+/// positional user arg after `--`. Godot's stdout is dropped — the shim's
+/// own stdout is the framed JSON-RPC channel, so we cannot let Godot's
+/// startup banner ("Godot Engine v4.6.2...") leak into it. Stderr is
+/// inherited so Godot's `push_error` lines and engine warnings reach the
+/// runner where they're already tolerated for tracing.
 pub fn spawn_godot(
     project_dir: &PathBuf,
     main_script: &str,
@@ -64,7 +66,7 @@ pub fn spawn_godot(
         .arg("--")
         .arg(port.to_string())
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
+        .stdout(Stdio::null())
         .stderr(Stdio::inherit());
     match cmd.spawn() {
         Ok(child) => Ok(GodotChild { child }),
