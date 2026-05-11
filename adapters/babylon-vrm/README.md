@@ -26,7 +26,7 @@ Filed upstream against `virtual-cast/babylon-vrm-loader` so the ecosystem signal
 
 ### Alternative third adapter
 
-[V-Sekai/godot-vrm](https://github.com/V-Sekai/godot-vrm) implements VRM 1.0 fully (VRMC_vrm, VRMC_materials_mtoon, VRMC_springBone, VRMC_node_constraint). It's the realistic next third adapter for vrm-conformance — Godot subprocess + GDScript-driven JSON-RPC over stdio. Different architecture from the JS adapters but viable; sketching `adapters/godot-vrm/` as a separate scaffold is a follow-up.
+[V-Sekai/godot-vrm](https://github.com/V-Sekai/godot-vrm) is now scaffolded at [`adapters/godot-vrm/`](../godot-vrm/) (L1+L2; renderer integration deferred to L3). Once L3 lands, the consensus diff will have its third independent renderer regardless of the babylon-vrm-loader VRM 1.0 timeline.
 
 Through L2, every operation returns a structured `Unimplemented` error (JSON-RPC code `-32000`):
 
