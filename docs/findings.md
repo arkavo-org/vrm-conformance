@@ -165,6 +165,50 @@ This is the **first time the spring-bone corpus produces a non-degenerate cross-
 
 The corpus-wide mean SSIM is now anchored around 0.70, with the cluster structure dominated by 8 outline tests at the bottom (0.18–0.52) and the rest of the corpus distributed around 0.70–0.95. To meaningfully raise the corpus-wide mean, the outline bugs need to land first. The remaining MToon shading divergence (~0.69 cluster) is still gated on [VRMMetalKit#183](https://github.com/arkavo-org/VRMMetalKit/issues/183).
 
+## Fourth run: VRMMetalKit 0.13.2 — outline regression closed
+
+**Trigger**: [VRMMetalKit 0.13.2](https://github.com/arkavo-org/VRMMetalKit/releases/tag/0.13.2) shipped within 3 hours of [#185](https://github.com/arkavo-org/VRMMetalKit/issues/185) being filed. Hotfix; root cause per the release notes: "the outline pass dispatched the inverted-hull geometry at world origin instead of at the rigid mesh node's world position" — side effect from 0.13.1's #181 fix touching the mesh-iteration path.
+
+Re-rendered through vrm-metal-kit only (three-vrm renders preserved from prior run; same hardware, same three-vrm version 3.5.0).
+
+### Corpus-wide before/after
+
+| Metric | Run 3 (0.13.1+chain) | Run 4 (0.13.2+chain) | Δ |
+|---|---|---|---|
+| consensus_passed | 0 / 80 | 0 / 80 | unchanged |
+| mean pairwise SSIM | 0.6994 | **0.7439** | **+0.0445** |
+| min pairwise SSIM | 0.1840 | **0.6313** | **+0.4473** |
+| max pairwise SSIM | 0.9490 | 0.9665 | +0.0175 |
+
+The 0.13.2 hotfix recovered **exactly** the ground lost by the 0.13.1 outline regression (the delta numbers are symmetric to run 1 → run 2). All three statistics returned to their original baseline values, modulo a tiny rounding band.
+
+### 8 outline tests no longer dominate divergence
+
+In run 3, `mtoon_outline_world_0p1` was the worst test at 0.1840 SSIM. In run 4, it's back to 0.6313 — still the worst test, but in the same range as MToon shading divergence. The 7 other outline tests have fallen entirely out of the top 15 most-divergent list. Top 15 in run 4 is now dominated by:
+
+- 1 outline test (`mtoon_outline_world_0p1` at 0.6313, baseline-equivalent)
+- 5 MToon shading tests (shadingShift / shadingToony / doubleSided)
+- 8 spring-bone variants (joints / segment / stiffness — parameter-sensitive thanks to the chain-skinned mesh from run 3)
+- 1 baseline (`mtoon_default`)
+
+### Cumulative four-run progression
+
+| Run | mean | min | upstream events |
+|---|---|---|---|
+| 1 | 0.7447 | 0.6313 | first corpus measurement |
+| 2 | 0.7002 | 0.1840 | #181/#182 closed; #185+#1839 surfaced |
+| 3 | 0.6994 | 0.1840 | chain-skinned mesh wired |
+| 4 | 0.7439 | 0.6313 | #185 closed in 0.13.2 |
+
+Three of the four issues filed against VRMMetalKit (#181, #182, #185) are now closed. Three remain open: #183 (MToon flat-white shading), [pixiv/three-vrm#1838](https://github.com/pixiv/three-vrm/issues/1838) (color-space hypothesis), [pixiv/three-vrm#1839](https://github.com/pixiv/three-vrm/issues/1839) (outline floods entire mesh).
+
+### Time-to-fix observed
+
+- #181 + #182 filed → fixed in 0.13.1: same-session turnaround (hours).
+- #185 filed during the 0.13.1 corpus re-run → fixed in 0.13.2: **3 hours**.
+
+When the upstream maintainer is engaged with the conformance suite, the loop closes faster than the test corpus can re-run. The total wall-clock from "find regression" → "merge fix" → "re-measure recovery" is now under a single project session.
+
 ### Open questions
 
 - **Should the corpus's default SSIM threshold be relaxed below 0.985?** v1.0 standardizes on 0.985 per `docs/methodology.md`, but the data shows that's currently unreachable for any test in the corpus. Two interpretations:

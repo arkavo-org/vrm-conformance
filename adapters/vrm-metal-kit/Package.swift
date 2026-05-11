@@ -21,13 +21,17 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
-        // 0.13.1 (commit 9404287) closes:
-        //   - arkavo-org/VRMMetalKit#181 (non-skinned mesh dropped when skin present)
-        //   - arkavo-org/VRMMetalKit#182 (VRM 1.0 spring chain over-expansion)
-        // Both were first filed by this conformance suite.
+        // 0.13.2 (commit d4bd52d) closes:
+        //   - #185 (outline pass dispatching at world origin — regression
+        //          introduced by 0.13.1's #181 fix; surfaced by this
+        //          suite's 0.13.1 corpus re-run within 3h of release)
+        // 0.13.1 (commit 9404287) closed:
+        //   - #181 (non-skinned mesh dropped when skin present)
+        //   - #182 (VRM 1.0 spring chain over-expansion)
+        // All four were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "94042878bbd3cc464b68da11d81ccf02d6733274"
+            revision: "d4bd52da1faec86ca06daafc052b6761a4f6f40c"
         ),
     ],
     targets: [
