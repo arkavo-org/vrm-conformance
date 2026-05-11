@@ -97,11 +97,22 @@ The pass count is unchanged because the v1.0 threshold (0.985) is still far abov
 
 The corpus-wide mean dropped −0.0445 specifically because of this 8-variant cluster. The release that closed #181 (non-skinned mesh dropped when skin present) appears to have introduced a regression in outline rendering — outline width and mode now produce visibly different pixels than before, and the divergence vs three-vrm is much larger than at the old pin.
 
-### New finding: outline-rendering regression in 0.13.1
+### New findings: two outline bugs surfaced together
 
-This is a measurable behavioral change in VRMMetalKit between 50cfd7d → 9404287. Worth filing upstream as a new issue (likely a side effect of the #181 fix touching the pipeline state cache, or the outline pass's interaction with the new mixed-mesh draw order). The corpus surfaces it automatically: same VRM, same test plan, same three-vrm version, different VRMMetalKit produces materially different outline pixels.
+This is a measurable behavioral change in VRMMetalKit between 50cfd7d → 9404287. The corpus surfaces it automatically: same VRM, same test plan, same three-vrm version, different VRMMetalKit produces materially different outline pixels. Pixel sampling reveals *both* renderers diverge from MToon-1.0's outline-rendering spec:
 
-This is also exactly why we pin the upstream revision in `Package.swift` rather than tracking `main`: regressions like this would otherwise propagate silently.
+| variant | vrm-metal-kit centerline | three-vrm centerline |
+|---|---|---|
+| `mtoon_outline_none` | `(255, 255, 255)` (flat white, #183) | `(53, 53, 53)` (shaded gray) |
+| `mtoon_outline_world_0p1` | `(255, 255, 255)` (outline invisible) | **`(0, 0, 0)` (outline color floods entire mesh)** |
+
+The expected per [VRMC_materials_mtoon-1.0 §4.2 "Outline"](https://github.com/vrm-c/vrm-specification/blob/master/specification/VRMC_materials_mtoon-1.0/README.md) is a thin silhouette band (~6 pixels at this asset's camera distance for `0.01 m` width). Neither renderer produces that.
+
+Both filed:
+- [arkavo-org/VRMMetalKit#185](https://github.com/arkavo-org/VRMMetalKit/issues/185) — outline rendering regression in 0.13.1; outline pass appears to drop entirely
+- [pixiv/three-vrm#1839](https://github.com/pixiv/three-vrm/issues/1839) — outline color floods entire mesh interior instead of producing a silhouette band
+
+This is also exactly why we pin the upstream revision in `Package.swift` rather than tracking `main`: regressions like the VRMMetalKit one would otherwise propagate silently. And it demonstrates the conformance suite's payoff structurally: same data surfaced two different upstream bugs in two different renderers, neither of which is visible to that renderer's own unit tests.
 
 ### What this run did and didn't validate
 
