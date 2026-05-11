@@ -59,6 +59,56 @@ Even the closest renderer pair in the entire corpus (`max=0.9665`) is well below
 
 These two issues together cover the dominant divergence pattern for MToon shading. If one or both lands, the corpus-wide mean SSIM should rise substantially and the threshold gap close.
 
+## Second run: VRMMetalKit 0.13.1
+
+**Date**: 2026-05-11, vrm-conformance commit (pending; this section commits with the version bump). Same hardware (M4 Max), same three-vrm version (3.5.0), only the VRMMetalKit revision changed.
+
+**Trigger**: [VRMMetalKit 0.13.1](https://github.com/arkavo-org/VRMMetalKit/releases/tag/0.13.1) shipped, closing two of the three bugs filed by this suite (#181 + #182, in [PR #184](https://github.com/arkavo-org/VRMMetalKit/pull/184)). Re-rendering through the corpus measures the delta.
+
+### Corpus-wide before/after
+
+| Metric | Baseline (50cfd7d) | 0.13.1 (9404287) | Delta |
+|---|---|---|---|
+| consensus_passed | 0 / 80 | 0 / 80 | unchanged |
+| mean pairwise SSIM | 0.7447 | **0.7002** | **−0.0445** |
+| min pairwise SSIM | 0.6313 | **0.1840** | **−0.4473** |
+| max pairwise SSIM | 0.9665 | 0.9490 | −0.0175 |
+
+The pass count is unchanged because the v1.0 threshold (0.985) is still far above the corpus-wide max. But the distribution shifted significantly — and not all in the direction we'd expect.
+
+### Pattern: two clusters move in opposite directions
+
+**MToon shading (~44 variants): essentially unchanged.** `shadingShift_neg0p5` stayed at 0.6893. `shadingShift_neg0p2` stayed at 0.7013. The full `shadingToony_*` cluster stayed at 0.708x. Expected, because the release notes don't mention #183 (the flat-white sphere root cause for MToon-default rendering) and our corpus's MToon shading divergence is dominated by that single cause.
+
+**Spring-bone (~36 settle + swing variants): unchanged at 0.7105.** Expected — visible signal still requires the chain-skinned-mesh asset-side wiring (the infrastructure is in `crates/vrm-asset-generator/src/chain_mesh.rs` but deferred until #181 lands), and even though #181 is now fixed upstream we haven't re-wired chain_mesh into emit yet.
+
+**Outline rendering (8 variants): substantial regression.** The 8 outline test_ids now occupy the top 8 worst slots:
+
+| test_id | baseline | 0.13.1 | Δ |
+|---|---|---|---|
+| `mtoon_outline_world_0p1` | 0.6313 | **0.1840** | −0.4473 |
+| `mtoon_outline_world_0p05` | (n/a in top 15) | **0.3588** | (large drop) |
+| `mtoon_outline_screen_0p1` | (n/a in top 15) | **0.4028** | (large drop) |
+| `mtoon_outline_world_0p03` | (n/a in top 15) | **0.4330** | (large drop) |
+| `mtoon_outline_screen_0p05` | (n/a in top 15) | **0.4711** | (large drop) |
+| `mtoon_outline_screen_0p03` | (n/a in top 15) | **0.4967** | (large drop) |
+| `mtoon_outline_world_0p01` | (n/a in top 15) | **0.5018** | (large drop) |
+| `mtoon_outline_screen_0p01` | (n/a in top 15) | **0.5223** | (large drop) |
+
+The corpus-wide mean dropped −0.0445 specifically because of this 8-variant cluster. The release that closed #181 (non-skinned mesh dropped when skin present) appears to have introduced a regression in outline rendering — outline width and mode now produce visibly different pixels than before, and the divergence vs three-vrm is much larger than at the old pin.
+
+### New finding: outline-rendering regression in 0.13.1
+
+This is a measurable behavioral change in VRMMetalKit between 50cfd7d → 9404287. Worth filing upstream as a new issue (likely a side effect of the #181 fix touching the pipeline state cache, or the outline pass's interaction with the new mixed-mesh draw order). The corpus surfaces it automatically: same VRM, same test plan, same three-vrm version, different VRMMetalKit produces materially different outline pixels.
+
+This is also exactly why we pin the upstream revision in `Package.swift` rather than tracking `main`: regressions like this would otherwise propagate silently.
+
+### What this run did and didn't validate
+
+- **Did validate**: the two upstream fixes (#181 + #182) are present at 0.13.1 — `swift test` is clean, the adapter binary boots, spring-bone counts are no longer inflated (TBD — needs a separate verification; the corpus signal doesn't reflect this directly since the chain isn't visible).
+- **Did NOT validate end-to-end yet**: visible chain-skinned-mesh diffing. With #181 fixed, the chain_mesh.rs infrastructure in this repo can be re-wired into `emit_vrm_with_spring_bone`. That's a separate piece of work — it unblocks the spring-bone signal that's currently degenerate.
+- **Surfaced**: an outline-rendering regression that wasn't visible in any per-renderer unit test. Only the cross-renderer signal catches it.
+
 ### Open questions
 
 - **Should the corpus's default SSIM threshold be relaxed below 0.985?** v1.0 standardizes on 0.985 per `docs/methodology.md`, but the data shows that's currently unreachable for any test in the corpus. Two interpretations:

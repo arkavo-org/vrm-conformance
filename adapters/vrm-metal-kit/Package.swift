@@ -20,9 +20,14 @@ let package = Package(
         // Pinned to a specific upstream revision so renderer regressions can be
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
+        //
+        // 0.13.1 (commit 9404287) closes:
+        //   - arkavo-org/VRMMetalKit#181 (non-skinned mesh dropped when skin present)
+        //   - arkavo-org/VRMMetalKit#182 (VRM 1.0 spring chain over-expansion)
+        // Both were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "50cfd7dd4b8d64a6e4f77f6f9e0fa22c5aaaf4ae"
+            revision: "94042878bbd3cc464b68da11d81ccf02d6733274"
         ),
     ],
     targets: [
