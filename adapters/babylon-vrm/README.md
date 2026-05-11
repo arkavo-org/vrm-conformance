@@ -16,7 +16,17 @@ The first finding from consensus diff ([arkavo-org/VRMMetalKit#183](https://gith
 |---|---|
 | L1 — package skeleton                         | implemented |
 | L2 — JSON-RPC stdio framing + dispatcher      | implemented (all ops return `Unimplemented`) |
-| L3 — Phase 1 ops against Babylon-VRM-Loader   | not yet |
+| L3 — Phase 1 ops against Babylon-VRM-Loader   | **upstream-blocked** (see below) |
+
+### L3 blocker
+
+`babylon-vrm-loader` v2.0 (current `^5.19.0` Babylon line) **does not support VRM 1.0**. From its [README](https://github.com/virtual-cast/babylon-vrm-loader/blob/master/README.md): "Supports `.vrm` v0.x file loading … TODO VRM v1.0 file loading." vrm-conformance's entire generated test corpus is VRM 1.0 (VRMC_vrm extension, VRMC_materials_mtoon, VRMC_springBone), so the loader can't ingest any asset this project produces. The library is otherwise mature and would be the natural third adapter once VRM 1.0 lands; until then, L3 here can't proceed.
+
+Filed upstream against `virtual-cast/babylon-vrm-loader` so the ecosystem signal is visible. When that lands, the L3 sketch below applies directly.
+
+### Alternative third adapter
+
+[V-Sekai/godot-vrm](https://github.com/V-Sekai/godot-vrm) implements VRM 1.0 fully (VRMC_vrm, VRMC_materials_mtoon, VRMC_springBone, VRMC_node_constraint). It's the realistic next third adapter for vrm-conformance — Godot subprocess + GDScript-driven JSON-RPC over stdio. Different architecture from the JS adapters but viable; sketching `adapters/godot-vrm/` as a separate scaffold is a follow-up.
 
 Through L2, every operation returns a structured `Unimplemented` error (JSON-RPC code `-32000`):
 
