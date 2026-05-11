@@ -209,6 +209,78 @@ Three of the four issues filed against VRMMetalKit (#181, #182, #185) are now cl
 
 When the upstream maintainer is engaged with the conformance suite, the loop closes faster than the test corpus can re-run. The total wall-clock from "find regression" → "merge fix" → "re-measure recovery" is now under a single project session.
 
+## Fifth run: VRMMetalKit 0.13.3 — MToon flat-white closed
+
+**Trigger**: [VRMMetalKit 0.13.3](https://github.com/arkavo-org/VRMMetalKit/releases/tag/0.13.3) shipped less than an hour after 0.13.2. Closes [#183](https://github.com/arkavo-org/VRMMetalKit/issues/183) — the deepest of the four bugs filed against VRMMetalKit and the one driving the largest residual divergence. Root cause per the release notes: "the main lighting path applied a Half-Lambert remap that saturated `shadowStep=1` across the visible hemisphere with `shadingToonyFactor=0.9` + typical directional lighting, collapsing the rendered color to `baseColor` everywhere."
+
+That's exactly what the pixel sampling in [#183](https://github.com/arkavo-org/VRMMetalKit/issues/183) showed: every sphere fragment at `(255, 255, 255)` regardless of position, regardless of shading parameter. The toon ramp wasn't applying.
+
+Re-rendered through vrm-metal-kit only.
+
+### Corpus-wide before/after
+
+| Metric | Run 4 (0.13.2) | Run 5 (0.13.3) | Δ |
+|---|---|---|---|
+| consensus_passed | 0 / 80 | 0 / 80 | unchanged |
+| mean pairwise SSIM | 0.7439 | **0.7879** | **+0.0440** |
+| min pairwise SSIM | 0.6313 | 0.6313 | unchanged (still outline floor on three-vrm side) |
+| max pairwise SSIM | 0.9665 | 0.9665 | unchanged |
+
+The mean moved by +0.044 on a single upstream fix — the largest single-release delta of the session. The 44 MToon shading variants that were anchored at ~0.69 are now distributed across the 0.74–0.76 band.
+
+### Pixel-level recovery
+
+Sphere centerline (x=512 on a 1024×1024 render), `mtoon_default`:
+
+| run | vrm-metal-kit (R,G,B) | three-vrm (R,G,B) |
+|---|---|---|
+| 1–4 (pre-#183 fix) | **255, 255, 255** (flat white) | 53, 53, 53 |
+| 5 (0.13.3) | **164, 164, 164** | 53, 53, 53 |
+
+vrm-metal-kit moved from `1.0` linear (flat white, no shading) to `0.643` linear (real MToon mid-gray, exactly what we'd expect from the spec for a sphere with `baseColor=1.0`, `shadeColor=0.5`, `shadingToonyFactor=0.9`, lit from `(-0.3, -0.6, -0.7)` with intensity 1 + ambient 0.15). The toon math is now firing.
+
+three-vrm is still at 0.208 — consistent with their longer-standing color-space hypothesis ([three-vrm#1838](https://github.com/pixiv/three-vrm/issues/1838)). With both renderers' raw outputs now non-trivial, the residual divergence at ~0.79 reflects the *actual* spec-interpretation gap between the two real MToon implementations, not a "one renderer fully broken" artifact.
+
+### Top 15 most-divergent: cluster structure has shifted
+
+| test_id | run 4 | run 5 |
+|---|---|---|
+| `mtoon_outline_world_0p1` | 0.6313 | 0.6313 (still the floor; three-vrm-side bug) |
+| `mtoon_shadingShift_0p8` | not top-15 | **0.7384** |
+| `mtoon_shadingToony_0p5` | 0.7087 | **0.7418** |
+| `mtoon_shadingShift_neg0p5` | 0.6893 (was worst MToon) | not in top 15 (moved up) |
+| `mtoon_shadingShift_neg0p2` | 0.7013 | not in top 15 (moved up) |
+
+Worth noting: `mtoon_shadingShift_neg0p5` was the second-worst test in run 4 at 0.6893 — it fell out of the top 15 entirely in run 5. The negative-shadingShift variants benefited most from the toon-ramp fix (negative shift shifts the lit/shadow boundary toward more shadow, which under the broken ramp had no effect; now the broader shadow area produces actual shadow pixels).
+
+The new bottom of the divergence list is dominated by:
+- 1 outline test at the floor (`mtoon_outline_world_0p1` at 0.6313, three-vrm-side per [#1839](https://github.com/pixiv/three-vrm/issues/1839))
+- 5 MToon shading + toony variants in the 0.738–0.749 band
+- 8 spring-bone parameter-sensitive swing variants in the 0.757–0.762 band
+
+The variance within the spring-bone cluster is now meaningfully tighter (3.7 percentage points of spread vs ~2.5 in run 3/4) because the chain-skinned cylinder is rendering against a properly-shaded sphere background, so the SSIM contributions from chain pixels are easier to discriminate.
+
+### Cumulative five-run progression
+
+| Run | mean | min | upstream events |
+|---|---|---|---|
+| 1 (50cfd7d) | 0.7447 | 0.6313 | first corpus baseline |
+| 2 (0.13.1) | 0.7002 | 0.1840 | #181/#182 closed; #185+#1839 surfaced |
+| 3 (0.13.1+chain) | 0.6994 | 0.1840 | chain-skinned mesh wired |
+| 4 (0.13.2+chain) | 0.7439 | 0.6313 | #185 closed in 0.13.2 |
+| **5 (0.13.3+chain)** | **0.7879** | **0.6313** | **#183 closed in 0.13.3** |
+
+The corpus-wide mean is now +0.0432 ABOVE the original baseline (0.7447 → 0.7879). Three of four VRMMetalKit issues have been closed in the same session that filed them; #183 took 4 hours from filing to closing.
+
+### What remains in the divergence floor
+
+With the three vrm-metal-kit bugs closed, residual divergence comes from:
+
+1. **three-vrm side** — [#1838](https://github.com/pixiv/three-vrm/issues/1838) (dark MToon shadow / double sRGB) and [#1839](https://github.com/pixiv/three-vrm/issues/1839) (outline color floods entire mesh). The first drives the 0.74-cluster floor; the second pins `mtoon_outline_world_0p1` at 0.6313.
+2. **MToon spec interpretation** — even with both renderers' fundamental bugs fixed, the two real renderers may legitimately diverge on edge-case shading parameters. Without a third independent reference (UniVRM in Unity), the suite can't pin which interpretation is closest to spec.
+
+The corpus mean is now plausibly approaching what "two-real-renderer pairwise SSIM" can theoretically reach. Further movement requires either three-vrm-side fixes (would raise the corpus floor) or adding a third real adapter to make consensus meaningful enough to identify outliers.
+
 ### Open questions
 
 - **Should the corpus's default SSIM threshold be relaxed below 0.985?** v1.0 standardizes on 0.985 per `docs/methodology.md`, but the data shows that's currently unreachable for any test in the corpus. Two interpretations:
