@@ -84,3 +84,11 @@ Lives in a separate plan. Implementation outline:
 5. `Engine.physics_ticks_per_second = 60` + spring-bone reset via `addons/godot-vrm`.
 
 `scripts/bootstrap-goldens.sh` gains a `SKIP_GODOT_VRM` knob and a `render_with_adapter "godot-vrm" "<version>" "$ROOT/target/release/vrm-godot-shim"` call once L3 produces real renders.
+
+## Bootstrap wiring (L3)
+
+`scripts/bootstrap-goldens.sh` will gain a `SKIP_GODOT_VRM` env knob and a
+`render_with_adapter "godot-vrm" "<version>" "$ROOT/target/release/vrm-godot-shim"`
+call once L3 produces real renders. Not wired during L1+L2 because Phase 1
+ops return `Unimplemented` and the runner cannot complete `execute-test-plan`
+against this adapter yet.
