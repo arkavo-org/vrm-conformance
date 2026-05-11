@@ -1254,3 +1254,45 @@ git commit -m "docs(adapters/godot-vrm): note L3 bootstrap-script wiring"
 - `docs/findings.md` entries from a three-renderer consensus run.
 
 A separate plan (`YYYY-MM-DD-adapter-godot-vrm-L3.md`) covers those.
+
+## Spike result
+
+- Date: 2026-05-11
+- Godot version: `4.6.2.stable.official.71f334935` (Homebrew cask `godot` — 4.3 not directly available; cask only ships latest stable, which is >= 4.3 so the minimum-version gate is satisfied)
+- Outcome: **BLOCKED — byte-safe GDScript stdio not achievable on this Godot.** Two independent failures, either of which alone is fatal to the framing assumption:
+
+  1. **`OS.write_buffer_to_stdout` does not exist.** The literal API call named in the plan's pre-flight assumption is gone (or never landed in this release line). Authoritative evidence — dumping the extension API and grepping `OS` for any stdio/print/write methods returns only the read side and metadata getters:
+
+     ```
+     get_stderr_type
+     get_stdin_type
+     get_stdout_type
+     is_stdout_verbose
+     read_buffer_from_stdin
+     read_string_from_stdin
+     ```
+
+     Running the plan's literal spike script (`OS.write_buffer_to_stdout(buf)`) produces:
+
+     ```
+     SCRIPT ERROR: Parse Error: Static function "write_buffer_to_stdout()" not found in base "GDScriptNativeClass".
+               at: GDScript::reload (/tmp/godot-stdio-spike.gd:6)
+     ERROR: Failed to load script "/tmp/godot-stdio-spike.gd" with error "Parse error".
+     ```
+
+  2. **Engine prints an unconditional banner to stdout that pollutes the wire.** Substituting the only available stdout-write primitive (`printraw`) and running `printf 'hello' | godot --headless --script /tmp/spike.gd | xxd` produced:
+
+     ```
+     00000000: 476f 646f 7420 456e 6769 6e65 2076 342e  Godot Engine v4.
+     00000010: 362e 322e 7374 6162 6c65 2e6f 6666 6963  6.2.stable.offic
+     00000020: 6961 6c2e 3731 6633 3334 3933 3520 2d20  ial.71f334935 - 
+     00000030: 6874 7470 733a 2f2f 676f 646f 7465 6e67  https://godoteng
+     00000040: 696e 652e 6f72 670a 0a68 656c 6c6f       ine.org..hello
+     ```
+
+     50 bytes of banner precede the 5 expected bytes. The `--quiet` flag suppresses the banner but *also* suppresses `printraw` output, so the same command with `--quiet` produced empty stdout — there is no flag combination on 4.6.2 stable that yields banner-free, byte-exact stdout in pure GDScript.
+
+- **Decision: STOP.** Per this plan's pre-flight assumption section, the correct response is to revise the plan to introduce a host-language framing shim (Rust or Node child process that owns the LSP `Content-Length` wire and forwards decoded JSON to Godot over a side channel — e.g., a temp-file mailbox, a named pipe, or a TCP loopback socket). The shim itself is well-trodden territory; the pivot just shouldn't happen mid-implementation.
+- **Tasks 2–12 should not be executed against the GDScript-direct-stdio design.** A follow-up plan (`2026-05-11-adapter-godot-vrm-scaffold-v2.md` or a revision of this file) should re-specify the wire-language and operation-dispatch boundary before Task 2 starts.
+- Throwaway spike artifacts (`/tmp/godot-stdio-spike.gd`, `/tmp/godot-stdio-probe.gd`, `/tmp/godot-printraw-spike.gd`, `/tmp/extension_api.json`) are not committed.
+
