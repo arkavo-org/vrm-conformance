@@ -54,11 +54,41 @@ pub enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Run N-way consensus diff over renders from multiple renderers.
+    /// Each `--render <name>=<png>` pair contributes one renderer to the
+    /// consensus pool. The test plan's `diff.threshold` is used unless
+    /// overridden with `--threshold`. Exits non-zero when any renderer
+    /// is flagged as an outlier (i.e., disagrees with one or more peers
+    /// at the SSIM threshold).
+    ConsensusDiff {
+        #[arg(long)]
+        plan: Utf8PathBuf,
+        /// One `name=path` pair per renderer. Repeat the flag. The same
+        /// PNG dimensions are required across all renderers.
+        #[arg(long = "render", value_parser = parse_named_path)]
+        renders: Vec<(String, Utf8PathBuf)>,
+        /// Override the plan's `diff.threshold`. Optional.
+        #[arg(long)]
+        threshold: Option<f32>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the operation catalog.
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
         format: DescribeFormat,
     },
+}
+
+/// Parse one `name=path` value for the consensus-diff --render flag.
+fn parse_named_path(s: &str) -> Result<(String, Utf8PathBuf), String> {
+    let (name, path) = s.split_once('=').ok_or_else(|| {
+        format!("expected name=path, got '{s}' (missing '=' separator)")
+    })?;
+    if name.is_empty() {
+        return Err(format!("empty renderer name in '{s}'"));
+    }
+    Ok((name.into(), Utf8PathBuf::from(path)))
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -178,6 +208,56 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::ConsensusDiff {
+            plan,
+            renders,
+            threshold,
+            json: emit_json,
+        } => {
+            use vrm_diff_engine::consensus::{consensus_diff, RendererRender};
+
+            let plan_value = load_plan(&plan)?;
+            let effective_threshold = threshold.unwrap_or(plan_value.diff.threshold);
+
+            let render_refs: Vec<RendererRender<'_>> = renders
+                .iter()
+                .map(|(name, path)| RendererRender {
+                    name: name.clone(),
+                    png_path: path.as_path(),
+                })
+                .collect();
+
+            let result =
+                consensus_diff(&plan_value.id, &render_refs, effective_threshold)?;
+
+            if emit_json {
+                println!("{}", serde_json::to_string(&result)?);
+            } else {
+                println!(
+                    "{}: {} renderer(s), threshold={:.4}",
+                    result.test_id,
+                    result.renderers.len(),
+                    result.threshold,
+                );
+                for (i, name) in result.renderers.iter().enumerate() {
+                    println!(
+                        "  {name}: agreement={}/{}",
+                        result.agreement_count[i],
+                        result.renderers.len() - 1
+                    );
+                }
+                if result.consensus_passed {
+                    println!("  consensus: PASS");
+                } else {
+                    println!("  consensus: FAIL  outliers={:?}", result.outliers);
+                }
+            }
+
+            if !result.consensus_passed {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-runner",
@@ -252,6 +332,37 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "ssim_threshold": { "type": "number" },
                                 "ssim_passed": { "type": "boolean" },
                                 "properties": { "type": "array" }
+                            }
+                        }
+                    },
+                    "consensus-diff": {
+                        "summary": "N-way cross-renderer consensus diff. Each --render name=path contributes one renderer to the pool; outputs the full SSIM matrix, per-renderer agreement counts, and outlier names. Exit non-zero when any renderer is an outlier (disagrees with a peer at threshold).",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["plan", "renders"],
+                            "properties": {
+                                "plan": { "type": "string" },
+                                "renders": {
+                                    "type": "array",
+                                    "items": { "type": "string", "description": "name=path" },
+                                    "minItems": 2
+                                },
+                                "threshold": { "type": "number" }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "test_id": { "type": "string" },
+                                "threshold": { "type": "number" },
+                                "renderers": { "type": "array", "items": { "type": "string" } },
+                                "ssim_matrix": {
+                                    "type": "array",
+                                    "items": { "type": "array", "items": { "type": "number" } }
+                                },
+                                "agreement_count": { "type": "array", "items": { "type": "integer" } },
+                                "outliers": { "type": "array", "items": { "type": "string" } },
+                                "consensus_passed": { "type": "boolean" }
                             }
                         }
                     }
