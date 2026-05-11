@@ -40,8 +40,16 @@ static func run(socket: StreamPeerTCP) -> void:
                 }
             else:
                 var req: Dictionary = parsed
+                var raw_id: Variant = req.get("id", null)
+                # GDScript's JSON.parse_string returns all numbers as float;
+                # coerce whole-valued floats back to int so peers using strict
+                # integer id types (e.g. the Rust runner's `JsonRpcResponse.id: u64`)
+                # can deserialize the response.
+                var id_out: Variant = raw_id
+                if typeof(raw_id) == TYPE_FLOAT and raw_id == floor(raw_id):
+                    id_out = int(raw_id)
                 resp = Operations.dispatch(
-                    req.get("id", null),
+                    id_out,
                     req.get("method", ""),
                     req.get("params", {}),
                 )
