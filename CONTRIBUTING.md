@@ -93,6 +93,18 @@ This reads `goldens/manifest.json`, downloads each entry to `/tmp/goldens-mirror
 
 Both `s3://` and `file://` URLs are supported in the manifest — the pull is a real S3 GetObject in the former case and a local file copy in the latter, so the same workflow works against both a published corpus and a freshly-bootstrapped local one.
 
+## Corpus-wide consensus report
+
+After bootstrapping, run the consensus report to find every test_id where renderers diverge:
+
+```bash
+./scripts/consensus-report.sh
+```
+
+This walks the manifest, invokes `vrm-runner consensus-diff` for every test_id, and writes a single JSON report at `goldens-cache/consensus-report.json` plus a human-readable summary on stdout (pairwise SSIM stats + top-N most-divergent test_ids).
+
+Findings from running it are recorded in [`docs/findings.md`](./docs/findings.md). Each top-divergent test_id is a candidate for an upstream issue (or a methodology refinement when the divergence is legitimate).
+
 Then drive the runner's diff against a local render:
 
 ```bash
