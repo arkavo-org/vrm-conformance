@@ -3188,6 +3188,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vrm-godot-shim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "vrm-ops",
+]
+
+[[package]]
 name = "vrm-mock-renderer"
 version = "0.1.0"
 dependencies = [

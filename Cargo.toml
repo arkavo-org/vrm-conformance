@@ -7,6 +7,7 @@ members = [
     "crates/vrm-asset-generator",
     "crates/vrm-diff-engine",
     "crates/vrm-mock-renderer",
+    "crates/vrm-godot-shim",
     "crates/vrm-runner",
     "crates/vrm-s3",
 ]
