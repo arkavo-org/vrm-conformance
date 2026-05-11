@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use vrm_godot_shim::bridge::{forward_one, BridgeError};
+use vrm_godot_shim::bridge::forward_one;
 use vrm_godot_shim::child::{accept_with_timeout, bind_ephemeral, spawn_godot, ChildError};
 
 const GODOT_ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -47,7 +47,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         match forward_one(&mut stdin_lock, &mut stdout_lock, &mut tcp) {
             Ok(true) => continue,
             Ok(false) => break,
-            Err(BridgeError::PeerClosed) => break,
             Err(e) => return Err(e.into()),
         }
     }
