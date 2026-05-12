@@ -207,6 +207,37 @@ static func _find_vrm_secondary(node: Node) -> Node:
             return found
     return null
 
+func step_physics(params: Dictionary) -> Dictionary:
+    if vrm_secondary == null:
+        # Adapter loaded a VRM without spring bones — treat as no-op for protocol
+        # compliance (cf. vrm-mock-renderer's no-op behavior).
+        return _ok({})
+    var dt_seconds: float = params.get("dt_seconds", 1.0/60.0)
+    var count: int = params.get("count", 1)
+    for i in count:
+        vrm_secondary.do_process(dt_seconds)
+    return _ok({})
+
+func reset_physics(params: Dictionary) -> Dictionary:
+    if vrm_secondary == null:
+        return _ok({})
+    var settle_steps: int = params.get("settle_steps", 30)
+    # _ready() alone doesn't fully reset — the addon writes bone pose
+    # overrides that survive across calls and _ready() re-reads from the
+    # current (overridden) skeleton pose. Clear overrides + write rest
+    # bones first, then re-initialize chains, then run settle steps.
+    var skel: Skeleton3D = vrm_secondary.get_node_or_null(vrm_secondary.skeleton) as Skeleton3D
+    if skel != null:
+        skel.clear_bones_global_pose_override()
+        for bone_i in range(skel.get_bone_count()):
+            var rest_tx := skel.get_bone_rest(bone_i)
+            skel.set_bone_pose_rotation(bone_i, rest_tx.basis.get_rotation_quaternion())
+            skel.set_bone_pose_position(bone_i, rest_tx.origin)
+    vrm_secondary._ready()
+    for i in settle_steps:
+        vrm_secondary.do_process(1.0/60.0)
+    return _ok({})
+
 func _ok(result: Variant) -> Dictionary:
     return { "ok": true, "result": result }
 
