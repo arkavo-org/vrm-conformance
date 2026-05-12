@@ -28,13 +28,6 @@ fn workspace_root() -> PathBuf {
     manifest_dir.parent().unwrap().parent().unwrap().to_path_buf()
 }
 
-struct Exchange {
-    request_id: i64,
-    request: Vec<u8>,
-    expected_code: i64,
-    expected_phase: Option<&'static str>,
-}
-
 fn frame(body: &[u8]) -> Vec<u8> {
     let mut out = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
     out.extend_from_slice(body);
@@ -71,49 +64,27 @@ fn read_framed(mut r: impl Read) -> Vec<u8> {
 
 #[test]
 #[ignore]
-fn contract_cases_round_trip_through_real_godot() {
-    let exchanges: Vec<Exchange> = vec![
-        Exchange {
-            request_id: 1,
-            request: br#"{"jsonrpc":"2.0","id":1,"method":"definitely_not_a_method","params":{}}"#.to_vec(),
-            expected_code: -32601,
-            expected_phase: None,
-        },
-        Exchange {
-            request_id: 2,
-            request: br#"{"jsonrpc":"2.0","id":2,"method":"load_vrm","params":{"path":"/tmp/x.vrm"}}"#.to_vec(),
-            expected_code: -32000,
-            expected_phase: Some("L3 (godot-vrm integration deferred)"),
-        },
-        Exchange {
-            request_id: 3,
-            request: br#"{"jsonrpc":"2.0","id":3,"method":"render","params":{}}"#.to_vec(),
-            expected_code: -32000,
-            expected_phase: Some("L3 (godot-vrm integration deferred)"),
-        },
-        Exchange {
-            request_id: 4,
-            request: br#"{"jsonrpc":"2.0","id":4,"method":"set_humanoid_pose","params":{}}"#.to_vec(),
-            expected_code: -32000,
-            expected_phase: Some("Phase 2"),
-        },
-        Exchange {
-            request_id: 5,
-            request: br#"{"jsonrpc":"2.0","id":5,"method":"set_environment","params":{}}"#.to_vec(),
-            expected_code: -32000,
-            expected_phase: Some("v1.x"),
-        },
-        Exchange {
-            request_id: 6,
-            request: br#"{"jsonrpc":"2.0","id":6,"method":"set_expression","params":{}}"#.to_vec(),
-            expected_code: -32000,
-            expected_phase: Some("Phase 3"),
-        },
-    ];
+fn phase1_ops_render_a_real_vrm() {
+    use std::path::Path;
 
     let project_dir = workspace_root().join("adapters").join("godot-vrm");
-    assert!(project_dir.join("project.godot").is_file(),
-        "expected project.godot at {}", project_dir.display());
+    assert!(project_dir.join("project.godot").is_file());
+
+    // Generate a sample VRM the test will load.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let asset_dir = tmp.path();
+    let status = std::process::Command::new("cargo")
+        .arg("run").arg("--release").arg("-q")
+        .arg("-p").arg("vrm-asset-generator").arg("--")
+        .arg("emit-default")
+        .arg("--id").arg("contract_l3")
+        .arg("--output-dir").arg(asset_dir)
+        .current_dir(workspace_root())
+        .status().expect("emit-default");
+    assert!(status.success(), "emit-default failed");
+    let vrm_path = asset_dir.join("contract_l3.vrm");
+    assert!(vrm_path.exists(), "VRM not generated");
+    let out_png = asset_dir.join("contract_l3.png");
 
     let mut child = Command::new(shim_binary())
         .env("GODOT_VRM_ADAPTER_DIR", &project_dir)
@@ -123,42 +94,76 @@ fn contract_cases_round_trip_through_real_godot() {
         .spawn()
         .expect("spawn shim");
 
-    let mut stdin = child.stdin.take().expect("shim stdin");
-    let mut stdout = child.stdout.take().expect("shim stdout");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
 
-    for ex in &exchanges {
-        stdin.write_all(&frame(&ex.request)).expect("write request");
-        stdin.flush().expect("flush");
+    let calls: Vec<(i64, &str, serde_json::Value)> = vec![
+        (1, "load_vrm", serde_json::json!({"path": vrm_path.to_string_lossy()})),
+        (2, "set_camera", serde_json::json!({"position":[0,1.4,1.5],"target":[0,1.4,0],"up":[0,1,0],"fov_degrees":30})),
+        (3, "set_lighting", serde_json::json!({"directional":{"dir":[-0.3,-0.6,-0.7],"color":[1,1,1],"intensity":1},"ambient":{"color":[0.5,0.5,0.5],"intensity":0.3},"cast_shadows":false,"receive_shadows":false})),
+        (4, "set_post_processing", serde_json::json!({"tone_mapping":"None","exposure":1.0})),
+        (5, "render", serde_json::json!({"width":1024,"height":1024,"output_path":out_png.to_string_lossy(),"color_space":"Srgb","msaa":4,"output_type":"Color"})),
+        (6, "dispose", serde_json::json!({})),
+    ];
 
+    for (id, method, params) in &calls {
+        let req = serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string();
+        stdin.write_all(&frame(req.as_bytes())).unwrap();
+        stdin.flush().unwrap();
         let body = read_framed(&mut stdout);
-        let parsed: serde_json::Value = serde_json::from_slice(&body)
-            .expect("parse response JSON");
-
-        // Lock down integer-id round-trip — regression guard for the
-        // GDScript float-coercion bug fixed in fb7bd689.
-        let id = parsed["id"].as_i64()
-            .unwrap_or_else(|| panic!("response id was not an integer; got {:?} (body: {parsed})",
-                parsed["id"]));
-        assert_eq!(id, ex.request_id,
-            "id mismatch: expected {}, got {} (body: {parsed})",
-            ex.request_id, id);
-
-        let code = parsed["error"]["code"].as_i64()
-            .unwrap_or_else(|| panic!("missing error.code in {parsed}"));
-        assert_eq!(code, ex.expected_code,
-            "method {:?} expected code {}, got {} (body: {parsed})",
-            std::str::from_utf8(&ex.request).unwrap_or("<binary>"),
-            ex.expected_code, code);
-        if let Some(phase) = ex.expected_phase {
-            let actual = parsed["error"]["data"]["phase"].as_str()
-                .unwrap_or_else(|| panic!("missing error.data.phase in {parsed}"));
-            assert_eq!(actual, phase, "phase mismatch in {parsed}");
-        }
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(parsed["error"].is_null(), "{method} failed: {parsed}");
+        let resp_id = parsed["id"].as_i64().expect("integer id");
+        assert_eq!(resp_id, *id, "id mismatch for {method}");
     }
 
     drop(stdin);
-    let status = child.wait().expect("wait");
-    assert!(status.success(), "shim exited with {status:?}");
+    assert!(child.wait().unwrap().success());
+
+    // Validate the rendered PNG.
+    let png = std::fs::read(&out_png).expect("read PNG");
+    let png_len = png.len();
+    assert!(png_len > 5000, "PNG too small: {png_len} bytes");
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "bad PNG magic");
+    let width = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
+    let height = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
+    assert_eq!((width, height), (1024, 1024), "unexpected dimensions");
+    let _ = out_png; let _ = Path::new(asset_dir);
+}
+
+#[test]
+#[ignore]
+fn reserved_ops_still_return_unimplemented() {
+    let project_dir = workspace_root().join("adapters").join("godot-vrm");
+    let mut child = Command::new(shim_binary())
+        .env("GODOT_VRM_ADAPTER_DIR", &project_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn shim");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+
+    let cases: Vec<(i64, &str, i64, Option<&str>)> = vec![
+        (1, "definitely_not_a_method", -32601, None),
+        (2, "set_humanoid_pose", -32000, Some("Phase 2")),
+        (3, "set_environment", -32000, Some("v1.x")),
+        (4, "set_expression", -32000, Some("Phase 3")),
+    ];
+    for (id, method, code, phase) in &cases {
+        let req = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"{method}","params":{{}}}}"#);
+        stdin.write_all(&frame(req.as_bytes())).unwrap();
+        stdin.flush().unwrap();
+        let body = read_framed(&mut stdout);
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["error"]["code"].as_i64(), Some(*code), "method {method} expected code {code}, got {parsed}");
+        if let Some(p) = phase {
+            assert_eq!(parsed["error"]["data"]["phase"].as_str(), Some(*p), "phase mismatch for {method}: {parsed}");
+        }
+    }
+    drop(stdin);
+    let _ = child.wait();
 }
 
 #[test]
