@@ -4,8 +4,12 @@ name: godot-vrm
 # crate, install Godot 4 headless, run the GDScript unit tests, and run
 # the #[ignore]'d Rust integration test that spawns the shim + real Godot.
 #
-# Real renderer integration (L3) is a separate plan; this workflow
-# doesn't run any render pipeline yet.
+# Runs on macos-latest because the L3 real-rendering path requires a
+# non-headless Godot display driver. The Rust shim spawns Godot with
+# `--display-driver macos --rendering-driver metal --audio-driver Dummy`
+# per Spike 1 in docs/superpowers/plans/2026-05-11-adapter-godot-vrm-L3.md.
+# Linux CI support requires a follow-up spike (likely xvfb-run +
+# --display-driver x11 --rendering-driver vulkan).
 #
 # No untrusted-input usage: this workflow does not read PR titles, commit
 # messages, issue bodies, or any other user-controlled fields into run:
@@ -30,34 +34,27 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    env:
-      GODOT_VERSION: 4.3-stable
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Cache Godot binary
-        id: cache-godot
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/bin/godot
-          key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
-
-      - name: Install Godot headless
-        if: steps.cache-godot.outputs.cache-hit != 'true'
+      - name: Install Godot via Homebrew
         run: |
-          mkdir -p ~/.local/bin
-          curl -L -o /tmp/godot.zip \
-            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
-          unzip -p /tmp/godot.zip > ~/.local/bin/godot
-          chmod +x ~/.local/bin/godot
-
-      - name: Make Godot reachable on PATH
-        run: |
+          brew install --cask godot
+          # Homebrew installs the .app bundle; expose the binary on PATH.
+          GODOT_BIN="/Applications/Godot.app/Contents/MacOS/Godot"
+          if [ ! -x "$GODOT_BIN" ]; then
+            echo "godot binary not found at $GODOT_BIN" >&2
+            ls -la /Applications/Godot.app/Contents/MacOS/ >&2
+            exit 1
+          fi
+          # Symlink for the runner's PATH.
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$GODOT_BIN" "$HOME/.local/bin/godot"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          ~/.local/bin/godot --version
+          "$GODOT_BIN" --version
 
       - name: Build shim
         run: cargo build -p vrm-godot-shim --release
