@@ -238,6 +238,31 @@ func reset_physics(params: Dictionary) -> Dictionary:
         vrm_secondary.do_process(1.0/60.0)
     return _ok({})
 
+func animate_root_transform(params: Dictionary) -> Dictionary:
+    if scene == null:
+        return _err(-32002, "RenderFailed", { "reason": "no session active; call load_vrm first" })
+    var start_arr = params.get("translation_start", [0.0, 0.0, 0.0])
+    var end_arr = params.get("translation_end", [0.0, 0.0, 0.0])
+    var duration: float = params.get("duration_seconds", 0.25)
+    var fps: int = params.get("fps", 60)
+    var start := Vector3(start_arr[0], start_arr[1], start_arr[2])
+    var end := Vector3(end_arr[0], end_arr[1], end_arr[2])
+
+    var dt := 1.0 / float(fps)
+    var sample_count := int(round(duration * float(fps)))
+    if sample_count < 1:
+        sample_count = 1
+
+    if scene is Node3D:
+        (scene as Node3D).position = start
+    for i in range(sample_count):
+        var t: float = float(i + 1) / float(sample_count)
+        if scene is Node3D:
+            (scene as Node3D).position = start.lerp(end, t)
+        if vrm_secondary != null:
+            vrm_secondary.do_process(dt)
+    return _ok({})
+
 func _ok(result: Variant) -> Dictionary:
     return { "ok": true, "result": result }
 
