@@ -126,6 +126,25 @@ Script bug uncovered during the spike: `Camera3D.look_at()` errors if called bef
 
 ---
 
+## Spike 2 result
+
+- Date: 2026-05-11
+- VRM loaded: `l3_spike.vrm` (vrm-asset-generator emit-default, 20 nodes, 19 humanoid bones + 1 mesh node)
+- Skeleton bone count: 20
+- Node-type counts: `{ "Node3D": 2, "AnimationPlayer": 1, "Skeleton3D": 1, "BoneAttachment3D": 2, "MeshInstance3D": 1 }`
+- Outcome: VRM 1.0 runtime load via `GLTFDocument` + the addon's VRM 1.0 extensions confirmed. Exit code 0.
+
+**Critical finding for Task 3+ (runtime addon use):** Godot 4.6.2 requires `GLTFDocumentExtension` subclasses to override `_get_supported_extensions()` to declare which glTF extension names they handle. The vendored addon's VRM 1.0 extension classes (`addons/vrm/1.0/VRMC_vrm.gd`, `VRMC_node_constraint.gd`, `VRMC_springBone.gd`, `VRMC_materials_mtoon.gd`, `VRMC_materials_hdr_emissiveMultiplier.gd`) do **not** override that method — they only implement `_import_preflight`/`_import_post`. In the editor that works because the editor's import path validates extensions differently, but at runtime `GLTFDocument._parse_gltf_extensions` rejects the VRM with `Can't import file, required extension 'VRMC_vrm' is not supported. Are you missing a GLTFDocumentExtension plugin?` even though preflight succeeds.
+
+The spike worked around this by subclassing each VRM 1.0 extension and overriding `_get_supported_extensions()` to return the corresponding extension name. Task 4 (runtime register) and Task 6 (Session load) must adopt the same pattern — instantiate thin wrapper subclasses, not the addon classes directly. (Filing this upstream as a Godot 4.6 compat bug is a follow-up; in the meantime the wrapper pattern is contained to `src/session.gd` or a small `src/vrm_runtime_extensions.gd` helper.)
+
+**Pre-existing addon issues surfaced (non-blocking):**
+- `VRMC_vrm.gd:957` triggers a Godot internal `Dictionary::operator[]` "Bug" warning when `get_additional_data(&"vrm/already_processed")` runs against a key that's never been set. The warning is non-fatal — preflight still returns OK.
+- `VRMC_vrm.gd:387` issues a `SCRIPT ERROR: Trying to assign value of type 'Skeleton3D' to a variable of type 'ImporterMeshInstance3D'` during `_create_animation_player`. This is a typed-assignment failure caused by the asset-generator emitting a mesh node whose `gltfnode.mesh != -1` but which is reached via the bone-walk. The error is non-fatal — `generate_scene` still produces a valid `Skeleton3D` (20 bones) and `MeshInstance3D` (1). Task 6 should treat this as a known warning; if downstream rendering breaks, revisit the asset generator's mesh-node-as-bone-leaf layout.
+- Godot reports leaked RIDs/instances at exit (`PagedAllocator`, `Mesh`, `Material`, `Shader`). These are the same kind of leaks Spike 1 saw (`SceneTree.quit(0)` doesn't free render-server resources before engine teardown), benign for a one-shot CLI invocation but worth a `free_rid` / `queue_free` pass during long-lived Session lifecycle in Task 6.
+
+---
+
 ## Task list
 
 11 tasks. Spikes 1+2+3 are gating — if any fails, stop and re-spec.
