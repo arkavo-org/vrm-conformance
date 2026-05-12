@@ -939,7 +939,7 @@ func set_lighting(params: Dictionary) -> Dictionary:
     # Receive shadows is per-material; for MToon math tests both flags are false,
     # so we can ignore the receive side here — the directional shadow_enabled
     # gates the entire shadow path.
-    var _ = receive
+    var _unused = receive
     return _ok({})
 
 func set_post_processing(params: Dictionary) -> Dictionary:
@@ -953,7 +953,7 @@ func set_post_processing(params: Dictionary) -> Dictionary:
         "Linear":
             environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
         "Reinhard":
-            environment.tonemap_mode = Environment.TONE_MAPPER_REINHARD
+            environment.tonemap_mode = Environment.TONE_MAPPER_REINHARDT
         "Aces":
             environment.tonemap_mode = Environment.TONE_MAPPER_ACES
         _:
