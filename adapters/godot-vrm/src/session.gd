@@ -147,6 +147,48 @@ func set_post_processing(params: Dictionary) -> Dictionary:
     environment.tonemap_exposure = exposure
     return _ok({})
 
+# Render the current scene to a PNG. Returns the output path + the actual
+# color-space the PNG was written in (Godot writes sRGB-encoded PNGs by
+# default; `color_space: "Linear"` would require a linear PNG which Godot
+# doesn't support natively, so we accept the request and report sRGB —
+# the runner's diff engine tolerates this declared mismatch).
+func render(tree: SceneTree, params: Dictionary) -> Dictionary:
+    if viewport == null:
+        return _err(-32002, "RenderFailed", { "reason": "no session active; call load_vrm first" })
+    var width: int = params.get("width", 1024)
+    var height: int = params.get("height", 1024)
+    var output_path: String = params.get("output_path", "")
+    if output_path == "":
+        return _err(-32602, "missing output_path")
+    var msaa: int = params.get("msaa", 4)
+    var declared_cs: String = params.get("color_space", "Srgb")
+
+    viewport.size = Vector2i(width, height)
+    match msaa:
+        0, 1: viewport.msaa_3d = Viewport.MSAA_DISABLED
+        2:    viewport.msaa_3d = Viewport.MSAA_2X
+        4:    viewport.msaa_3d = Viewport.MSAA_4X
+        8:    viewport.msaa_3d = Viewport.MSAA_8X
+        _:    viewport.msaa_3d = Viewport.MSAA_4X
+    viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+    # Drive a few frames so the shader pipeline is warm + the viewport
+    # texture is populated. UPDATE_ONCE renders the next frame after
+    # `notify_update` (which `tree.process_frame` triggers implicitly).
+    for i in 4:
+        await tree.process_frame
+
+    var img: Image = viewport.get_texture().get_image()
+    if img == null:
+        return _err(-32002, "RenderFailed", { "reason": "get_image returned null" })
+    var save_err := img.save_png(output_path)
+    if save_err != OK:
+        return _err(-32002, "RenderFailed", { "reason": "save_png err %d" % save_err })
+
+    # Declared color-space: we always write sRGB-encoded PNGs.
+    var _declared = declared_cs
+    return _ok({ "output_path": output_path, "actual_color_space": "Srgb" })
+
 func _ok(result: Variant) -> Dictionary:
     return { "ok": true, "result": result }
 
