@@ -128,7 +128,7 @@ Cross-renderer pixel-exact comparison is impossible for non-PBR toon shading —
 - `adapters/vrm-metal-kit/` — Swift / Metal / macOS 26 platform floor. Pins a specific VRMMetalKit upstream revision in `Package.swift`; bump that revision deliberately as part of the change. CI builds (debug) but does not test (Xcode 26 binaries link against macOS 26 libs absent on `macos-15` runners — runtime coverage runs locally on M-series Macs / Xcode Cloud).
 - `adapters/three-vrm/` — Phase 1 ops real; Playwright headless Chromium running three.js + three-vrm. Reserved ops return `Unimplemented`. Requires `npx playwright install chromium` after `npm install`.
 - `adapters/babylon-vrm/` — L1+L2 scaffold; renderer integration deferred to L3. Exists to give consensus diff a third real renderer when ready.
-- `adapters/godot-vrm/` — Godot 4 / GDScript. Paired with a Rust shim (`crates/vrm-godot-shim/`) that owns the LSP framing and bridges JSON-RPC ↔ TCP loopback to a headless Godot child; GDScript only handles dispatch. L1+L2 scaffolded; all ops return `Unimplemented`. Runner consumes `target/release/vrm-godot-shim` as `--adapter-bin`. Requires Godot 4.3+ on `PATH` or `GODOT_BIN`.
+- `adapters/godot-vrm/` — Godot 4 / GDScript paired with the `crates/vrm-godot-shim/` Rust shim. L3 (Phase 1 ops real); MToon corpus renders end-to-end. Phase 2 spring-bone ops still `Unimplemented` so spring-bone test plans skip this adapter. Runner consumes `target/release/vrm-godot-shim` as `--adapter-bin`. Requires Godot 4.x on `PATH`.
 
 ### CI guardrails
 

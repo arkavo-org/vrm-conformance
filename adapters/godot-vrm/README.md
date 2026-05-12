@@ -18,13 +18,13 @@ vrm-conformance has two real adapters (three-vrm + vrm-metal-kit). The [N-way co
 |---|---|
 | L1 — package skeleton                         | scaffolded |
 | L2 — JSON-RPC + dispatch                      | scaffolded (all ops return `Unimplemented`) |
-| L3 — Phase 1 ops against V-Sekai/godot-vrm    | deferred (separate plan) |
+| L3 — Phase 1 ops against V-Sekai/godot-vrm    | shipped |
+| L4 — Phase 2 spring-bone physics ops          | deferred — spring-bone settle/swing tests skip godot-vrm |
 
-Through L2, every operation returns a structured `Unimplemented` error (JSON-RPC code `-32000`):
+Through L3, Phase 1 ops are real. Remaining ops still return a structured `Unimplemented` error (JSON-RPC code `-32000`):
 
 | Method | `data.phase` |
 |---|---|
-| `load_vrm`, `set_camera`, `set_lighting`, `set_post_processing`, `render`, `dispose` | `L3 (godot-vrm integration deferred)` |
 | `set_humanoid_pose`, `set_root_transform`, `animate_root_transform`, `step_physics`, `reset_physics` | `Phase 2` |
 | `set_environment` | `v1.x` |
 | `set_expression` | `Phase 3` |
@@ -70,23 +70,3 @@ cargo run -p vrm-runner -- execute-test-plan \
   --renderer-name godot-vrm \
   --json
 ```
-
-L3 will keep this exact invocation. Only the Phase 1 dispatch behavior changes (return real responses instead of `Unimplemented`).
-
-## L3 sketch
-
-Lives in a separate plan. Implementation outline:
-
-1. Add `addons/godot-vrm/` pinned to a specific V-Sekai commit (parity with `adapters/vrm-metal-kit/Package.swift`'s upstream-revision pin).
-2. Replace the `Unimplemented` returns for Phase 1 ops with real handlers driving a hidden `SubViewport` rendering to a `ViewportTexture` saved via `Image.save_png`.
-3. Magenta clear color `(255, 0, 255)` for property-assertion bbox detection.
-4. `Environment.tone_mapper = TONE_MAPPER_LINEAR` + shadows disabled for MToon math tests.
-5. `Engine.physics_ticks_per_second = 60` + spring-bone reset via `addons/godot-vrm`.
-
-### Bootstrap wiring
-
-`scripts/bootstrap-goldens.sh` will gain a `SKIP_GODOT_VRM` env knob and a
-`render_with_adapter "godot-vrm" "<version>" "$ROOT/target/release/vrm-godot-shim"`
-call once L3 produces real renders. Not wired during L1+L2 because Phase 1
-ops return `Unimplemented` and the runner cannot complete `execute-test-plan`
-against this adapter yet.
