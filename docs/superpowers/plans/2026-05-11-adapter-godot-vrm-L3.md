@@ -102,6 +102,30 @@ From `docs/operation-contract.md`, Phase 1 ops:
 
 ---
 
+## Spike 1 result
+
+- Date: 2026-05-11
+- Godot version: `4.6.2.stable.official.71f334935`
+- Working rendering driver: `metal` (with `--display-driver macos --audio-driver Dummy`; **NOT** `--headless`)
+- PNG size: 1364 bytes (256x256, valid PNG)
+- Outcome: SubViewport render-to-PNG confirmed when using the macOS display driver in offscreen mode.
+
+**Critical finding for Task 8 (shim spawn):** `--headless` is a hard alias for `--display-driver headless --audio-driver Dummy`, and the `headless` display driver only supports the `dummy` rendering driver — which produces null textures (`get_image()` returns null with `texture_2d_get` failing inside `servers/rendering/dummy/storage/texture_storage.h`). Specifying `--rendering-driver opengl3|vulkan|metal` alongside `--headless` is silently ignored.
+
+The wrapper script must spawn Godot with:
+
+```
+godot --display-driver macos --rendering-driver metal --audio-driver Dummy --script <script>
+```
+
+(NOT `--headless`.) `metal` was chosen over `opengl3` because Godot reports it as "Forward+" (full-featured renderer used in production), while `opengl3` reports as "Compatibility" — for a fidelity suite we want the production-quality path. Both produce non-trivial PNGs (metal 1364 B, opengl3 1436 B); `vulkan` was not tested separately because metal is the native macOS path. If CI runs on Linux later, the driver will need to be re-spiked there (likely `vulkan`).
+
+**Side-effects to verify in Task 8:** spawning with `--display-driver macos` from a CLI may briefly create a Cocoa window or dock icon. The spike did not surface a window during its ~1 s lifetime, but a longer-lived session may differ — Task 8 should add a guard (e.g. `LSUIElement` plist hint or `--position`-offscreen workaround) if a window flashes during real runs.
+
+Script bug uncovered during the spike: `Camera3D.look_at()` errors if called before `add_child()` (the node isn't in the tree yet). Use `look_at_from_position()` or call `look_at()` after parenting. Recorded for Task 7's render impl.
+
+---
+
 ## Task list
 
 11 tasks. Spikes 1+2+3 are gating — if any fails, stop and re-spec.
