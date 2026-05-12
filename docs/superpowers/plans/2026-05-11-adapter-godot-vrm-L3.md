@@ -833,8 +833,7 @@ func load_vrm(tree_root: Node, params: Dictionary) -> Dictionary:
 
     camera = Camera3D.new()
     viewport.add_child(camera)
-    camera.position = Vector3(0.0, 1.4, 1.5)
-    camera.look_at(Vector3(0.0, 1.4, 0.0), Vector3.UP)
+    camera.look_at_from_position(Vector3(0.0, 1.4, 1.5), Vector3(0.0, 1.4, 0.0), Vector3.UP)
     camera.fov = 30.0
 
     directional_light = DirectionalLight3D.new()
@@ -910,8 +909,7 @@ func set_camera(params: Dictionary) -> Dictionary:
     var tgt = params.get("target", [0.0, 1.4, 0.0])
     var up = params.get("up", [0.0, 1.0, 0.0])
     var fov: float = params.get("fov_degrees", 30.0)
-    camera.position = Vector3(pos[0], pos[1], pos[2])
-    camera.look_at(Vector3(tgt[0], tgt[1], tgt[2]), Vector3(up[0], up[1], up[2]))
+    camera.look_at_from_position(Vector3(pos[0], pos[1], pos[2]), Vector3(tgt[0], tgt[1], tgt[2]), Vector3(up[0], up[1], up[2]))
     camera.fov = fov
     return _ok({})
 

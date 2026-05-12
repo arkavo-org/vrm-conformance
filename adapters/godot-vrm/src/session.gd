@@ -65,8 +65,7 @@ func load_vrm(tree_root: Node, params: Dictionary) -> Dictionary:
 
     camera = Camera3D.new()
     viewport.add_child(camera)
-    camera.position = Vector3(0.0, 1.4, 1.5)
-    camera.look_at(Vector3(0.0, 1.4, 0.0), Vector3.UP)
+    camera.look_at_from_position(Vector3(0.0, 1.4, 1.5), Vector3(0.0, 1.4, 0.0), Vector3.UP)
     camera.fov = 30.0
 
     directional_light = DirectionalLight3D.new()
