@@ -15,6 +15,8 @@
 #   SKIP_THREE_VRM=1      Skip the three-vrm adapter (e.g., if Playwright
 #                         install is broken in this environment).
 #   SKIP_VRM_METAL_KIT=1  Skip the vrm-metal-kit adapter (e.g., on Linux).
+#   SKIP_GODOT_VRM=1      Skip the godot-vrm adapter (e.g., if godot is not
+#                         on PATH).
 #   GOLDENS_DIR=path      Override the on-disk cache location.
 #                         Default: ./goldens-cache/
 #   QUICK=1               Render only emit-default + emit-springbone (2
@@ -197,6 +199,23 @@ if [ "${SKIP_THREE_VRM:-0}" != "1" ]; then
     fi
 else
     echo "==> Skipping three-vrm (SKIP_THREE_VRM=1)"
+fi
+
+if [ "${SKIP_GODOT_VRM:-0}" != "1" ]; then
+    echo "==> Building vrm-godot-shim"
+    cargo build --release -q -p vrm-godot-shim >/dev/null
+    GVRM_BIN="$ROOT/target/release/vrm-godot-shim"
+    if [ -x "$GVRM_BIN" ] && command -v godot >/dev/null 2>&1; then
+        render_with_adapter "godot-vrm" "0.1.0" "$GVRM_BIN"
+    else
+        if [ ! -x "$GVRM_BIN" ]; then
+            echo "    (skipping godot-vrm: shim binary not built)" >&2
+        else
+            echo "    (skipping godot-vrm: godot not on PATH)" >&2
+        fi
+    fi
+else
+    echo "==> Skipping godot-vrm (SKIP_GODOT_VRM=1)"
 fi
 
 echo
