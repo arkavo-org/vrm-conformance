@@ -83,9 +83,7 @@ Lives in a separate plan. Implementation outline:
 4. `Environment.tone_mapper = TONE_MAPPER_LINEAR` + shadows disabled for MToon math tests.
 5. `Engine.physics_ticks_per_second = 60` + spring-bone reset via `addons/godot-vrm`.
 
-`scripts/bootstrap-goldens.sh` gains a `SKIP_GODOT_VRM` knob and a `render_with_adapter "godot-vrm" "<version>" "$ROOT/target/release/vrm-godot-shim"` call once L3 produces real renders.
-
-## Bootstrap wiring (L3)
+### Bootstrap wiring
 
 `scripts/bootstrap-goldens.sh` will gain a `SKIP_GODOT_VRM` env knob and a
 `render_with_adapter "godot-vrm" "<version>" "$ROOT/target/release/vrm-godot-shim"`
