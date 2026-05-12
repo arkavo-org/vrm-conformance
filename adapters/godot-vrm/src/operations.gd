@@ -14,15 +14,13 @@ const PHASE_BY_RESERVED_METHOD := {
     "set_expression": "Phase 3",
     "set_humanoid_pose": "Phase 2",
     "set_root_transform": "Phase 2",
-    "animate_root_transform": "Phase 2",
-    "step_physics": "Phase 2",
-    "reset_physics": "Phase 2",
 }
 
 # Phase 1 method names. dispatch() routes these to Session.<name>.
 const PHASE1_METHODS := [
     "load_vrm", "set_camera", "set_lighting",
     "set_post_processing", "render", "dispose",
+    "step_physics", "reset_physics", "animate_root_transform",
 ]
 
 # Async to support `render` which awaits frames.
@@ -42,6 +40,12 @@ static func dispatch(tree: SceneTree, session: Session, id: Variant, method: Str
                 outcome = await session.render(tree, params if typeof(params) == TYPE_DICTIONARY else {})
             "dispose":
                 outcome = session.dispose(params if typeof(params) == TYPE_DICTIONARY else {})
+            "step_physics":
+                outcome = session.step_physics(params if typeof(params) == TYPE_DICTIONARY else {})
+            "reset_physics":
+                outcome = session.reset_physics(params if typeof(params) == TYPE_DICTIONARY else {})
+            "animate_root_transform":
+                outcome = session.animate_root_transform(params if typeof(params) == TYPE_DICTIONARY else {})
             _:
                 outcome = { "ok": false, "error": { "code": -32601, "message": "internal: PHASE1 method not routed: " + method } }
         if outcome.get("ok"):

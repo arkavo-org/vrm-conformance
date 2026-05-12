@@ -25,9 +25,13 @@ func test_set_root_transform_returns_phase_2() -> void:
     var r: Dictionary = await Operations.dispatch(null, null, 8, "set_root_transform", {})
     _assert_eq(r.get("error", {}).get("data", {}).get("phase"), "Phase 2", "phase label")
 
-func test_animate_root_transform_returns_phase_2() -> void:
-    var r: Dictionary = await Operations.dispatch(null, null, 9, "animate_root_transform", {})
-    _assert_eq(r.get("error", {}).get("data", {}).get("phase"), "Phase 2", "phase label")
+func test_phase1_methods_include_physics_ops() -> void:
+    var has_step: bool = Operations.PHASE1_METHODS.has("step_physics")
+    var has_reset: bool = Operations.PHASE1_METHODS.has("reset_physics")
+    var has_animate: bool = Operations.PHASE1_METHODS.has("animate_root_transform")
+    _assert_eq(has_step, true, "step_physics in PHASE1")
+    _assert_eq(has_reset, true, "reset_physics in PHASE1")
+    _assert_eq(has_animate, true, "animate_root_transform in PHASE1")
 
 func test_set_environment_returns_v1x() -> void:
     var r: Dictionary = await Operations.dispatch(null, null, 4, "set_environment", {})
