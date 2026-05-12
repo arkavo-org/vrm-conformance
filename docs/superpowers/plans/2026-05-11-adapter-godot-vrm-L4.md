@@ -349,8 +349,17 @@ func reset_physics(params: Dictionary) -> Dictionary:
     if vrm_secondary == null:
         return _ok({})
     var settle_steps: int = params.get("settle_steps", 30)
-    # Re-initialize chains to rest pose. _ready() rebuilds spring_bones_internal
-    # + verlets from the export'd spring_bones array.
+    # _ready() alone doesn't fully reset — the addon writes bone pose
+    # overrides that survive across calls and _ready() re-reads from the
+    # current (overridden) skeleton pose. Clear overrides + write rest
+    # bones first, then re-initialize chains, then run settle steps.
+    var skel: Skeleton3D = vrm_secondary.get_node_or_null(vrm_secondary.skeleton) as Skeleton3D
+    if skel != null:
+        skel.clear_bones_global_pose_override()
+        for bone_i in range(skel.get_bone_count()):
+            var rest_tx := skel.get_bone_rest(bone_i)
+            skel.set_bone_pose_rotation(bone_i, rest_tx.basis.get_rotation_quaternion())
+            skel.set_bone_pose_position(bone_i, rest_tx.origin)
     vrm_secondary._ready()
     for i in settle_steps:
         vrm_secondary.do_process(1.0/60.0)
