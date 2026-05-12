@@ -13,6 +13,7 @@ var viewport: SubViewport = null
 var camera: Camera3D = null
 var directional_light: DirectionalLight3D = null
 var environment: Environment = null
+var vrm_secondary: Node = null
 
 # Build the SubViewport once at load time; reused across set_camera/
 # set_lighting/set_post_processing/render. Caller passes the SceneTree
@@ -75,6 +76,12 @@ func load_vrm(tree_root: Node, params: Dictionary) -> Dictionary:
     directional_light.light_energy = 1.0
     directional_light.shadow_enabled = false
 
+    vrm_secondary = _find_vrm_secondary(scene)
+    if vrm_secondary != null:
+        # Disable auto-stepping so step_physics/reset_physics/animate_root_transform
+        # have full control over the physics pump.
+        vrm_secondary.process_mode = Node.PROCESS_MODE_DISABLED
+
     return _ok({ "session_id": session_id })
 
 func dispose(_params: Dictionary) -> Dictionary:
@@ -85,6 +92,7 @@ func dispose(_params: Dictionary) -> Dictionary:
     camera = null
     directional_light = null
     environment = null
+    vrm_secondary = null
     session_id = ""
     return _ok({})
 
@@ -188,6 +196,16 @@ func render(tree: SceneTree, params: Dictionary) -> Dictionary:
     # Declared color-space: we always write sRGB-encoded PNGs.
     var _declared = declared_cs
     return _ok({ "output_path": output_path, "actual_color_space": "Srgb" })
+
+static func _find_vrm_secondary(node: Node) -> Node:
+    for child in node.get_children():
+        var script = child.get_script()
+        if script != null and script.resource_path.ends_with("vrm_secondary.gd"):
+            return child
+        var found := _find_vrm_secondary(child)
+        if found != null:
+            return found
+    return null
 
 func _ok(result: Variant) -> Dictionary:
     return { "ok": true, "result": result }
