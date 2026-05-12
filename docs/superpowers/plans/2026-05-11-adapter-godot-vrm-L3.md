@@ -155,7 +155,7 @@ The spike worked around this by subclassing each VRM 1.0 extension and overridin
 
 **Pre-existing addon issues surfaced (non-blocking, same as Spike 2):**
 - `VRMC_vrm.gd:957` Dictionary::operator[] warning on `vrm/already_processed` key — same as Spike 2, non-fatal, preflight still returns OK.
-- `Camera3D.look_at` errored ("Node not inside tree. Use look_at_from_position() instead.") because the spike script calls `cam.look_at()` before `vp.add_child(cam)`. Render still succeeded (camera fell back to default orientation, sphere was visible — pink count 0/9). Already noted as a script bug for Task 7 in the Spike 1 result section (line 125). The production renderer (Task 7) must call `look_at()` AFTER `add_child()` or use `look_at_from_position()`.
+- **Camera ordering**: `Camera3D.look_at()` errors with "Node not inside tree. Use look_at_from_position() instead." if called before `add_child()`. The original Task 5 code in this plan had this bug at the `camera.look_at(...)` call site — fixed in this same commit by reordering to parent the camera (and directional_light) into the viewport *before* configuring orientation. Render in the spike still succeeded (camera fell back to default orientation, sphere was visible — pink count 0/9). Task 6's `set_camera` is unaffected because by that point the camera is already parented.
 
 ---
 
@@ -828,21 +828,21 @@ func load_vrm(tree_root: Node, params: Dictionary) -> Dictionary:
     environment.tonemap_exposure = 1.0
     viewport.world_3d.environment = environment
 
+    tree_root.add_child(viewport)
+    viewport.add_child(scene)
+
     camera = Camera3D.new()
+    viewport.add_child(camera)
     camera.position = Vector3(0.0, 1.4, 1.5)
     camera.look_at(Vector3(0.0, 1.4, 0.0), Vector3.UP)
     camera.fov = 30.0
 
     directional_light = DirectionalLight3D.new()
+    viewport.add_child(directional_light)
     directional_light.rotation = Vector3(-deg_to_rad(30.0), deg_to_rad(45.0), 0.0)
     directional_light.light_color = Color(1, 1, 1)
     directional_light.light_energy = 1.0
     directional_light.shadow_enabled = false
-
-    tree_root.add_child(viewport)
-    viewport.add_child(scene)
-    viewport.add_child(camera)
-    viewport.add_child(directional_light)
 
     return _ok({ "session_id": session_id })
 
