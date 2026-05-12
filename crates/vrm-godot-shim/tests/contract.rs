@@ -168,6 +168,67 @@ fn reserved_ops_still_return_unimplemented() {
 
 #[test]
 #[ignore]
+fn springbone_physics_ops_render_a_real_vrm() {
+    let project_dir = workspace_root().join("adapters").join("godot-vrm");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let asset_dir = tmp.path();
+    let status = std::process::Command::new("cargo")
+        .arg("run").arg("--release").arg("-q")
+        .arg("-p").arg("vrm-asset-generator").arg("--")
+        .arg("emit-springbone")
+        .arg("--id").arg("contract_l4")
+        .arg("--output-dir").arg(asset_dir)
+        .current_dir(workspace_root())
+        .status().expect("emit-springbone");
+    assert!(status.success(), "emit-springbone failed");
+    let vrm_path = asset_dir.join("contract_l4.vrm");
+    let out_png = asset_dir.join("contract_l4.png");
+
+    let mut child = Command::new(shim_binary())
+        .env("GODOT_VRM_ADAPTER_DIR", &project_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn shim");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+
+    let calls: Vec<(i64, &str, serde_json::Value)> = vec![
+        (1, "load_vrm", serde_json::json!({"path": vrm_path.to_string_lossy()})),
+        (2, "set_camera", serde_json::json!({"position":[0,1.4,1.5],"target":[0,1.4,0],"up":[0,1,0],"fov_degrees":30})),
+        (3, "set_lighting", serde_json::json!({"directional":{"dir":[-0.3,-0.6,-0.7],"color":[1,1,1],"intensity":1},"ambient":{"color":[0.5,0.5,0.5],"intensity":0.3},"cast_shadows":false,"receive_shadows":false})),
+        (4, "set_post_processing", serde_json::json!({"tone_mapping":"None","exposure":1.0})),
+        (5, "reset_physics", serde_json::json!({"settle_steps":30})),
+        (6, "animate_root_transform", serde_json::json!({"translation_start":[0,0,0],"translation_end":[0.15,0,0],"duration_seconds":0.25,"fps":60})),
+        (7, "step_physics", serde_json::json!({"dt_seconds":1.0/60.0,"count":5})),
+        (8, "render", serde_json::json!({"width":1024,"height":1024,"output_path":out_png.to_string_lossy(),"color_space":"Srgb","msaa":4,"output_type":"Color"})),
+        (9, "dispose", serde_json::json!({})),
+    ];
+    for (id, method, params) in &calls {
+        let req = serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string();
+        stdin.write_all(&frame(req.as_bytes())).unwrap();
+        stdin.flush().unwrap();
+        let body = read_framed(&mut stdout);
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(parsed["error"].is_null(), "{method} failed: {parsed}");
+        let resp_id = parsed["id"].as_i64().expect("integer id");
+        assert_eq!(resp_id, *id, "id mismatch for {method}");
+    }
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+
+    let png = std::fs::read(&out_png).expect("read PNG");
+    let png_len = png.len();
+    assert!(png_len > 5000, "PNG too small: {png_len} bytes");
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "bad PNG magic");
+    let width = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
+    let height = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
+    assert_eq!((width, height), (1024, 1024));
+}
+
+#[test]
+#[ignore]
 fn malformed_json_returns_parse_error_with_null_id() {
     let project_dir = workspace_root().join("adapters").join("godot-vrm");
     let mut child = Command::new(shim_binary())
