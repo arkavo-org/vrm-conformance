@@ -5,6 +5,7 @@
 extends SceneTree
 
 const TcpSession := preload("res://src/tcp_session.gd")
+const Session := preload("res://src/session.gd")
 
 func _init() -> void:
     var args := OS.get_cmdline_user_args()
@@ -28,6 +29,7 @@ func _init() -> void:
     if socket.get_status() != StreamPeerTCP.STATUS_CONNECTED:
         push_error("godot-vrm adapter: not connected: status=%d" % socket.get_status()); quit(2); return
 
-    TcpSession.run(socket)
+    var session := Session.new()
+    await TcpSession.run(self, session, socket)
     socket.disconnect_from_host()
     quit(0)

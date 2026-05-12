@@ -5,25 +5,23 @@
 class_name TcpSession
 
 const Operations := preload("res://src/operations.gd")
+const Session := preload("res://src/session.gd")
 
 # Run the loop on `socket`. Blocks until the peer (shim) closes the
-# connection. Errors surface as push_error + return; the shim treats a
-# closed socket as "session over".
-static func run(socket: StreamPeerTCP) -> void:
+# connection. The Session is held in main.gd; we forward both to dispatch.
+static func run(tree: SceneTree, session: Session, socket: StreamPeerTCP) -> void:
     var buf := PackedByteArray()
     while true:
         if socket.get_status() != StreamPeerTCP.STATUS_CONNECTED:
             return
         socket.poll()
-        # Drain whatever's available; accumulate until we see "\n".
         var available := socket.get_available_bytes()
         if available > 0:
             var chunk := socket.get_data(available)
             if chunk[0] != OK:
                 push_error("tcp read error: %d" % chunk[0]); return
             buf.append_array(chunk[1])
-        # Process every complete line in the buffer.
-        var newline_byte := 0x0a  # "\n"
+        var newline_byte := 0x0a
         while true:
             var nl := buf.find(newline_byte)
             if nl < 0: break
@@ -41,21 +39,15 @@ static func run(socket: StreamPeerTCP) -> void:
             else:
                 var req: Dictionary = parsed
                 var raw_id: Variant = req.get("id", null)
-                # GDScript's JSON.parse_string returns all numbers as float;
-                # coerce whole-valued floats back to int so peers using strict
-                # integer id types (e.g. the Rust runner's `JsonRpcResponse.id: u64`)
-                # can deserialize the response.
                 var id_out: Variant = raw_id
                 if typeof(raw_id) == TYPE_FLOAT and raw_id == floor(raw_id):
                     id_out = int(raw_id)
-                resp = Operations.dispatch(
-                    id_out,
-                    req.get("method", ""),
-                    req.get("params", {}),
+                resp = await Operations.dispatch(
+                    tree, session,
+                    id_out, req.get("method", ""), req.get("params", {}),
                 )
             var out := (JSON.stringify(resp) + "\n").to_utf8_buffer()
             var put_err := socket.put_data(out)
             if put_err != OK:
                 push_error("tcp write error: %d" % put_err); return
-        # Yield to OS so we don't busy-spin if peer is idle.
         OS.delay_msec(5)

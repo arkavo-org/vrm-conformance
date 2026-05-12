@@ -60,7 +60,15 @@ pub fn spawn_godot(
 ) -> Result<GodotChild, ChildError> {
     let bin = godot_binary();
     let mut cmd = Command::new(&bin);
-    cmd.arg("--headless")
+    // `--headless` aliases to `--display-driver headless --audio-driver Dummy`,
+    // which forces the dummy rendering driver and produces null SubViewport
+    // textures. Must use a non-headless display driver to render. macOS-specific
+    // flag combo confirmed by docs/superpowers/plans/2026-05-11-adapter-godot-vrm-L3.md
+    // Spike 1. Linux CI needs a follow-up spike (likely xvfb-run +
+    // --display-driver x11 --rendering-driver vulkan).
+    cmd.arg("--display-driver").arg("macos")
+        .arg("--rendering-driver").arg("metal")
+        .arg("--audio-driver").arg("Dummy")
         .arg("--path").arg(project_dir)
         .arg("--script").arg(main_script)
         .arg("--")
