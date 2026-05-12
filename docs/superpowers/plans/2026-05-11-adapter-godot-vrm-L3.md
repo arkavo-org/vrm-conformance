@@ -29,7 +29,7 @@ Three load-bearing assumptions; each gets a spike task in the plan, in order. A 
 
 1. **Offscreen rendering works on macOS.** Godot's `--headless` is a hard alias for `--display-driver headless --audio-driver Dummy`, which forces the dummy rendering driver (no pixel output). We need a real display driver (`--display-driver macos`) paired with a real rendering driver (`--rendering-driver metal`) and audio suppressed (`--audio-driver Dummy`) to produce actual pixel output without a visible window. Spike: render a magenta-clear SubViewport in pure GDScript without any VRM, save PNG, verify file is non-trivial and has the expected dimensions.
 
-2. **VRM 1.0 loads at runtime via `GLTFDocument` + `vrm_extension.gd`.** The addon was written for editor-time import (`_import_scene` callback in `import_vrm.gd`), but the inner mechanism is `GLTFDocument.append_from_file` which is runtime-callable. Spike: load a generated VRM, walk the scene tree, assert there's a `Skeleton3D` with the head bone.
+2. **VRM 1.0 loads at runtime via `GLTFDocument` + the addon's `addons/vrm/1.0/VRMC_*.gd` extension classes** (registered through the `VrmRuntimeExtensions` helper introduced in Task 5; see Spike 2 result for why `vrm_extension.gd` — the VRM 0.0 handler — is not used). The addon was written for editor-time import (`_import_scene` callback in `import_vrm.gd`), but the inner mechanism is `GLTFDocument.append_from_file` which is runtime-callable. Spike: load a generated VRM, walk the scene tree, assert there's a `Skeleton3D` with the head bone.
 
 3. **MToon shader compiles and runs.** Godot-MToon-Shader is plain Godot shaders (`*.gdshader`). They should compile on first load; if any one fails, the entire VRM looks pink-magenta (Godot's shader-error tint). Spike: load + render a default MToon VRM, sample a few pixels, confirm they're not pink-magenta (the error indicator).
 
@@ -129,19 +129,19 @@ Script bug uncovered during the spike: `Camera3D.look_at()` errors if called bef
 ## Spike 2 result
 
 - Date: 2026-05-11
-- VRM loaded: `l3_spike.vrm` (vrm-asset-generator emit-default, 20 nodes, 19 humanoid bones + 1 mesh node)
+- VRM loaded: `l3_spike.vrm` (vrm-asset-generator emit-default)
 - Skeleton bone count: 20
 - Node-type counts: `{ "Node3D": 2, "AnimationPlayer": 1, "Skeleton3D": 1, "BoneAttachment3D": 2, "MeshInstance3D": 1 }`
 - Outcome: VRM 1.0 runtime load via `GLTFDocument` + the addon's VRM 1.0 extensions confirmed. Exit code 0.
 
 **Critical finding for Task 3+ (runtime addon use):** Godot 4.6.2 requires `GLTFDocumentExtension` subclasses to override `_get_supported_extensions()` to declare which glTF extension names they handle. The vendored addon's VRM 1.0 extension classes (`addons/vrm/1.0/VRMC_vrm.gd`, `VRMC_node_constraint.gd`, `VRMC_springBone.gd`, `VRMC_materials_mtoon.gd`, `VRMC_materials_hdr_emissiveMultiplier.gd`) do **not** override that method — they only implement `_import_preflight`/`_import_post`. In the editor that works because the editor's import path validates extensions differently, but at runtime `GLTFDocument._parse_gltf_extensions` rejects the VRM with `Can't import file, required extension 'VRMC_vrm' is not supported. Are you missing a GLTFDocumentExtension plugin?` even though preflight succeeds.
 
-The spike worked around this by subclassing each VRM 1.0 extension and overriding `_get_supported_extensions()` to return the corresponding extension name. Task 4 (runtime register) and Task 6 (Session load) must adopt the same pattern — instantiate thin wrapper subclasses, not the addon classes directly. (Filing this upstream as a Godot 4.6 compat bug is a follow-up; in the meantime the wrapper pattern is contained to `src/session.gd` or a small `src/vrm_runtime_extensions.gd` helper.)
+The spike worked around this by subclassing each VRM 1.0 extension and overriding `_get_supported_extensions()` to return the corresponding extension name. Task 4 (render spike) and Task 5 (Session.load_vrm) must adopt the same pattern — instantiate thin wrapper subclasses, not the addon classes directly. The plan extracts the wrappers into `adapters/godot-vrm/src/vrm_runtime_extensions.gd` (see Task 5 Step 1) so `session.gd` has a single import. (Filing this upstream as a Godot 4.6 compat bug is a follow-up.)
 
 **Pre-existing addon issues surfaced (non-blocking):**
 - `VRMC_vrm.gd:957` triggers a Godot internal `Dictionary::operator[]` "Bug" warning when `get_additional_data(&"vrm/already_processed")` runs against a key that's never been set. The warning is non-fatal — preflight still returns OK.
-- `VRMC_vrm.gd:387` issues a `SCRIPT ERROR: Trying to assign value of type 'Skeleton3D' to a variable of type 'ImporterMeshInstance3D'` during `_create_animation_player`. This is a typed-assignment failure caused by the asset-generator emitting a mesh node whose `gltfnode.mesh != -1` but which is reached via the bone-walk. The error is non-fatal — `generate_scene` still produces a valid `Skeleton3D` (20 bones) and `MeshInstance3D` (1). Task 6 should treat this as a known warning; if downstream rendering breaks, revisit the asset generator's mesh-node-as-bone-leaf layout.
-- Godot reports leaked RIDs/instances at exit (`PagedAllocator`, `Mesh`, `Material`, `Shader`). These are the same kind of leaks Spike 1 saw (`SceneTree.quit(0)` doesn't free render-server resources before engine teardown), benign for a one-shot CLI invocation but worth a `free_rid` / `queue_free` pass during long-lived Session lifecycle in Task 6.
+- `VRMC_vrm.gd:387` issues a `SCRIPT ERROR: Trying to assign value of type 'Skeleton3D' to a variable of type 'ImporterMeshInstance3D'` during `_create_animation_player`. This is a typed-assignment failure caused by the asset-generator emitting a mesh node whose `gltfnode.mesh != -1` but which is reached via the bone-walk. The error is non-fatal — `generate_scene` still produces a valid `Skeleton3D` (20 bones) and `MeshInstance3D` (1). Task 5 should treat this as a known warning; if downstream rendering breaks, revisit the asset generator's mesh-node-as-bone-leaf layout. Filed as a Task 11 follow-up (Concern 2).
+- Godot reports leaked RIDs/instances at exit (`PagedAllocator`, `Mesh`, `Material`, `Shader`). These are the same kind of leaks Spike 1 saw (`SceneTree.quit(0)` doesn't free render-server resources before engine teardown), benign for a one-shot CLI invocation but worth a `free_rid` / `queue_free` pass during long-lived Session lifecycle in Task 5 (`dispose`).
 
 ---
 
@@ -489,7 +489,29 @@ The third gating spike. Combines spikes 1+2: load a VRM, set up camera/light/vie
 cat > /tmp/godot-vrm-render-spike.gd <<'GD'
 extends SceneTree
 
-const vrm_extension_class := preload("res://addons/vrm/vrm_extension.gd")
+# VRM 1.0 runtime registration: subclass each addon extension and override
+# _get_supported_extensions() (Godot 4.6 requires this — see Spike 2 result).
+# vrm_extension.gd is the VRM 0.0 handler and rejects VRM 1.0 files with
+# ERR_INVALID_DATA, so we deliberately do NOT use it here.
+class VRMC_vrm_wrapped extends "res://addons/vrm/1.0/VRMC_vrm.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_vrm"])
+
+class VRMC_node_constraint_wrapped extends "res://addons/vrm/1.0/VRMC_node_constraint.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_node_constraint"])
+
+class VRMC_springBone_wrapped extends "res://addons/vrm/1.0/VRMC_springBone.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_springBone"])
+
+class VRMC_materials_mtoon_wrapped extends "res://addons/vrm/1.0/VRMC_materials_mtoon.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_materials_mtoon"])
+
+class VRMC_materials_hdr_emissiveMultiplier_wrapped extends "res://addons/vrm/1.0/VRMC_materials_hdr_emissiveMultiplier.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_materials_hdr_emissiveMultiplier"])
 
 func _init() -> void:
     var args := OS.get_cmdline_user_args()
@@ -498,10 +520,20 @@ func _init() -> void:
     var vrm_path: String = args[0]
     var out_path: String = args[1]
 
-    # Load the VRM (same as spike 2).
+    # Load the VRM (same as spike 2): instantiate + register all five wrappers
+    # via the STATIC GLTFDocument.register_gltf_document_extension (no second
+    # arg) so the registration is process-global across GLTFDocument instances.
     var gltf := GLTFDocument.new()
-    var ext: GLTFDocumentExtension = vrm_extension_class.new()
-    gltf.register_gltf_document_extension(ext, true)
+    var vrmc_vrm_inst := VRMC_vrm_wrapped.new()
+    var vrmc_node_constraint_inst := VRMC_node_constraint_wrapped.new()
+    var vrmc_springBone_inst := VRMC_springBone_wrapped.new()
+    var vrmc_mtoon_inst := VRMC_materials_mtoon_wrapped.new()
+    var vrmc_hdr_emit_inst := VRMC_materials_hdr_emissiveMultiplier_wrapped.new()
+    GLTFDocument.register_gltf_document_extension(vrmc_vrm_inst)
+    GLTFDocument.register_gltf_document_extension(vrmc_node_constraint_inst)
+    GLTFDocument.register_gltf_document_extension(vrmc_springBone_inst)
+    GLTFDocument.register_gltf_document_extension(vrmc_hdr_emit_inst)
+    GLTFDocument.register_gltf_document_extension(vrmc_mtoon_inst)
     var state := GLTFState.new()
     state.set_additional_data(&"vrm/head_hiding_method", 0)
     state.set_additional_data(&"vrm/first_person_layers", 2)
@@ -509,9 +541,19 @@ func _init() -> void:
     state.handle_binary_image = GLTFState.HANDLE_BINARY_EMBED_AS_UNCOMPRESSED
     var err := gltf.append_from_file(vrm_path, state, 0)
     if err != OK:
-        push_error("append_from_file err: %d" % err); quit(2); return
+        push_error("append_from_file err: %d" % err)
+        GLTFDocument.unregister_gltf_document_extension(vrmc_vrm_inst)
+        GLTFDocument.unregister_gltf_document_extension(vrmc_node_constraint_inst)
+        GLTFDocument.unregister_gltf_document_extension(vrmc_springBone_inst)
+        GLTFDocument.unregister_gltf_document_extension(vrmc_mtoon_inst)
+        GLTFDocument.unregister_gltf_document_extension(vrmc_hdr_emit_inst)
+        quit(2); return
     var scene: Node = gltf.generate_scene(state)
-    gltf.unregister_gltf_document_extension(ext)
+    GLTFDocument.unregister_gltf_document_extension(vrmc_vrm_inst)
+    GLTFDocument.unregister_gltf_document_extension(vrmc_node_constraint_inst)
+    GLTFDocument.unregister_gltf_document_extension(vrmc_springBone_inst)
+    GLTFDocument.unregister_gltf_document_extension(vrmc_mtoon_inst)
+    GLTFDocument.unregister_gltf_document_extension(vrmc_hdr_emit_inst)
 
     # Build the viewport scene.
     var vp := SubViewport.new()
@@ -640,9 +682,73 @@ git commit -m "docs(plan/godot-vrm-L3): record VRM render spike result"
 ### Task 5: Implement `session.gd` — state + load_vrm + dispose
 
 **Files:**
+- Create: `adapters/godot-vrm/src/vrm_runtime_extensions.gd`
 - Create: `adapters/godot-vrm/src/session.gd`
 
-- [ ] **Step 1: Write session.gd with load + dispose**
+- [ ] **Step 1: Write the VRM 1.0 runtime-extension registration helper**
+
+Per Spike 2's finding, Godot 4.6 rejects VRM 1.0 files unless each
+`GLTFDocumentExtension` subclass declares its extension name via
+`_get_supported_extensions()`. The vendored addon's `1.0/VRMC_*.gd` classes
+omit that override. We wrap each in a subclass and expose
+`register_all` / `unregister_all` so `session.gd` (and any future call site)
+imports a single helper.
+
+```bash
+cat > adapters/godot-vrm/src/vrm_runtime_extensions.gd <<'GD'
+# Registers all VRM 1.0 GLTFDocument extensions for runtime load.
+#
+# The vendored V-Sekai/godot-vrm addon classes (1.0/VRMC_*.gd) implement
+# _import_preflight + _import_post but do NOT override _get_supported_extensions().
+# Godot 4.6's GLTFDocument._parse_gltf_extensions requires that override or it
+# rejects the extension with err 43 (ERR_PARSE_ERROR). This helper wraps each
+# upstream class in a subclass that declares its extension name and registers
+# all five.
+
+class_name VrmRuntimeExtensions
+
+class _VRMC_vrm extends "res://addons/vrm/1.0/VRMC_vrm.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_vrm"])
+
+class _VRMC_node_constraint extends "res://addons/vrm/1.0/VRMC_node_constraint.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_node_constraint"])
+
+class _VRMC_springBone extends "res://addons/vrm/1.0/VRMC_springBone.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_springBone"])
+
+class _VRMC_materials_mtoon extends "res://addons/vrm/1.0/VRMC_materials_mtoon.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_materials_mtoon"])
+
+class _VRMC_materials_hdr_emissiveMultiplier extends "res://addons/vrm/1.0/VRMC_materials_hdr_emissiveMultiplier.gd":
+    func _get_supported_extensions() -> PackedStringArray:
+        return PackedStringArray(["VRMC_materials_hdr_emissiveMultiplier"])
+
+# Returns an array of registered extension instances; pass to unregister_all
+# after the load completes (or fails). Uses the static GLTFDocument method
+# so the registration is process-global across all GLTFDocument instances.
+static func register_all() -> Array:
+    var instances := [
+        _VRMC_vrm.new(),
+        _VRMC_node_constraint.new(),
+        _VRMC_springBone.new(),
+        _VRMC_materials_mtoon.new(),
+        _VRMC_materials_hdr_emissiveMultiplier.new(),
+    ]
+    for inst in instances:
+        GLTFDocument.register_gltf_document_extension(inst)
+    return instances
+
+static func unregister_all(instances: Array) -> void:
+    for inst in instances:
+        GLTFDocument.unregister_gltf_document_extension(inst)
+GD
+```
+
+- [ ] **Step 2: Write session.gd with load + dispose**
 
 ```bash
 cat > adapters/godot-vrm/src/session.gd <<'GD'
@@ -652,7 +758,7 @@ cat > adapters/godot-vrm/src/session.gd <<'GD'
 
 class_name Session
 
-const vrm_extension_class := preload("res://addons/vrm/vrm_extension.gd")
+const VrmRuntimeExtensions := preload("res://src/vrm_runtime_extensions.gd")
 const MAGENTA := Color(1.0, 0.0, 1.0)
 
 var session_id: String = ""
@@ -671,20 +777,18 @@ func load_vrm(tree_root: Node, params: Dictionary) -> Dictionary:
         return _err(-32602, "missing path")
 
     var gltf := GLTFDocument.new()
-    var ext: GLTFDocumentExtension = vrm_extension_class.new()
-    gltf.register_gltf_document_extension(ext, true)
+    var registered := VrmRuntimeExtensions.register_all()
     var state := GLTFState.new()
     state.set_additional_data(&"vrm/head_hiding_method", 0)
     state.set_additional_data(&"vrm/first_person_layers", 2)
     state.set_additional_data(&"vrm/third_person_layers", 4)
     state.handle_binary_image = GLTFState.HANDLE_BINARY_EMBED_AS_UNCOMPRESSED
-
     var err := gltf.append_from_file(path, state, 0)
-    gltf.unregister_gltf_document_extension(ext)
     if err != OK:
+        VrmRuntimeExtensions.unregister_all(registered)
         return _err(-32001, "LoadFailed", { "reason": "append_from_file err %d" % err })
-
     var built: Node = gltf.generate_scene(state)
+    VrmRuntimeExtensions.unregister_all(registered)
     if built == null:
         return _err(-32001, "LoadFailed", { "reason": "generate_scene returned null" })
 
@@ -750,7 +854,7 @@ func _err(code: int, message: String, data: Variant = null) -> Dictionary:
 GD
 ```
 
-- [ ] **Step 2: Confirm GDScript loads without errors**
+- [ ] **Step 3: Confirm GDScript loads without errors**
 
 ```bash
 godot --headless --path adapters/godot-vrm --quit-after 1 2>&1 | tail -5
@@ -758,7 +862,7 @@ godot --headless --path adapters/godot-vrm --quit-after 1 2>&1 | tail -5
 
 Expected: no `Parse Error` lines.
 
-- [ ] **Step 3: Confirm existing GDScript dispatch tests still pass**
+- [ ] **Step 4: Confirm existing GDScript dispatch tests still pass**
 
 ```bash
 godot --headless --path adapters/godot-vrm --script tests/run_gdscript_tests.gd 2>&1 | tail -3
@@ -766,10 +870,10 @@ godot --headless --path adapters/godot-vrm --script tests/run_gdscript_tests.gd 
 
 Expected: still `7 passed, 0 failed`. Session is new code, not yet wired into operations.gd; L2's tests are untouched.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add adapters/godot-vrm/src/session.gd
+git add adapters/godot-vrm/src/vrm_runtime_extensions.gd adapters/godot-vrm/src/session.gd
 git commit -m "feat(adapters/godot-vrm): session.gd skeleton + load_vrm + dispose"
 ```
 
@@ -1554,7 +1658,16 @@ Use this template:
 
 Fill in the placeholders with actual data from `/tmp/consensus-l3.log`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: File Concern 2 as a known-issue follow-up**
+
+Spike 2's "Pre-existing addon issues" enumerated a `VRMC_vrm.gd:387` `SCRIPT ERROR: Trying to assign value of type 'Skeleton3D' to a variable of type 'ImporterMeshInstance3D'` during `_create_animation_player`. The error is non-fatal but should be filed. Two candidate homes:
+
+- **vrm-asset-generator** — if the root cause is the emitted mesh-node placement (a mesh node reached via the humanoid bone walk), fix the emitter so `gltfnode.mesh == -1` for any node addressable as a bone parent. Add a `docs/findings.md` bullet under "Sixth run" capturing the trigger and the upstream-godot-vrm typed-assignment line.
+- **V-Sekai/godot-vrm** — if the bone/mesh node layout is conformant per the VRM 1.0 spec and the issue is godot-vrm's typed-assignment hardness, file an upstream issue against godot-vrm with a minimal repro VRM.
+
+Decide which home is correct based on the spec reading and link the issue from `docs/findings.md`'s "Sixth run" section.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add adapters/godot-vrm/README.md README.md CLAUDE.md docs/findings.md
