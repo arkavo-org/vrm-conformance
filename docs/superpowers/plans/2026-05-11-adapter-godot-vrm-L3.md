@@ -145,6 +145,20 @@ The spike worked around this by subclassing each VRM 1.0 extension and overridin
 
 ---
 
+## Spike 3 result
+
+- Date: 2026-05-11
+- VRM rendered: `l3_spike.vrm` (vrm-asset-generator emit-default)
+- Pink-magenta count in 9 samples: 0 / 9
+- PNG size: 10582 bytes (1024x1024 valid PNG; magic + IHDR verified)
+- Outcome: MToon shader compiles + renders confirmed (no shader-error pink across the body samples). Exit code 0.
+
+**Pre-existing addon issues surfaced (non-blocking, same as Spike 2):**
+- `VRMC_vrm.gd:957` Dictionary::operator[] warning on `vrm/already_processed` key — same as Spike 2, non-fatal, preflight still returns OK.
+- `Camera3D.look_at` errored ("Node not inside tree. Use look_at_from_position() instead.") because the spike script calls `cam.look_at()` before `vp.add_child(cam)`. Render still succeeded (camera fell back to default orientation, sphere was visible — pink count 0/9). Already noted as a script bug for Task 7 in the Spike 1 result section (line 125). The production renderer (Task 7) must call `look_at()` AFTER `add_child()` or use `look_at_from_position()`.
+
+---
+
 ## Task list
 
 11 tasks. Spikes 1+2+3 are gating — if any fails, stop and re-spec.
