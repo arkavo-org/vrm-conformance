@@ -19,13 +19,13 @@ vrm-conformance has two real adapters (three-vrm + vrm-metal-kit). The [N-way co
 | L1 — package skeleton                         | scaffolded |
 | L2 — JSON-RPC + dispatch                      | scaffolded (all ops return `Unimplemented`) |
 | L3 — Phase 1 ops against V-Sekai/godot-vrm    | shipped |
-| L4 — Phase 2 spring-bone physics ops          | deferred — spring-bone settle/swing tests skip godot-vrm |
+| L4 — Phase 2 spring-bone physics ops          | shipped |
 
-Through L3, Phase 1 ops are real. Remaining ops still return a structured `Unimplemented` error (JSON-RPC code `-32000`):
+Through L4, Phase 1 + spring-bone physics ops are real. Remaining ops still return a structured `Unimplemented` error (JSON-RPC code `-32000`):
 
 | Method | `data.phase` |
 |---|---|
-| `set_humanoid_pose`, `set_root_transform`, `animate_root_transform`, `step_physics`, `reset_physics` | `Phase 2` |
+| `set_humanoid_pose`, `set_root_transform` | `Phase 2` |
 | `set_environment` | `v1.x` |
 | `set_expression` | `Phase 3` |
 | (unknown) | `-32601 method not found` |

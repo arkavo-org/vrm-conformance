@@ -360,6 +360,73 @@ For reference: run 5 had three-vrm at (53, 53, 53) and vrm-metal-kit at (164, 16
 - **godot-vrm flat-white at `mtoon_default`**: file an investigation issue against either `adapters/godot-vrm/src/session.gd` (lighting / tonemap setup) or the upstream Godot-MToon-Shader. Pixel sampling matches the VMK #183 symptom; the fix path likely doesn't.
 - **Concern 2 from Spike 2 (mesh-under-head-bone)**: `addons/godot-vrm/VRMC_vrm.gd:387` emits a `Skeleton3D` → `ImporterMeshInstance3D` typed-assignment SCRIPT ERROR during `_create_animation_player` when the asset generator places the mesh node as a child of a humanoid bone (head). Non-fatal — the renderer recovers and produces output — but worth filing upstream against either `V-Sekai/godot-vrm` (typed-assignment hardness; the line should fail gracefully when the node isn't an `ImporterMeshInstance3D`) or `crates/vrm-asset-generator/` (avoid mesh-as-bone-leaf layouts that trip this branch). Reproducer: any of the chain-skinned spring-bone fixtures emitted by `vrm-asset-generator emit-sweep`.
 
+## Seventh run: godot-vrm L4 shipped — full 80-test 3-way consensus
+
+**Date**: 2026-05-11, vrm-conformance commit `9f5aa7b`.
+
+**Trigger**: godot-vrm L4 landed — `step_physics`, `reset_physics`, `animate_root_transform` are now real implementations driving V-Sekai/godot-vrm's `VRMSecondary` node manually (auto-stepping disabled, `do_process` called explicitly, bone-pose-override clearing for proper reset). All 36 spring-bone tests (18 settle + 18 swing) now render through godot-vrm. **This closes the VMK 1.0 launch blocker.**
+
+**Method**: `scripts/bootstrap-goldens.sh` rendered the full 80-test corpus through three-vrm, vrm-metal-kit, and godot-vrm on macOS 26 (Apple M4 Max, Godot 4.6.2). `scripts/consensus-report.sh` ran pairwise SSIM across the manifest.
+
+**Headline**: All three adapters at 80/80. First time the project has full three-way coverage across the entire corpus. Every spring-bone test now has three independent renderers driving the same physics contract.
+
+### Corpus-wide consensus
+
+```
+Processed 80 test_ids; skipped 0
+consensus_passed: 0/80
+consensus_failed: 80/80
+
+Pairwise SSIM stats across the corpus:
+  pair                                  mean    min     max     n
+  godot-vrm vs three-vrm                0.7042  0.1840  0.9482  80
+  godot-vrm vs vrm-metal-kit            0.8709  0.5301  0.9517  80
+  three-vrm vs vrm-metal-kit            0.7879  0.6313  0.9665  80
+```
+
+All three pairs at `n=80` for the first time. The `three-vrm vs vrm-metal-kit` row is unchanged from run 6 (those renderers didn't move). The `godot-vrm vs *` pairs both gained 36 spring-bone tests' worth of data points:
+
+- `godot-vrm vs three-vrm`: mean +0.0126 (0.6916 → 0.7042), min unchanged (still pinned to the outline cluster).
+- `godot-vrm vs vrm-metal-kit`: mean +0.0188 (0.8521 → 0.8709), min unchanged.
+
+The spring-bone tests are pulling both godot-vrm pair means up — i.e. godot-vrm's spring-bone renders agree with the other two renderers more strongly than its MToon renders do. The godot-vrm/vrm-metal-kit pair remains the tightest cluster across the corpus.
+
+### Top 15 most-divergent test_ids
+
+```
+mtoon_outline_world_0p1                   0.1840  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_outline_world_0p05                  0.3588  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_outline_screen_0p1                  0.4028  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_outline_world_0p03                  0.4330  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_outline_screen_0p05                 0.4711  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_outline_screen_0p03                 0.4967  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_outline_world_0p01                  0.5018  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_outline_screen_0p01                 0.5223  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_doubleSided_true                    0.7045  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_shadingShift_neg0p5                 0.7053  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_shadingShift_neg0p2                 0.7075  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+mtoon_shadingToony_0p75                   0.7079  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+springbone_joints_16                      0.7096  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+springbone_joints_8                       0.7096  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+springbone_segment_0p1                    0.7097  outliers=['vrm-metal-kit', 'three-vrm', 'godot-vrm']
+```
+
+Two `springbone_*` entries crack the top-15 for the first time (`joints_16`, `joints_8`, `segment_0p1`) — but only at ~0.7096, well above the outline-cluster floor of 0.1840. The outline tests still dominate the divergence floor (same 8 entries leading the list as in run 6); their min SSIMs are unchanged because nothing in this run touched outline rendering. The outline-cluster floor hasn't moved with the expanded `n=80` panel — confirming the floor is set by godot-vrm's distinct outline interpretation, not by sample-size noise.
+
+### Observations
+
+- **Spring-bone three-way coverage works.** godot-vrm's manual physics pump (60 Hz fixed step, explicit `do_process` calls, bone-pose-override clearing on reset) produces renders that agree with three-vrm and vrm-metal-kit more strongly than the MToon corpus does. The fact that no spring-bone test cracks the top-8 divergent list — despite three independent physics engines (Godot's, three-vrm's, VMK's) settling the same chain — is the headline methodological win of L4.
+- **mtoon_default flat-white persists** (carried from Run 6). godot-vrm still renders (255, 255, 255) at the sphere center while three-vrm sits at (53, 53, 53) and vrm-metal-kit at (164, 164, 164). L4 didn't touch lighting/tonemap; this remains the leading godot-vrm-specific fidelity bug.
+- **Outline divergence floor (0.1840) is stable at `n=80`.** The floor didn't shift between run 6's `n=44` godot-pair sample and run 7's `n=80`, which means the worst-case outline disagreement is a deterministic three-way property of the renderers — not an artifact of which subset we sampled.
+- **godot-vrm/vrm-metal-kit remains the tightest pair** (mean 0.8709 vs 0.7879 for three-vrm/vmk vs 0.7042 for three-vrm/godot). Both are first-party MToon implementations against the VRMC spec; three-vrm's color-space hypothesis ([three-vrm#1838](https://github.com/pixiv/three-vrm/issues/1838)) continues to keep it as the dimmest of the three. With three renderers' worth of data at full `n`, the consensus diff confidently flags three-vrm as the shading-cluster outlier — the methodology working as designed.
+
+### Open follow-ups
+
+- **godot-vrm flat-white at `mtoon_default`** (carried from Run 6 — still open). Lighting/tonemap investigation against `adapters/godot-vrm/src/session.gd` or the upstream Godot-MToon-Shader is the next concrete fidelity win available.
+- **`springbone_joints_16` / `joints_8` / `segment_0p1`** crack the top-15 divergent list at ~0.7096. Worth a closer look — the chains agree well enough not to dominate the floor but they're meaningfully lower than the spring-bone median. Candidates: joint-count edge cases (longer chains accumulate more drift per step), per-joint segment-length scaling, or a `do_process` ordering subtlety in long chains.
+- **Linux CI driver spike** (still pending from L3). The whole corpus runs on macOS today; a Linux driver pass would validate that the godot-vrm shim doesn't inherit anything macOS-specific from the Godot path.
+- **Concern 2 from Spike 2 (mesh-under-head-bone)** (still open from Run 6). Non-fatal `VRMC_vrm.gd:387` typed-assignment script error during chain-skinned imports; renderer recovers and emits output.
+
 ## How to reproduce
 
 ```bash
