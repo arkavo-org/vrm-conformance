@@ -6,10 +6,10 @@
 
 **Goal:** Land the six Phase 1 ops (`load_vrm`, `set_camera`, `set_lighting`, `set_post_processing`, `render`, `dispose`) as real implementations driving V-Sekai/godot-vrm via GDScript, so `vrm-runner execute-test-plan` produces actual PNG renders through this adapter and `scripts/bootstrap-goldens.sh` picks it up as the third real renderer alongside three-vrm and vrm-metal-kit.
 
-**Architecture:** Vendor V-Sekai/godot-vrm @ `9fae4049f20954e70d9d7de6f3ed2695a6870e04` and V-Sekai/Godot-MToon-Shader @ `27cb2b78f13ce473c1ccdcf14c30a835c2193fbd` into `adapters/godot-vrm/addons/`. Introduce `src/session.gd` as a stateful object owning the loaded VRM scene + SubViewport + camera + lights. `operations.gd` keeps the Phase 2/reserved entries returning `Unimplemented`; Phase 1 entries dispatch to Session methods. Runs in Godot's `--headless --rendering-driver <real-driver>` mode (the spike confirms which driver works on Linux CI vs macOS dev).
+**Architecture:** Vendor V-Sekai/godot-vrm @ `9fae4049f20954e70d9d7de6f3ed2695a6870e04` and V-Sekai/Godot-MToon-Shader @ `27cb2b78f13ce473c1ccdcf14c30a835c2193fbd` into `adapters/godot-vrm/addons/`. Introduce `src/session.gd` as a stateful object owning the loaded VRM scene + SubViewport + camera + lights. `operations.gd` keeps the Phase 2/reserved entries returning `Unimplemented`; Phase 1 entries dispatch to Session methods. Runs Godot offscreen with `--display-driver macos --rendering-driver metal --audio-driver Dummy` on macOS (verified by Spike 1; `--headless` is incompatible with real rendering — see Spike 1 result). Linux CI will need a follow-up spike to determine the equivalent flag combination (likely `xvfb-run` + `--display-driver x11 --rendering-driver vulkan`).
 
 ```
-runner ──framed stdio──> vrm-godot-shim ──NDJSON over TCP──> godot --headless --rendering-driver opengl3
+runner ──framed stdio──> vrm-godot-shim ──NDJSON over TCP──> godot --display-driver macos --rendering-driver metal --audio-driver Dummy
                                                                   │
                                                                   ├─ main.gd (TCP client)
                                                                   ├─ tcp_session.gd (NDJSON dispatch loop)
@@ -27,7 +27,7 @@ runner ──framed stdio──> vrm-godot-shim ──NDJSON over TCP──> god
 
 Three load-bearing assumptions; each gets a spike task in the plan, in order. A failure on any one stops the plan for re-spec.
 
-1. **Headless rendering works on macOS.** Godot's default `--headless` may select a "Dummy" rendering driver that doesn't render. We need `--rendering-driver opengl3` (or similar) to be available and to produce actual pixel output. Spike: render a magenta-clear SubViewport in pure GDScript without any VRM, save PNG, verify file is non-trivial and has the expected dimensions.
+1. **Offscreen rendering works on macOS.** Godot's `--headless` is a hard alias for `--display-driver headless --audio-driver Dummy`, which forces the dummy rendering driver (no pixel output). We need a real display driver (`--display-driver macos`) paired with a real rendering driver (`--rendering-driver metal`) and audio suppressed (`--audio-driver Dummy`) to produce actual pixel output without a visible window. Spike: render a magenta-clear SubViewport in pure GDScript without any VRM, save PNG, verify file is non-trivial and has the expected dimensions.
 
 2. **VRM 1.0 loads at runtime via `GLTFDocument` + `vrm_extension.gd`.** The addon was written for editor-time import (`_import_scene` callback in `import_vrm.gd`), but the inner mechanism is `GLTFDocument.append_from_file` which is runtime-callable. Spike: load a generated VRM, walk the scene tree, assert there's a `Skeleton3D` with the head bone.
 
@@ -214,6 +214,8 @@ Commit will be large (~250 KB of GDScript + shader files); that's expected. Look
 ---
 
 ### Task 2: Spike — headless SubViewport render-to-PNG (no VRM)
+
+> **Spike already executed (2026-05-11) — see "Spike 1 result" section above.** The `--headless --rendering-driver <opengl3|vulkan>` flag combinations referenced in the steps below were tried and FAILED (the `--headless` alias forces the dummy rendering driver, ignoring `--rendering-driver`). The working combination is `--display-driver macos --rendering-driver metal --audio-driver Dummy` — downstream tasks (3, 4, 8) already use that combination. The steps below are preserved as the audit trail of how the working flag set was discovered.
 
 **Files:**
 - Create: `/tmp/godot-render-spike.gd` (throwaway — never committed)
@@ -415,15 +417,16 @@ func _init() -> void:
 GD
 ```
 
-- [ ] **Step 3: Run the spike** (use the rendering driver determined in Spike 1)
+- [ ] **Step 3: Run the spike** (use the flag combination verified in Spike 1)
 
 ```bash
-godot --headless --rendering-driver opengl3 --path adapters/godot-vrm \
+godot --display-driver macos --rendering-driver metal --audio-driver Dummy \
+  --path adapters/godot-vrm \
   --script /tmp/godot-vrm-load-spike.gd \
   -- /tmp/godot-l3-assets/l3_spike.vrm 2>&1 | tail -15
 ```
 
-Replace `opengl3` if Spike 1 chose a different driver.
+This flag combination is macOS-specific (verified by Spike 1). Linux CI will need a separate spike (likely `xvfb-run` + `--display-driver x11 --rendering-driver vulkan`).
 
 Expected: stdout shows `scene root: <name>`, `node-type counts: {...}` (with `MeshInstance3D` count >= 1 and `Skeleton3D` count == 1), and `skeleton bone count: NN` with NN >= 1. Exit 0.
 
@@ -557,11 +560,14 @@ GD
 - [ ] **Step 2: Run the spike**
 
 ```bash
-godot --headless --rendering-driver opengl3 --path adapters/godot-vrm \
+godot --display-driver macos --rendering-driver metal --audio-driver Dummy \
+  --path adapters/godot-vrm \
   --script /tmp/godot-vrm-render-spike.gd \
   -- /tmp/godot-l3-assets/l3_spike.vrm /tmp/godot-l3-render.png 2>&1 | tail -10
 ls -la /tmp/godot-l3-render.png
 ```
+
+This flag combination is macOS-specific (verified by Spike 1). Linux CI will need a separate spike (likely `xvfb-run` + `--display-driver x11 --rendering-driver vulkan`).
 
 Expected:
 - `magenta-or-pink pixels in 9 samples: 0 / 9` (or at most 4 — the background corners are real magenta, sphere fills the center, the 5 center-cluster samples should be sphere pixels at neutral gray).
@@ -1112,7 +1118,7 @@ Expected: clean parse; 7 passed, 0 failed (the dispatch unit tests don't exercis
 
 - [ ] **Step 5: Manual end-to-end smoke — load + render via the shim**
 
-The wrapper script already invokes Godot via the shim. We need to pass the rendering-driver flag to Godot. **Update `crates/vrm-godot-shim/src/child.rs`** to pass `--rendering-driver opengl3` (or the winning flag from Spike 1):
+The wrapper script already invokes Godot via the shim. We need to pass the verified Spike 1 flag combination to Godot. **Update `crates/vrm-godot-shim/src/child.rs`** to swap `--headless` for the real-rendering trio (`--display-driver macos --rendering-driver metal --audio-driver Dummy`):
 
 Read child.rs, find the `spawn_godot` function, locate the line:
 
@@ -1123,9 +1129,12 @@ cmd.arg("--headless")
 Change to:
 
 ```rust
-cmd.arg("--headless")
-    .arg("--rendering-driver").arg("opengl3")
+cmd.arg("--display-driver").arg("macos")
+    .arg("--rendering-driver").arg("metal")
+    .arg("--audio-driver").arg("Dummy")
 ```
+
+Note: this flag combination is macOS-specific. Linux CI will need a follow-up spike to determine the equivalent (likely `--display-driver x11 --rendering-driver vulkan` invoked under `xvfb-run`). The L1+L2 CI workflow's GDScript dispatch tests use `--headless --quit-after`/`--script` which is fine for parse-only invocations; the L3 render path needs a real display driver.
 
 Then:
 
