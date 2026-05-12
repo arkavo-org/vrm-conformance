@@ -37,6 +37,29 @@ Spike (Task 1) validates these assumptions on a real spring-bone VRM: load, find
 
 ---
 
+## Spike 1 result
+
+- Date: 2026-05-11
+- Asset: `vrm-asset-generator emit-springbone --id l4_spike` (gravity_dir [0,-1,0], gravity_scale 0.5, drag 0.5, 4-joint vertical chain at y=1.26..1.11).
+- Found VRMSecondary: node name `secondary`, class `Node3D`, script `addons/vrm/vrm_secondary.gd` — `_find_vrm_secondary` walks fine.
+- Default process_mode: `0` (PROCESS_MODE_INHERIT).
+- After setting `PROCESS_MODE_DISABLED`: process_mode reads `4`. Auto-stepping confirmed off.
+- `spring_bones_internal[0].verlets` exists (3 verlets for a 4-joint chain), `current_tail` field present on each `VRMSpringBoneLogic`.
+- **Claim 1 (manual step advances physics): CONFIRMED.** With the test asset's perfectly-axis-aligned chain, gravity-only stepping produces zero motion because the verlet length-constraint at `vrm_spring_bone_logic.gd:81` re-normalizes the force vector back onto the chain axis. Adding a non-axis perturbation `springbone_add_force = (1, 0, 0)` and running 30 steps at 1/60 s moves verlet[0] from `(0, 1.26, 0)` to `(0.0447, 1.2876, 0)` — delta magnitude `0.0526`. Without perturbation, delta is `0.0` (correct physics, not a control-surface bug). Real test plans excite chains via `animate_root_transform` translation, which produces the perturbation.
+- **Claim 2 (process_mode disable stops auto-stepping): CONFIRMED.** Setting `process_mode = PROCESS_MODE_DISABLED` (4) before any process tick prevents `_process`/`_physics_process` from running. In Godot 4.6 the addon also installs a `SkeletonModifier3D` child that auto-pumps physics — `PROCESS_MODE_DISABLED` propagates to that child too (verified: bone overrides do not change between manual steps).
+- **Claim 3 (`_ready()` resets to rest): CONFIRMED WITH CAVEAT.** Calling `_ready()` alone after the chain has been perturbed does NOT restore tail positions, because the addon writes pose overrides via `skel.set_bone_global_pose(...)` (in `vrm_spring_bone_logic.gd:99`) and `_ready()` re-initializes verlets from the current (overridden) skeleton pose. Full reset requires clearing pose state first:
+  ```gdscript
+  skel.clear_bones_global_pose_override()
+  for i in range(skel.get_bone_count()):
+      skel.set_bone_pose_rotation(i, skel.get_bone_rest(i).basis.get_rotation_quaternion())
+      skel.set_bone_pose_position(i, skel.get_bone_rest(i).origin)
+  secondary._ready()
+  ```
+  With this sequence, `current_tail` returns exactly to `(0, 1.26, 0)` — delta from initial: `0.0`.
+- Outcome: control surface confirmed. `reset_physics` (Task 3) must include the pose-clear-and-rest preamble before `_ready()`, otherwise reset is a no-op after the first stepped frame. Plan body of Task 3 needs that update.
+
+---
+
 ## File Structure
 
 ```
