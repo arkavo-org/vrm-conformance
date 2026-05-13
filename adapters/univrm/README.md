@@ -18,7 +18,7 @@ runner ◀───results.ndjson───────────────�
 | L3 — Phase 1 ops real (`load_vrm`, `set_camera`, `set_lighting`, `set_post_processing`, `render`) | deferred |
 | L4 — Phase 2 spring-bone physics ops | deferred |
 
-Through L2, the runner side speaks the full batch contract end-to-end against mock-binary fixtures (`crates/vrm-runner/tests/fixtures/mock-univrm-*.sh`). The Unity side compiles cleanly with UniVRM v0.131.2 pinned via UPM but `Conformance.RunBatch` is a stub — every test returns `-32000 Unimplemented` with `data.phase: "L3"`. Real rendering arrives in the L3 plan.
+Through L2, the runner side speaks the full batch contract end-to-end against mock-binary fixtures (`crates/vrm-runner/tests/fixtures/mock-univrm-*.sh`). The Unity side compiles cleanly with UniVRM v0.131.0 pinned via UPM but `Conformance.RunBatch` is a stub — every test returns `-32000 Unimplemented` with `data.phase: "L3"`. Real rendering arrives in the L3 plan.
 
 ## Runtime dependency
 

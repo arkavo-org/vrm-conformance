@@ -1,0 +1,14 @@
+{
+  "name": "Conformance.Editor",
+  "rootNamespace": "Conformance.Editor",
+  "references": [ "Conformance" ],
+  "includePlatforms": [ "Editor" ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
