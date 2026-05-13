@@ -64,12 +64,15 @@ namespace Conformance
 
         public static void AssertPostProcessingSupported(Manifest.PostProcessingDto p)
         {
-            if (p.tone_mapping != "None")
+            // The runner serializes ToneMapping with `rename_all = "lowercase"`,
+            // so the wire value is "none" (not "None"). Accept the canonical
+            // serialized form.
+            if (p.tone_mapping != "none")
             {
                 throw new UnsupportedFeatureException(
                     feature: "tone_mapping",
                     value: p.tone_mapping,
-                    supported: new[] { "None" });
+                    supported: new[] { "none" });
             }
         }
     }

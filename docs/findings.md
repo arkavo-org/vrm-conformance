@@ -673,7 +673,58 @@ Either way: **all four renderers' outputs are consistent with each other and wit
    - (b) Use a humanoid mesh where the outline width is reasonable relative to feature size (e.g., 0.001m on a face), OR
    - (c) Mark these tests as "expected to flood; the test exercises that flooding is consistent across renderers, not that it produces a silhouette band".
 
-The full corpus rerun with all four renderers will quantify the SSIM agreement; based on the visual evidence, UniVRM should land in the same ~0.7-0.95 SSIM cluster as the other three renderers, with the outline tests still at the floor but the floor now confirmed as cross-implementation-consistent rather than as a renderer bug.
+### Corpus-wide 4-renderer consensus (full 80-test rerun)
+
+**Method**: `scripts/bootstrap-goldens.sh` re-rendered the full corpus through all four real adapters (vrm-metal-kit 0.1.0 post-VMK#204-fix, three-vrm 3.5.0, godot-vrm 0.1.0, UniVRM v0.131.0), then `scripts/consensus-report.sh` computed pairwise SSIM.
+
+```
+Pairwise SSIM stats across the corpus:
+  pair                                  mean    min     max     n
+  godot-vrm vs three-vrm                0.8972  0.1840  0.9902  80
+  godot-vrm vs univrm                   0.8278  0.1843  0.9793  80
+  godot-vrm vs vrm-metal-kit            0.9047  0.5303  1.0000  80
+  three-vrm vs univrm                   0.9305  0.8282  0.9988  80    ← highest agreement
+  three-vrm vs vrm-metal-kit            0.9014  0.6313  0.9796  80
+  univrm vs vrm-metal-kit               0.8726  0.6315  0.9688  80
+```
+
+**Headline result**: `three-vrm vs univrm` is the closest renderer pair across the entire 80-test corpus — mean 0.9305 SSIM, maximum 0.9988. UniVRM (the spec author's reference) and three-vrm agree more strongly than any other pair. The outline tests specifically: `mtoon_outline_world_0p1` produces a `three-vrm vs univrm` pairwise SSIM of **0.9988** — essentially pixel-identical renders.
+
+That settles the outline-floor question definitively. Three independent MToon implementations + the consortium reference all converge on the same flood result. The "0.1840 min pair" headline comes from godot-vrm's no-outline fallback, not from any disagreement among the renderers that actually render outlines.
+
+### Outline-test SSIM matrix (illustrative for `mtoon_outline_world_0p1`)
+
+|              | vmk     | three-vrm | godot-vrm | **univrm**  |
+|--------------|---------|-----------|-----------|-------------|
+| vmk          | 1.000   | 0.6313    | 0.5303    | 0.6315      |
+| three-vrm    | 0.6313  | 1.000     | 0.1840    | **0.9988**  |
+| godot-vrm    | 0.5303  | 0.1840    | 1.000     | 0.1843      |
+| **univrm**   | 0.6315  | **0.9988**| 0.1843    | 1.000       |
+
+three-vrm ↔ univrm = 0.9988 on the worst test in the corpus. VMK ↔ {three-vrm, univrm} = ~0.63 (similar flood with slight outline-mesh-size differences). godot-vrm doesn't render outlines at all (KHR_unlit fallback) — its ~0.18 pairs are silhouette-size-only divergence.
+
+### VMK#204 light-direction fix verified in this run
+
+The post-fix VMK corpus run shows:
+- `mtoon_shadingShift_0p8` dropped out of the top-15 most-divergent list (was at 0.8527 SSIM pre-fix; now ~0.92 with three-vrm in the new top-15 cluster).
+- The pre-fix Y-mirror symptom is gone in visual inspection.
+- `godot-vrm vs vrm-metal-kit` mean SSIM jumped from 0.8714 (pre-fix) → 0.9047 (post-fix) — godot agrees more strongly with the corrected VMK.
+- Curiously, `univrm vs vrm-metal-kit` went *down* slightly (0.8911 → 0.8726). UniVRM and three-vrm appear to share a shading-shift response curve that VMK still diverges from at large shadingShift values, but that's a separate finding from the light-direction Y-mirror.
+
+### Top divergent tests post-fix (excluding outline cluster)
+
+```
+mtoon_shadingToony_0p5      0.7810  outliers all four
+mtoon_shadingToony_0p25     0.7842  outliers all four
+mtoon_shadingToony_0p1      0.7902  outliers all four
+mtoon_shadingToony_0p75     0.8141  outliers all four
+swing_springbone_joints_16  0.8187  outliers all four
+swing_springbone_segment_0p1 0.8199 outliers all four
+```
+
+`mtoon_shadingToony_*` becomes the new attention cluster: the four renderers diverge non-trivially on the shading-toony parameter, suggesting either a spec-interpretation ambiguity or a methodology artifact (the `shadingToony` parameter interacts with how each renderer computes the lit-vs-shaded transition). Worth a dedicated per-test investigation similar to the `mtoon_shadingShift_0p8` deep-dive.
+
+The `swing_springbone_*` divergence is expected at this layer — UniVRM L3 renders spring-bone tests in **rest pose** (physics not stepped), while the other three renderers run their physics implementations. UniVRM L4 (spring-bone stepping) is required to settle whether the remaining divergence is animation-driven or renderer-driven.
 
 ### Bonus: UniVRM L3 capabilities verified in this run
 

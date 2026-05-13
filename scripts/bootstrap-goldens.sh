@@ -218,6 +218,77 @@ else
     echo "==> Skipping godot-vrm (SKIP_GODOT_VRM=1)"
 fi
 
+# UniVRM uses the batched adapter contract (one Unity invocation for the
+# whole batch) — execute-test-batch instead of execute-test-plan. See
+# rfcs/0003-engine-idiom-divergence.md.
+if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
+    UNIVRM_BIN_DEFAULT="/Applications/Unity/Hub/Editor/6000.4.6f1/Unity.app/Contents/MacOS/Unity"
+    UNITY_BIN_PATH="${UNITY_BIN:-$UNIVRM_BIN_DEFAULT}"
+    if [ -x "$UNITY_BIN_PATH" ]; then
+        echo "==> UniVRM (batched, Unity 6 + UniVRM v0.131.0)"
+        UNIVRM_OUT="$GOLDENS_DIR/univrm"
+        mkdir -p "$UNIVRM_OUT"
+
+        # Stage both asset dirs into one plans dir so a single batch covers
+        # all 80 test_ids and writes a single local-manifest.json.
+        UNIVRM_STAGE="$GOLDENS_DIR/_univrm_stage"
+        rm -rf "$UNIVRM_STAGE" && mkdir -p "$UNIVRM_STAGE"
+        for src in "$ASSETS_DIR" "${SWING_DIR:-}"; do
+            [ -z "$src" ] && continue
+            [ ! -d "$src" ] && continue
+            for f in "$src"/*.test.yaml "$src"/*.vrm; do
+                [ ! -f "$f" ] && continue
+                ln -sf "$f" "$UNIVRM_STAGE/$(basename "$f")"
+            done
+        done
+        cargo run --release -q -p vrm-runner -- execute-test-batch \
+            --plans "$UNIVRM_STAGE" \
+            --adapter-bin "$ROOT/adapters/univrm/launcher.sh" \
+            --output-dir "$UNIVRM_OUT" \
+            --renderer-name univrm \
+            --json 2>&1 | tail -3
+
+        # Push each ok PNG to the goldens manifest.
+        if [ -f "$UNIVRM_OUT/local-manifest.json" ]; then
+            entries_json=$(cat "$UNIVRM_OUT/local-manifest.json")
+            ok_test_ids=$(python3 -c "
+import json
+m = json.loads('''$entries_json''')
+for e in m.get('entries', []):
+    if e.get('status') == 'ok':
+        print(e['test_id'])
+")
+            echo "    pushing $(echo "$ok_test_ids" | wc -w | tr -d ' ') univrm PNGs to manifest"
+            for test_id in $ok_test_ids; do
+                png="$UNIVRM_OUT/${test_id}.png"
+                [ ! -f "$png" ] && continue
+                push_args=(
+                    --file "$png"
+                    --test-id "$test_id"
+                    --renderer-name univrm
+                    --renderer-version v0.131.0
+                    --git-hash "$GIT_HASH"
+                    --os "$OS"
+                    --os-version "$OS_VERSION"
+                    --gpu-vendor "$GPU_VENDOR"
+                    --gpu-model "$GPU_MODEL"
+                    --manifest "$MANIFEST"
+                )
+                if [ "$PUSH_MODE" = "local" ]; then
+                    push_args+=(--local)
+                fi
+                cargo run --release -q -p vrm-s3 --bin push-goldens -- "${push_args[@]}" >/dev/null
+            done
+        fi
+    else
+        echo "==> Skipping UniVRM (Unity not at $UNITY_BIN_PATH; set UNITY_BIN env)"
+    fi
+elif [ "${RUN_UNIVRM:-0}" = "1" ]; then
+    echo "==> Skipping UniVRM (not macOS)"
+else
+    echo "==> Skipping UniVRM (set RUN_UNIVRM=1 to enable)"
+fi
+
 echo
 if [ -f "$MANIFEST" ]; then
     COUNT=$(python3 -c "import json; print(len(json.load(open('$MANIFEST'))['entries']))")
