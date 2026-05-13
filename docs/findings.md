@@ -713,13 +713,24 @@ That settles the outline-floor question definitively. Three independent MToon im
   VRMMetalKit   ≥ declared threshold vs UniVRM:  63 / 76  ( 83%)   ← VMK 0.13.5; up from 53/76 at 0.13.4
 ```
 
-VMK 0.13.5 (commit `c01ac8a`) closed [VMK#205](https://github.com/arkavo-org/VRMMetalKit/issues/205) (PR #207, /π Lambert normalization in MToonShader.metal) and [VMK#206](https://github.com/arkavo-org/VRMMetalKit/issues/206) (PR #208, VRMNode.updateWorldTransform re-derives localMatrix from T/R/S). Net effect on this corpus:
+**Update (after vrm-conformance sRGB-encoding fix in the VMK adapter)**: VMK 0.13.5 corpus run, post-adapter-fix, lifts the conformance pass-rate from 63/76 (83%) to **66/76 (87%)**. The fix corrected two adapter bugs surfaced by the VMK team's #213 root-cause analysis: (1) case-sensitive `colorSpace == "Srgb"` comparison against the lowercase wire form `"srgb"`, and (2) `RendererConfig.colorPixelFormat` defaulted to `.bgra8Unorm` with no override before pipeline lock-in. VMK was writing linear bytes (byte 118 on `shadingShift_0p8` center pixel) where UniVRM and three-vrm wrote sRGB-encoded bytes (181 and 230). The shadingShift "regression" identified in the 0.13.5-to-0.13.6 finding was actually this encoding bug; VMK's shading math was correct.
+
+Post-fix VMK shadingShift_0p8 center pixel: **byte 181** — exactly what the diagnosis predicted. The byte-for-byte match confirms the encoding was the bug, not the shader math.
+
+VMK 0.13.5 (commit `c01ac8a`) closed [VMK#205](https://github.com/arkavo-org/VRMMetalKit/issues/205) (PR #207, /π Lambert normalization in MToonShader.metal) and [VMK#206](https://github.com/arkavo-org/VRMMetalKit/issues/206) (PR #208, VRMNode.updateWorldTransform re-derives localMatrix from T/R/S). Net effect on this corpus (pre-sRGB-fix):
 
 - **Swing-springbone cluster (#206 closed)**: 18/18 lifted from 0.7985-0.8025 → 0.8916-0.8965. All pass the 0.85 threshold now.
 - **shadingToony cluster (#205 partial close)**: All 8 SSIMs shifted up by +0.01 to +0.02. Tests at toony ≥ 0.9 now pass; tests at toony 0 → 0.75 still below 0.85 — see [VMK#213](https://github.com/arkavo-org/VRMMetalKit/issues/213) for the residual curve-shape divergence.
 - **shadingShift regression (NEW in 0.13.5)**: 2 tests that passed pre-0.13.5 (`shadingShift_0p8`, `shadingShift_1`) dropped below 0.85 (0.90 → 0.82, 0.94 → 0.83). The /π normalization changed the direct/ambient ratio in a way that interacts with positive-shift boundary placement. Tracked in [VMK#213](https://github.com/arkavo-org/VRMMetalKit/issues/213) alongside the toony residual; both clusters likely share a root cause in the MToon shader's curve math.
 
-For VRMMetalKit specifically, the remaining gap to 76/76 is **13 tests** spread across two clusters in one upstream-fixable issue:
+**Residual gap after the sRGB-encoding fix (10 tests below their declared threshold):**
+
+- **4 shadingToony tests** at SSIM 0.83–0.85: `_0`, `_0p1`, `_0p25`, `_0p5`. Curve-shape divergence (real, not encoding). Filed as the [VMK#213](https://github.com/arkavo-org/VRMMetalKit/issues/213) residual; smoothstep math between `shade` and `base` color differs from UniVRM at low toony values.
+- **6 rimLightingMix tests** at SSIM 0.9078: NEW finding revealed by the encoding fix. The pre-fix 0.97 SSIM was a coincidence of linear-vs-sRGB byte alignment on rim-colored pixels. Real cross-pair signal: three-vrm↔UniVRM = 0.9902, godot-vrm↔UniVRM = 0.9793, VMK↔UniVRM = 0.9078 — **VMK is the outlier on rim-fresnel math**. All 6 tests have *identical* pairwise SSIMs across the rim_lighting_mix parameter sweep — suggesting either the rim color isn't being modulated by the parameter on VMK's side, or the divergence is a constant offset regardless of parameter value. File-worthy as a separate upstream issue.
+
+The 3 outline tests below 0.85 in the divergent list (`world_0p1`, `screen_0p1`, `world_0p05`) are `conformance_status: Excluded` and don't count toward the pass-rate — they're spec-correct flood per vrm-conformance#3.
+
+For VRMMetalKit specifically, the remaining gap to 76/76 is **10 tests** spread across two clusters, both upstream-fixable:
 
 The 26 tests outside that band split into three named clusters; only one of the three is an open question for VMK at RC time:
 

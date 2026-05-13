@@ -189,6 +189,24 @@ final class Operations: @unchecked Sendable {
             var config = RendererConfig()
             config.sampleCount = Operations.msaaSampleCount
             config.strict = .off
+            // Bake the sRGB-encoded color attachment into the pipeline state
+            // at load time. VRMMetalKit's pipeline objects are locked to
+            // `config.colorPixelFormat` here; if the render-time target's
+            // pixel format diverges, Metal writes raw linear bytes to the
+            // target regardless of the descriptor's sRGB flag. The
+            // methodology pins `color_space: srgb` for SSIM-grade comparison
+            // (docs/methodology.md), so .rgba8Unorm_srgb is the right
+            // default. A test requesting Linear output (diagnostic only per
+            // methodology) still routes through this pipeline; the cost is
+            // an extra OETF cycle, not a correctness issue.
+            //
+            // This bug was surfaced by VMK#213 (vrm-conformance run 12) —
+            // VMK rendered shadingShift_0p8 center pixels at byte 118
+            // (linear of 0.461) while three-vrm + UniVRM produced byte 181
+            // (sRGB-encoded). Locking the format here, plus the
+            // case-insensitive render-time comparison below, closes that
+            // gap entirely.
+            config.colorPixelFormat = .rgba8Unorm_srgb
             let renderer = VRMRenderer(device: device, config: config)
             renderer.loadModel(model)
             // Enable spring-bone physics during draws. No-op for models
@@ -395,7 +413,12 @@ final class Operations: @unchecked Sendable {
         // Magenta clear color: matches the mock-renderer + three-vrm
         // sentinel so the diff engine's bbox-relative property assertions
         // can find the avatar against a known background.
-        let colorPixelFormat: MTLPixelFormat = (colorSpace == "Srgb") ? .rgba8Unorm_srgb : .rgba8Unorm
+        // Case-insensitive: the wire format is `vrm_test_plan::ColorSpace`
+        // serialized via `#[serde(rename_all = "lowercase")]` ⇒ "srgb" /
+        // "linear". The original adapter compared against PascalCase
+        // "Srgb" — always false — silently selecting .rgba8Unorm and
+        // writing linear bytes to the target. See VMK#213.
+        let colorPixelFormat: MTLPixelFormat = (colorSpace.lowercased() == "srgb") ? .rgba8Unorm_srgb : .rgba8Unorm
         let sampleCount = Operations.msaaSampleCount
 
         // Multisample color attachment (.private — GPU only, not CPU-readable).
