@@ -611,9 +611,27 @@ The Math.PI scaling is a net positive for the corpus:
 
 The `three-vrm vs vrm-metal-kit` pair mean is essentially flat between runs 9 and 10 (0.8975 → 0.8953), but the `godot-vrm vs three-vrm` mean — the second-best signal — moved from 0.8398 to 0.8972, putting both three-vrm-involving pairs in the same ~0.89 band for the first time. The corpus is now clustered tightly enough that adding a fourth renderer (UniVRM) for outlier-detection consensus is the obvious next move.
 
+### Per-test deep-dive: `mtoon_shadingShift_0p8` (0.8527 floor for shading)
+
+Visual comparison of the three renderers on this single test (added post-bootstrap, same renders as the table above):
+
+| renderer | render description |
+|---|---|
+| three-vrm | small shadow region in **lower-right** of the sphere; rest lit. Consistent with test plan's directional dir `[-0.3, -0.6, -0.7]` — light travels down-and-toward-the-camera-from-the-left, so the lit hemisphere is upper-left and shadow is lower-right. Spec-correct shading-boundary position for `shadingShiftFactor: 0.8`. |
+| vrm-metal-kit | small shadow region in **upper-right** — Y-component of light direction or surface normal appears flipped. Same general "mostly-lit with localized shadow" shape as three-vrm, just mirrored vertically. |
+| godot-vrm | **flat white, no shading visible** — same surface as `mtoon_default` flat-white bug from run 6+. The `VRMC_materials_mtoon` parameters aren't being honored; `shadingShiftFactor` has no effect. |
+
+Two distinct upstream findings:
+
+1. **VRMMetalKit Y-axis convention** — directional-light Y-component or surface-normal Y-component is sign-flipped relative to three-vrm's interpretation. Test plan's negative-Y directional ("light travels downward") should produce shadow in the *lower* hemisphere; VMK puts it in the *upper* hemisphere. This is a new upstream finding worth filing against `arkavo-org/VRMMetalKit` after UniVRM (renderer #4) confirms which Y convention is spec-intended.
+
+2. **godot-vrm MToon parameter binding** — the persistent `mtoon_default` flat-white bug now has a second corroborating data point: `shadingShiftFactor: 0.8` produces no visible shadow on the godot-vrm render. Either the V-Sekai/godot-vrm importer isn't binding `VRMC_materials_mtoon.shadingShiftFactor` to the shader's uniform, or the Godot-MToon-Shader doesn't sample the parameter. Worth filing upstream as a follow-up to the existing `mtoon_default` open issue.
+
+The 0.8527 SSIM floor for `mtoon_shadingShift_0p8` is well-explained by these two divergences combined.
+
 ### Open follow-ups
 
-- **VRMMetalKit's intensity / shading interpretation** — now the consensus minority on MToon shading. Worth a dedicated investigation against MToon-1.0 spec to determine whether VMK's interpretation is closer to or further from spec. Filing an issue against VRMMetalKit is appropriate once UniVRM lands and can confirm directionally.
+- **VRMMetalKit's intensity / shading interpretation** — now the consensus minority on MToon shading. Combined with the new Y-axis-flip finding from `mtoon_shadingShift_0p8`, there's a strong case for a dedicated upstream investigation. File once UniVRM is rendering to confirm directionally.
 - **Outline floor (0.1840)** — unchanged across runs 9–10. Still gated on the asset-side investigation from [three-vrm#1839](https://github.com/pixiv/three-vrm/issues/1839)'s close-out.
 - **UniVRM as renderer #4** — scaffold (L1+L2) shipped in this session; L3+L4 deferred. With four renderers, consensus-of-3 can replace consensus-of-2 for outlier-flagging, which will be especially valuable for the ~0.89 cluster where one of three renderers (currently VMK on MToon shading) is the consensus minority.
 
