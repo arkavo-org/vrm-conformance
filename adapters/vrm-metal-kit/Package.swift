@@ -21,7 +21,11 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
-        // 0.13.3 (commit 83c9da1) closes:
+        // 0.13.4 (commit 4223876) closes:
+        //   - #189 (GLTFParser BIN-chunk leak)
+        //   - #190 (VRMA lookAt head-local space)
+        //   - PR #188 (DocC catalog + 8 articles)
+        // 0.13.3 (commit 83c9da1) closed:
         //   - #183 (flat-white MToon sphere — Half-Lambert remap saturated
         //          shadowStep=1 with shadingToonyFactor=0.9 + typical
         //          directional lighting; collapsed color to baseColor
@@ -31,10 +35,10 @@ let package = Package(
         // 0.13.1 (commit 9404287) closed:
         //   - #181 (non-skinned mesh dropped when skin present)
         //   - #182 (VRM 1.0 spring chain over-expansion)
-        // All four were first filed by this conformance suite.
+        // All five were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "83c9da1d68f6186eeea838423741de0936f786df"
+            revision: "42238767e53d72375f5eebecad2ecbafc1690cad"
         ),
     ],
     targets: [
