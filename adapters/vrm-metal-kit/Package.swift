@@ -21,7 +21,25 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
-        // 0.13.4 (commit 4223876) closes:
+        // 0.13.5 (commit c01ac8a) closes:
+        //   - #205 (MToon shadingToonyFactor low values rendered as
+        //          nearly-flat-lit; PR #207 adds /π Lambert normalization
+        //          in MToonShader.metal so the lit/shaded transition curve
+        //          matches three-vrm + UniVRM's BRDF_Lambert convention)
+        //   - #206 (animate_root_transform no-op; PR #208 makes
+        //          VRMNode.updateWorldTransform re-derive localMatrix
+        //          from T/R/S so external translation writes finally
+        //          reach worldMatrix — unblocks the entire swing-springbone
+        //          surface)
+        //   Behavioural changes recorded in 0.13.5 release notes:
+        //   - setLightNormalizationMode(.manual(factor)) now multiplies on
+        //     top of /π; scale factor by π for pre-0.13.5 brightness. (We
+        //     don't use .manual; the default path gets the new
+        //     normalization automatically.)
+        //   - node.localMatrix is now owned by T/R/S. Direct assignment is
+        //     transient. (Our adapter mutates node.translation, the new
+        //     correct path.)
+        // 0.13.4 (commit 4223876) closed:
         //   - #189 (GLTFParser BIN-chunk leak)
         //   - #190 (VRMA lookAt head-local space)
         //   - PR #188 (DocC catalog + 8 articles)
@@ -35,10 +53,10 @@ let package = Package(
         // 0.13.1 (commit 9404287) closed:
         //   - #181 (non-skinned mesh dropped when skin present)
         //   - #182 (VRM 1.0 spring chain over-expansion)
-        // All five were first filed by this conformance suite.
+        // All seven were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "42238767e53d72375f5eebecad2ecbafc1690cad"
+            revision: "c01ac8a621c1b6bcc47539c0e8cd81bf658290c0"
         ),
     ],
     targets: [

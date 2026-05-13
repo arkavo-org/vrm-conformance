@@ -705,15 +705,21 @@ That settles the outline-floor question definitively. Three independent MToon im
 
 ### VRMMetalKit vs the consortium reference — launch anchor
 
-**Headline (post-methodology-fixes, conformance-internal, declared per-test thresholds)**: across the 80-test corpus, 4 outline tests are `conformance_status: Excluded` (per [vrm-conformance#3](https://github.com/arkavo-org/vrm-conformance/issues/3) — spec-correct flood; whole-frame SSIM measures AA only). Of the remaining **76 included tests**, against the consortium reference (UniVRM v0.131.0 + Unity 6 PlayMode physics) at each test's declared per-test threshold (default 0.85, rimLighting cluster 0.95, per [vrm-conformance#2](https://github.com/arkavo-org/vrm-conformance/issues/2)):
+**Headline (post-methodology-fixes + VMK 0.13.5, conformance-internal, declared per-test thresholds)**: across the 80-test corpus, 4 outline tests are `conformance_status: Excluded` (per [vrm-conformance#3](https://github.com/arkavo-org/vrm-conformance/issues/3) — spec-correct flood; whole-frame SSIM measures AA only). Of the remaining **76 included tests**, against the consortium reference (UniVRM v0.131.0 + Unity 6 PlayMode physics) at each test's declared per-test threshold (default 0.85, rimLighting cluster 0.95, per [vrm-conformance#2](https://github.com/arkavo-org/vrm-conformance/issues/2)):
 
 ```
   three-vrm     ≥ declared threshold vs UniVRM:  76 / 76  (100%)   ← passes conformance
   godot-vrm     ≥ declared threshold vs UniVRM:  67 / 76  ( 88%)
-  VRMMetalKit   ≥ declared threshold vs UniVRM:  53 / 76  ( 70%)   ← current
+  VRMMetalKit   ≥ declared threshold vs UniVRM:  63 / 76  ( 83%)   ← VMK 0.13.5; up from 53/76 at 0.13.4
 ```
 
-For VRMMetalKit `0.13.4` specifically, the gap to 76/76 is **23 tests** spread across two upstream-fixable clusters:
+VMK 0.13.5 (commit `c01ac8a`) closed [VMK#205](https://github.com/arkavo-org/VRMMetalKit/issues/205) (PR #207, /π Lambert normalization in MToonShader.metal) and [VMK#206](https://github.com/arkavo-org/VRMMetalKit/issues/206) (PR #208, VRMNode.updateWorldTransform re-derives localMatrix from T/R/S). Net effect on this corpus:
+
+- **Swing-springbone cluster (#206 closed)**: 18/18 lifted from 0.7985-0.8025 → 0.8916-0.8965. All pass the 0.85 threshold now.
+- **shadingToony cluster (#205 partial close)**: All 8 SSIMs shifted up by +0.01 to +0.02. Tests at toony ≥ 0.9 now pass; tests at toony 0 → 0.75 still below 0.85 — see [VMK#213](https://github.com/arkavo-org/VRMMetalKit/issues/213) for the residual curve-shape divergence.
+- **shadingShift regression (NEW in 0.13.5)**: 2 tests that passed pre-0.13.5 (`shadingShift_0p8`, `shadingShift_1`) dropped below 0.85 (0.90 → 0.82, 0.94 → 0.83). The /π normalization changed the direct/ambient ratio in a way that interacts with positive-shift boundary placement. Tracked in [VMK#213](https://github.com/arkavo-org/VRMMetalKit/issues/213) alongside the toony residual; both clusters likely share a root cause in the MToon shader's curve math.
+
+For VRMMetalKit specifically, the remaining gap to 76/76 is **13 tests** spread across two clusters in one upstream-fixable issue:
 
 The 26 tests outside that band split into three named clusters; only one of the three is an open question for VMK at RC time:
 
