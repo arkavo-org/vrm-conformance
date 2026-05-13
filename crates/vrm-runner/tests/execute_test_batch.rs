@@ -452,7 +452,9 @@ fn spawn_failure_reports_clear_error() {
     let err = run_batch(&opts).expect_err("should fail when adapter binary does not exist");
     let msg = err.to_string();
     assert!(
-        msg.contains("spawn") || msg.contains("adapter") || msg.contains("/definitely/not/a/real/binary"),
+        msg.contains("spawn")
+            || msg.contains("adapter")
+            || msg.contains("/definitely/not/a/real/binary"),
         "error should mention spawn failure or the bogus path; got: {msg}"
     );
     assert!(
