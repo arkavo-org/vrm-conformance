@@ -21,7 +21,16 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
-        // 0.13.5 (commit c01ac8a) closes:
+        // 0.13.6 (commit a610223) closes:
+        //   - #214 PR (pipeline cache: include pixel format + sample count
+        //          in PSO cache key — adapter's config.colorPixelFormat
+        //          write actually reaches the pipeline state object now)
+        //   - #226 (MToon parametric-rim fresnel: move to world space —
+        //          fresnel `viewDir·normalDir` term was using mismatched
+        //          coordinate spaces, producing a constant position-offset
+        //          rim band vs three-vrm + UniVRM. World-space normals
+        //          match the spec's vector convention.)
+        // 0.13.5 (commit c01ac8a) closed:
         //   - #205 (MToon shadingToonyFactor low values rendered as
         //          nearly-flat-lit; PR #207 adds /π Lambert normalization
         //          in MToonShader.metal so the lit/shaded transition curve
@@ -53,10 +62,10 @@ let package = Package(
         // 0.13.1 (commit 9404287) closed:
         //   - #181 (non-skinned mesh dropped when skin present)
         //   - #182 (VRM 1.0 spring chain over-expansion)
-        // All seven were first filed by this conformance suite.
+        // All nine were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "c01ac8a621c1b6bcc47539c0e8cd81bf658290c0"
+            revision: "a610223f30b45f9a8a7604b57c78989018d0e1b2"
         ),
     ],
     targets: [
