@@ -3,6 +3,8 @@
   "rootNamespace": "Conformance.Tests",
   "references": [
     "Conformance",
+    "VRM10",
+    "UniGLTF",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],

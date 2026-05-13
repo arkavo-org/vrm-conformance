@@ -1,7 +1,10 @@
 {
   "name": "Conformance",
   "rootNamespace": "Conformance",
-  "references": [],
+  "references": [
+    "VRM10",
+    "UniGLTF"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
