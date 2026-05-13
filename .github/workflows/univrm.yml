@@ -63,7 +63,7 @@ jobs:
         uses: game-ci/unity-test-runner@v4
         with:
           projectPath: adapters/univrm/UniVRMConformance
-          unityVersion: 2022.3.50f1
+          unityVersion: 6000.4.6f1
           testMode: EditMode
           artifactsPath: artifacts/univrm-test-results
           githubToken: ${{ secrets.GITHUB_TOKEN }}

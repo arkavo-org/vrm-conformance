@@ -7,7 +7,7 @@
 # UNITY_VERSION env: which Hub-installed version to default to
 #   (only used if UNITY_BIN is unset).
 #
-# Defaults to 2022.3.50f1 (the version pinned in
+# Defaults to 6000.4.6f1 (Unity 6 LTS — the version pinned in
 # UniVRMConformance/ProjectSettings/ProjectVersion.txt). If Unity isn't
 # installed at the default path, the launcher prints a clear error and
 # exits 127 — the runner reports this as a batch-level failure.
@@ -17,7 +17,7 @@ set -euo pipefail
 manifest="${1:?manifest path required}"
 results="${2:?results path required}"
 
-UNITY_VERSION="${UNITY_VERSION:-2022.3.50f1}"
+UNITY_VERSION="${UNITY_VERSION:-6000.4.6f1}"
 UNITY_BIN_DEFAULT="/Applications/Unity/Hub/Editor/${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity"
 UNITY_BIN="${UNITY_BIN:-$UNITY_BIN_DEFAULT}"
 

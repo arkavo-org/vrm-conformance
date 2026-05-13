@@ -73,7 +73,7 @@ Communication is filesystem-as-protocol. No stdio, no TCP, no IPC.
 
 ### Environment
 
-- **Unity:** 2022.3 LTS (pinned via `ProjectSettings/ProjectVersion.txt`).
+- **Unity:** 6000.4.6f1 (Unity 6 LTS; pinned via `ProjectSettings/ProjectVersion.txt`). Originally specced as 2022.3 LTS; bumped to Unity 6 at L3-execution time because the dev machine had Unity 6 installed and UniVRM v0.131.0 supports Unity 2021.3+.
 - **UniVRM:** v0.131+ pinned via `Packages/manifest.json` UPM git URL (`https://github.com/vrm-c/UniVRM.git?path=/Assets/VRM10#v0.131.2`-style ref; final pin established during implementation).
 - **Render pipeline:** Built-in RP. Built-in is the original implementation the MToon-1.0 spec was authored against and gives the adapter strongest "consortium reference" positioning. URP and HDRP are out of scope (URP is a port; HDRP is unsupported by UniVRM's MToon).
 - **Platform:** macOS-only for v1.0. `-batchmode` without `-nographics` so Metal initializes for PNG capture. Same precedent as `vrm-metal-kit`.
@@ -128,7 +128,7 @@ One JSON object per line, terminated by `\n`. First line is a `_meta` envelope; 
 **Line 1 — batch metadata:**
 
 ```json
-{"_meta":true,"manifest_version":1,"renderer_name":"univrm","renderer_version":"v0.131.2","unity_version":"2022.3.50f1","render_pipeline":"Built-in RP","total_tests":80}
+{"_meta":true,"manifest_version":1,"renderer_name":"univrm","renderer_version":"v0.131.0","unity_version":"6000.4.6f1","render_pipeline":"Built-in RP","total_tests":80}
 ```
 
 **Lines 2..N+1 — per-test results:**
@@ -189,7 +189,7 @@ The existing `execute-test-plan` (per-test) subcommand stays unchanged for the o
 
 1. User runs `cargo run -p vrm-runner -- execute-test-batch --plans corpus/ --adapter-bin adapters/univrm/launcher.sh --output-dir goldens-cache/univrm/`.
 2. Runner globs `*.test.yaml`, builds `manifest.json` (one entry per test_id), writes to temp dir.
-3. Runner spawns `launcher.sh manifest.json results.ndjson`. The launcher resolves `UNITY_BIN` from env (default `/Applications/Unity/Hub/Editor/2022.3.50f1/Unity.app/Contents/MacOS/Unity`), invokes `Unity -batchmode -projectPath adapters/univrm/UniVRMConformance -executeMethod Conformance.RunBatch -- manifest.json results.ndjson -logFile -`.
+3. Runner spawns `launcher.sh manifest.json results.ndjson`. The launcher resolves `UNITY_BIN` from env (default `/Applications/Unity/Hub/Editor/6000.4.6f1/Unity.app/Contents/MacOS/Unity`), invokes `Unity -batchmode -projectPath adapters/univrm/UniVRMConformance -executeMethod Conformance.RunBatch -- manifest.json results.ndjson -logFile -`.
 4. Unity boots (~12 s), `Conformance.RunBatch` runs, writes per-test PNGs into `output_dir/` and `results.ndjson` incrementally next to the manifest.
 5. Unity exits. Runner reads `results.ndjson` line-by-line, validates each entry, computes BLAKE3 for any PNG missing the hash field, writes the local manifest.
 

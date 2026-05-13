@@ -22,7 +22,7 @@ Through L2, the runner side speaks the full batch contract end-to-end against mo
 
 ## Runtime dependency
 
-Unity 2022.3.50f1 must be installed via Unity Hub. The launcher resolves the binary at `/Applications/Unity/Hub/Editor/2022.3.50f1/Unity.app/Contents/MacOS/Unity` by default; override with `UNITY_BIN` env or `UNITY_VERSION` env (the Hub install path is derived from `UNITY_VERSION`).
+Unity 6000.4.6f1 (Unity 6 LTS) must be installed via Unity Hub. The launcher resolves the binary at `/Applications/Unity/Hub/Editor/6000.4.6f1/Unity.app/Contents/MacOS/Unity` by default; override with `UNITY_BIN` env or `UNITY_VERSION` env (the Hub install path is derived from `UNITY_VERSION`).
 
 License: Unity Personal (free for individuals/orgs under $200K USD/yr). Activation is a one-time manual flow per machine; see [Unity's docs](https://docs.unity3d.com/Manual/ManagingYourUnityLicense.html). Lapses every ~6 months and needs re-activation; no automated regression test for the lapse path.
 
@@ -42,7 +42,7 @@ The Unity project is opened lazily by the launcher when Unity is invoked. On fir
 # Rust contract tests (no Unity needed)
 cargo test -p vrm-runner --test execute_test_batch
 
-# Unity EditMode tests (requires Unity 2022.3.50f1 installed)
+# Unity EditMode tests (requires Unity 6000.4.6f1 installed)
 "$UNITY_BIN" \
   -batchmode \
   -projectPath adapters/univrm/UniVRMConformance \
