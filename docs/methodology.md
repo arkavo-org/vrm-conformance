@@ -4,7 +4,36 @@ This document records the cross-renderer comparison hazards every test plan must
 
 ## Color management
 
-MToon's spec is silent on linear vs sRGB workflow. Each render submission **must** declare its `color_space` field. Comparison is only valid within the same color space; cross-space comparisons get a wider SSIM tolerance.
+MToon's spec is silent on the renderer's display-encoding workflow. Each render submission **must** declare its `color_space` field, and the meaning is pinned here:
+
+- `color_space: Srgb` — **the v1.0 default for every MToon math test.** Shading runs in linear color space; the sRGB OETF is applied on output. The PNG is sRGB-encoded.
+- `color_space: Linear` — shading runs in linear color space; **no** OETF on output. The PNG carries raw linear values. Diagnostic-only — use to inspect a renderer's pre-display values; do not compare across renderers.
+
+The two conventions are **not interchangeable** under SSIM. Test plans must not mix them within a corpus, and adapters must honor the declared field exactly.
+
+### Why `Srgb` is the default
+
+When pixiv/three-vrm clarified [#1838](https://github.com/pixiv/three-vrm/issues/1838), the contributor noted that three-vrm's MToon implementation only produces spec-intended output when `THREE.SRGBColorSpace` is set (which applies the sRGB OETF after shading). `THREE.LinearSRGBColorSpace` is explicitly unsupported for MToon — three.js's "Linear" output corresponds to the *absence* of the display-encoding step, not Unity's "Linear" workflow (which means "linear shading + sRGB output"; the three.js equivalent is `SRGBColorSpace`).
+
+The conformance suite's prior default (`color_space: Linear`) therefore asked three-vrm to render in an unsupported mode, producing a corpus baseline that under-represented three-vrm's MToon math by the sRGB OETF. The v1.0 default is now `Srgb` to:
+
+1. Align with three-vrm's documented expectation.
+2. Match godot-vrm's PNG output (Godot writes sRGB-encoded PNGs unconditionally; the renderer can't be asked for raw-linear without a custom export path).
+3. Keep VRMMetalKit in the same regime via `rgba8Unorm_srgb`.
+
+### Adapter contract for `color_space`
+
+| Adapter | `Srgb` (default) | `Linear` |
+|---|---|---|
+| three-vrm | `renderer.outputColorSpace = THREE.SRGBColorSpace` | `THREE.LinearSRGBColorSpace` — diagnostic only, MToon math not spec-conformant |
+| vrm-metal-kit | `rgba8Unorm_srgb` | `rgba8Unorm` |
+| godot-vrm | sRGB-encoded PNG (native) | request honored at the API, but Godot still writes sRGB-encoded PNG; `actual_color_space: "Srgb"` is reported back |
+
+Adapters return `actual_color_space` in their render response so the runner can flag any deviation from the declared plan.
+
+### Open methodology question: directional intensity convention
+
+three.js since r155 uses physically-correct intensity scaling — a `DirectionalLight` with intensity `1.0` is dimmer by a factor of π than the same setting in legacy three.js or in Unity URP. three-vrm's reference output for "intensity 1 directional light + sRGB output" implicitly assumes intensity is scaled by `Math.PI`. The conformance corpus currently declares `directional.intensity = 1.0` without specifying which convention applies. Tracking this as a follow-up — moving to a `Math.PI`-scaled convention would re-baseline three-vrm renders and likely move the corpus mean again. Filed as part of the [#1838](https://github.com/pixiv/three-vrm/issues/1838) close-out.
 
 ## Tone mapping
 

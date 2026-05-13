@@ -130,6 +130,9 @@
 
       window.__render = async function (params) {
         ensureRenderer(params.width, params.height);
+        // color_space=Srgb is the v1.0 default and the only mode three-vrm
+        // produces spec-conformant MToon output in (per pixiv/three-vrm#1838).
+        // color_space=Linear is honored but documented as diagnostic-only.
         if (params.color_space === "Linear") {
           state.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
         } else {

@@ -427,6 +427,39 @@ Two `springbone_*` entries crack the top-15 for the first time (`joints_16`, `jo
 - **Linux CI driver spike** (still pending from L3). The whole corpus runs on macOS today; a Linux driver pass would validate that the godot-vrm shim doesn't inherit anything macOS-specific from the Godot path.
 - **Concern 2 from Spike 2 (mesh-under-head-bone)** (still open from Run 6). Non-fatal `VRMC_vrm.gd:387` typed-assignment script error during chain-skinned imports; renderer recovers and emits output.
 
+## Eighth run: methodology refinement — color-space convention pinned
+
+**Date**: 2026-05-12. No new renderer revisions; methodology + tooling change only.
+
+**Trigger**: [pixiv/three-vrm#1838](https://github.com/pixiv/three-vrm/issues/1838) closed by maintainer reply (not a bug). [0b5vr](https://github.com/0b5vr) explained that three-vrm's MToon implementation deliberately renders in linear color space and assumes the renderer's `outputColorSpace = THREE.SRGBColorSpace` will apply the sRGB OETF on output. `THREE.LinearSRGBColorSpace` is explicitly unsupported for MToon — three.js's `SRGBColorSpace` corresponds to what Unity calls "Linear" workflow (linear shading + sRGB display encoding), not `LinearSRGBColorSpace` (which is *no* display encoding at all).
+
+Our prior test-plan default was `color_space: Linear`, which the three-vrm adapter honored by setting `LinearSRGBColorSpace`. That asked three-vrm to render in an unsupported mode and produced a corpus baseline that systematically under-represented its MToon output by the sRGB OETF. The other two adapters interpreted the same field inconsistently (vrm-metal-kit → `rgba8Unorm` linear framebuffer; godot-vrm → always sRGB-encoded PNG regardless of request).
+
+### What changed
+
+- `docs/methodology.md` — rewrote the **Color management** section to pin `color_space: Srgb` as the v1.0 default for every MToon math test, document the adapter contract per renderer, and flag the directional-intensity-by-π open question as a follow-up.
+- `crates/vrm-asset-generator/src/sidecar.rs` — `build_default_test_plan` now emits `color_space: Srgb`. All sweep variants inherit the change (they all start from `build_default_test_plan` or its spring-bone derivatives).
+- `adapters/three-vrm/src/renderer-host.html` — added a comment near the `outputColorSpace` branch flagging the convention so future contributors don't reintroduce `LinearSRGBColorSpace` as a default.
+
+### Expected impact on the corpus (not yet measured)
+
+This change has not been re-rendered through the corpus yet — that's a follow-up bootstrap-goldens run. Predictions:
+
+- **three-vrm**: every test should now render meaningfully brighter (the sRGB OETF is applied on output, so the `(53, 53, 53)` sphere centerline at `mtoon_default` should move into the high-100s, much closer to the VRMMetalKit `(164, 164, 164)` and away from the godot-vrm `(255, 255, 255)` outlier). The longstanding "three-vrm is the dimmest renderer" signal — which has been the dominant divergence floor across runs 1–7 since the run-5 VMK fix — should largely close.
+- **vrm-metal-kit**: framebuffer flips from `rgba8Unorm` to `rgba8Unorm_srgb`. Pixel values move from raw-linear to sRGB-encoded. Expected to remain visually similar but PNG byte values shift; SSIM vs the new three-vrm baseline likely tightens substantially.
+- **godot-vrm**: no behavioral change (already wrote sRGB-encoded PNGs unconditionally).
+
+If the prediction holds, the corpus mean SSIM should jump materially — possibly through the 0.85+ band — driven primarily by the three-vrm/VMK pair re-converging. The remaining divergence floor would still be the outline cluster (three different outline interpretations across three renderers, including [#1839](https://github.com/pixiv/three-vrm/issues/1839)).
+
+### What this measures, conceptually
+
+Up to run 7, every divergence finding was filed against a renderer that was actually behaving incorrectly relative to the spec. This run is the first where the conformance suite *itself* was the source of a systematic divergence — the test plan asked renderers for an output mode that wasn't well-defined cross-renderer, and three-vrm in particular flagged it. The fix is methodology, not renderer code. Logging it here as a deliverable on the same footing as the upstream-bug findings, because the suite's purpose is to produce falsifiable signal and that includes signal about the suite's own assumptions.
+
+### Follow-ups
+
+- **Run 9 bootstrap**: re-render the full 80-test corpus through all three real adapters with the new default and re-measure pairwise SSIM. Compare against run 7 numbers to validate the prediction above.
+- **Directional-intensity-by-π**: three-vrm assumes `Math.PI` scaling (legacy three.js convention). Our plan declares `intensity: 1.0` without specifying which convention applies. Decide whether to scale in the adapter (preserves the human-readable `1.0`) or in the plan (requires updating every test). Tracked as an open methodology question in `docs/methodology.md`.
+
 ## How to reproduce
 
 ```bash

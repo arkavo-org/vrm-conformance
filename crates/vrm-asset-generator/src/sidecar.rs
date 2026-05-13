@@ -69,7 +69,7 @@ pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> Tes
         output: Output {
             width: 1024,
             height: 1024,
-            color_space: ColorSpace::Linear,
+            color_space: ColorSpace::Srgb,
             msaa: 4,
         },
         diff: Diff {
