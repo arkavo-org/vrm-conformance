@@ -80,6 +80,90 @@ fn absolutize(p: &Utf8PathBuf) -> Utf8PathBuf {
     Utf8PathBuf::from_path_buf(abs).expect("absolute path is utf-8")
 }
 
+// =====================================================================
+// Results parsing (Unity → runner)
+// =====================================================================
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct BatchResultsMeta {
+    pub manifest_version: u32,
+    pub renderer_name: String,
+    pub renderer_version: String,
+    pub unity_version: String,
+    pub render_pipeline: String,
+    pub total_tests: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct ResultEntry {
+    pub test_id: String,
+    pub status: ResultStatus,
+    #[serde(default)]
+    pub output_path: Option<String>,
+    #[serde(default)]
+    pub blake3: Option<String>,
+    #[serde(default)]
+    pub actual_color_space: Option<String>,
+    #[serde(default)]
+    pub render_seconds: Option<f32>,
+    #[serde(default)]
+    pub error: Option<ResultError>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ResultStatus {
+    Ok,
+    Error,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct ResultError {
+    pub code: i32,
+    pub message: String,
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BatchResults {
+    pub meta: BatchResultsMeta,
+    pub entries: Vec<ResultEntry>,
+}
+
+/// Parse the NDJSON results file. Line 1 must be the `_meta` envelope
+/// (a JSON object with `"_meta": true`); subsequent non-blank lines
+/// are per-test result entries. Blank lines are tolerated.
+///
+/// Returns an error if (a) the file is empty, (b) line 1 is not a
+/// `_meta` envelope, or (c) any line fails to parse as JSON. Does
+/// **not** validate that `entries.len() == meta.total_tests` —
+/// partial output is a defined success condition; the caller
+/// reconciles it.
+pub fn parse_results_ndjson(s: &str) -> anyhow::Result<BatchResults> {
+    let mut lines = s.lines().filter(|l| !l.trim().is_empty());
+    let meta_line = lines
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("results file is empty; expected _meta envelope"))?;
+    let meta_value: serde_json::Value = serde_json::from_str(meta_line)
+        .map_err(|e| anyhow::anyhow!("failed to parse first line as JSON: {e}; line={meta_line}"))?;
+    if meta_value.get("_meta").and_then(|v| v.as_bool()) != Some(true) {
+        anyhow::bail!(
+            "first line must be a _meta envelope (object with \"_meta\": true); got: {meta_line}"
+        );
+    }
+    let meta: BatchResultsMeta = serde_json::from_value(meta_value)
+        .map_err(|e| anyhow::anyhow!("_meta envelope deserialization failed: {e}"))?;
+    let mut entries = Vec::new();
+    for (i, line) in lines.enumerate() {
+        let entry: ResultEntry = serde_json::from_str(line).map_err(|e| {
+            anyhow::anyhow!("failed to parse entry line {}: {e}; line={line}", i + 2)
+        })?;
+        entries.push(entry);
+    }
+    Ok(BatchResults { meta, entries })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -154,3 +154,56 @@ fn manifest_serializes_to_expected_json_shape() {
     assert_eq!(json["tests"][0]["camera"]["position"][2], 1.5);
     assert_eq!(json["tests"][0]["output"]["color_space"], "srgb");
 }
+
+use vrm_runner::execute_batch::{parse_results_ndjson, BatchResults, ResultStatus};
+
+#[test]
+fn parse_meta_envelope_and_two_entries() {
+    let input = r#"{"_meta":true,"manifest_version":1,"renderer_name":"univrm","renderer_version":"v0.131.2","unity_version":"2022.3.50f1","render_pipeline":"Built-in RP","total_tests":2}
+{"test_id":"a","status":"ok","output_path":"/tmp/a.png","blake3":"blake3:aaa","actual_color_space":"Srgb","render_seconds":0.18}
+{"test_id":"b","status":"error","error":{"code":-32000,"message":"Unimplemented","data":{"phase":"L3"}}}
+"#;
+    let parsed: BatchResults = parse_results_ndjson(input).expect("parse");
+    assert_eq!(parsed.meta.manifest_version, 1);
+    assert_eq!(parsed.meta.renderer_name, "univrm");
+    assert_eq!(parsed.meta.total_tests, 2);
+    assert_eq!(parsed.entries.len(), 2);
+    assert_eq!(parsed.entries[0].test_id, "a");
+    assert!(matches!(parsed.entries[0].status, ResultStatus::Ok));
+    assert!(matches!(parsed.entries[1].status, ResultStatus::Error));
+    assert_eq!(parsed.entries[1].error.as_ref().unwrap().code, -32000);
+}
+
+#[test]
+fn parse_rejects_missing_meta_envelope() {
+    // First line is a test result, not a `_meta` envelope. Parser
+    // must reject — the runner needs the meta line to validate the
+    // batch before ingesting entries.
+    let input = r#"{"test_id":"a","status":"ok","output_path":"/tmp/a.png"}
+"#;
+    let err = parse_results_ndjson(input).expect_err("must reject");
+    assert!(
+        err.to_string().contains("_meta"),
+        "error should mention _meta, got: {err}"
+    );
+}
+
+#[test]
+fn parse_tolerates_partial_output_below_total_tests() {
+    // _meta says total_tests=3 but only 1 entry follows (Unity crashed
+    // mid-batch). Parser succeeds; the caller is responsible for
+    // detecting the count mismatch.
+    let input = r#"{"_meta":true,"manifest_version":1,"renderer_name":"univrm","renderer_version":"v0.131.2","unity_version":"2022.3.50f1","render_pipeline":"Built-in RP","total_tests":3}
+{"test_id":"a","status":"ok","output_path":"/tmp/a.png","blake3":"blake3:aaa","actual_color_space":"Srgb","render_seconds":0.18}
+"#;
+    let parsed = parse_results_ndjson(input).expect("parse");
+    assert_eq!(parsed.meta.total_tests, 3);
+    assert_eq!(parsed.entries.len(), 1);
+}
+
+#[test]
+fn parse_skips_blank_lines() {
+    let input = "{\"_meta\":true,\"manifest_version\":1,\"renderer_name\":\"univrm\",\"renderer_version\":\"v0.131.2\",\"unity_version\":\"2022.3.50f1\",\"render_pipeline\":\"Built-in RP\",\"total_tests\":1}\n\n{\"test_id\":\"a\",\"status\":\"ok\",\"output_path\":\"/tmp/a.png\",\"blake3\":\"blake3:aaa\",\"actual_color_space\":\"Srgb\",\"render_seconds\":0.18}\n\n";
+    let parsed = parse_results_ndjson(input).expect("parse");
+    assert_eq!(parsed.entries.len(), 1);
+}
