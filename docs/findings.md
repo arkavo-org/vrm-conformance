@@ -537,6 +537,86 @@ Eight upstream tickets filed and closed (#181, #182, #183, #185 against VRMMetal
 - **`mtoon_shadingShift_0p8` and other ~0.84 cluster shading tests.** Sample pixel data to identify which renderer is the outlier on each. With three renderers, consensus can call it — but it's worth a dedicated look before treating any of them as ground truth.
 - **Outline floor (0.1840) unchanged.** Asset-side investigation still pending from the [three-vrm#1839](https://github.com/pixiv/three-vrm/issues/1839) close-out (try a known-good MToon asset from `vrm-c/UniVRM-Samples` and see whether outlines render as a thin silhouette band there).
 
+## Tenth run: Math.PI intensity scaling in three-vrm (corollary to run 9)
+
+**Date**: 2026-05-12, vrm-conformance commit `0763387` baseline. Same hardware, same renderer revisions. Single change: `adapters/three-vrm/src/renderer-host.html` now applies `d.intensity * Math.PI` instead of `d.intensity` for `DirectionalLight.intensity`. Re-rendered through three-vrm only (vrm-metal-kit and godot-vrm renders carried over unchanged from run 9).
+
+This closes the open methodology question that run 9 surfaced ("directional intensity convention" in `docs/methodology.md`). three.js since r155 uses physically-correct intensity (lux); three-vrm's spec-intended baseline assumes `intensity = Math.PI`. Test plans declare `1.0`; the adapter scales by π.
+
+### Corpus-wide before/after
+
+| pair | run 9 mean | run 10 mean | Δ | run 9 max | run 10 max |
+|---|---|---|---|---|---|
+| `godot-vrm` vs `three-vrm` | 0.8398 | **0.8972** | **+0.0574** | 0.9745 | **0.9902** |
+| `three-vrm` vs `vrm-metal-kit` | 0.8975 | 0.8953 | −0.0022 | 0.9749 | **0.9889** |
+| `godot-vrm` vs `vrm-metal-kit` | 0.8714 | 0.8714 | 0 | 0.9523 | 0.9523 |
+
+`godot-vrm vs three-vrm` jumped +0.0574 — bigger than the Srgb-default change in run 9. The two pairs not involving three-vrm-side adapter change either moved very slightly (three-vrm/VMK: −0.0022, noise) or didn't move at all (godot/VMK: 0, neither side changed).
+
+Two notable structural shifts:
+
+1. **`godot-vrm vs three-vrm` is now the tightest pair** at 0.8972, exceeding the prior champion `three-vrm vs vrm-metal-kit` at 0.8953. This is the first time the godot/three pair has been the corpus's tightest cluster. Interpretation: three-vrm and godot-vrm now both render in "linear shading + sRGB OETF + physically-correct intensity" convention; VRMMetalKit's MToon shader path doesn't apply the same intensity scaling and produces a slightly different brightness profile. With three renderers, consensus can now flag VRMMetalKit as the mild outlier on MToon shading — which is the methodology working as designed.
+
+2. **Max SSIM crossed 0.99** on non-outline tests for the first time. Run 10 max values are `godot-vrm vs three-vrm = 0.9902`, `three-vrm vs vrm-metal-kit = 0.9889`. The v1.0 standard threshold is 0.985, and both of those exceed it. consensus_passed is still 0/80 because the per-test consensus must hold for all three pairs at once (and the outline cluster floors at 0.1840), but the data shows non-outline tests now reach threshold pixel-agreement between specific renderer pairs.
+
+### Pixel-level — `mtoon_default` centerline
+
+| renderer | run 7 | run 9 (+Srgb) | run 10 (+π) | Δ run 9→10 |
+|---|---|---|---|---|
+| three-vrm | (53, 53, 53) | (126, 126, 126) | **(195, 195, 195)** | **+69 per channel** |
+| vrm-metal-kit | (164, 164, 164) | (164, 164, 164) | (164, 164, 164) | 0 |
+| godot-vrm | (255, 255, 255) | (255, 255, 255) | (255, 255, 255) | 0 |
+
+three-vrm now renders BRIGHTER than VRMMetalKit at the centerline — direction flipped from prior runs where three-vrm was the consistent "dimmest" outlier. For `intensity = 1.0 × Math.PI` directional light + the standard MToon material, three-vrm's `0.5 linear → sRGB OETF` should produce `~188` per channel; the actual `195` includes additional contribution from the ambient term (`0.5 × 0.3 = 0.15 linear`) plus shading-shift behavior near the centerline. The math is now self-consistent across three.js's documented physically-correct lighting semantics.
+
+VRMMetalKit's `(164, ...)` is now the *darker* one. Without UniVRM as a fourth oracle to call which interpretation is closest to MToon-1.0, the suite reports the divergence faithfully: with three renderers, two agreeing more strongly than the third is the strongest signal we have until a ground-truth renderer is added.
+
+### Top 15 most-divergent — outline still floors
+
+```
+mtoon_outline_world_0p1                   0.1840   (8 outline tests dominate divergence floor; unchanged from prior runs)
+mtoon_outline_world_0p05                  0.3588
+...
+swing_springbone_joints_16                0.8505   (slight regression: 0.8535 → 0.8505)
+swing_springbone_joints_8                 0.8506
+swing_springbone_segment_0p1              0.8509
+swing_springbone_stiffness_0              0.8523   (new entry; previously not in top 15)
+swing_springbone_stiffness_0p2            0.8526   (new entry)
+swing_springbone_default                  0.8527
+mtoon_shadingShift_0p8                    0.8527
+```
+
+The 8 outline tests still floor at 0.1840 — outline-rendering disagreement is orthogonal to color-space / intensity, and the asset-side hypothesis from the [three-vrm#1839](https://github.com/pixiv/three-vrm/issues/1839) close-out remains the open path.
+
+Spring-bone variants are reshuffling slightly. `swing_springbone_stiffness_0` and `_stiffness_0p2` are new top-15 entries; they replaced two of the `drag_*` variants from run 9. The mean of the spring-bone cluster is unchanged within sampling noise (~0.85), but the specific tests in the bottom-15 are now slightly different. With three-vrm brighter, fine-detail rendering at the chain edges becomes a slightly different signal — same underlying physics, slightly different SSIM contribution per pixel.
+
+### Net result
+
+The Math.PI scaling is a net positive for the corpus:
+
+- Corpus-wide mean across the 3 pairs: 0.8696 → 0.8880 (+0.0184)
+- Maximum pair-SSIM: 0.9749 → 0.9902 (+0.0153) — first time crossing the v1.0 threshold of 0.985
+- The two pairs involving three-vrm shifted in opposite directions (+0.0574 toward godot; −0.0022 from VMK), with the net favoring three-vrm/godot agreement
+- The change identifies VRMMetalKit's intensity handling as the new likely outlier on MToon shading — a fresh upstream question worth investigating once we have a fourth renderer to confirm
+
+### Cumulative ten-run progression
+
+| Run | mean (3v vs VMK) | min | max (any pair) | upstream events |
+|---|---|---|---|---|
+| 1 | 0.7447 | 0.6313 | 0.9665 | first corpus baseline |
+| 5 (0.13.3) | 0.7879 | 0.6313 | 0.9665 | #183 closed |
+| 7 (godot-vrm L4) | 0.7879 | 0.1840 | 0.9665 | full 3-renderer 80-test |
+| 9 (Srgb default) | 0.8975 | 0.1840 | 0.9749 | methodology refinement |
+| **10 (Math.PI)** | **0.8953** | **0.1840** | **0.9902** | **intensity convention closed** |
+
+The `three-vrm vs vrm-metal-kit` pair mean is essentially flat between runs 9 and 10 (0.8975 → 0.8953), but the `godot-vrm vs three-vrm` mean — the second-best signal — moved from 0.8398 to 0.8972, putting both three-vrm-involving pairs in the same ~0.89 band for the first time. The corpus is now clustered tightly enough that adding a fourth renderer (UniVRM) for outlier-detection consensus is the obvious next move.
+
+### Open follow-ups
+
+- **VRMMetalKit's intensity / shading interpretation** — now the consensus minority on MToon shading. Worth a dedicated investigation against MToon-1.0 spec to determine whether VMK's interpretation is closer to or further from spec. Filing an issue against VRMMetalKit is appropriate once UniVRM lands and can confirm directionally.
+- **Outline floor (0.1840)** — unchanged across runs 9–10. Still gated on the asset-side investigation from [three-vrm#1839](https://github.com/pixiv/three-vrm/issues/1839)'s close-out.
+- **UniVRM as renderer #4** — scaffold (L1+L2) shipped in this session; L3+L4 deferred. With four renderers, consensus-of-3 can replace consensus-of-2 for outlier-flagging, which will be especially valuable for the ~0.89 cluster where one of three renderers (currently VMK on MToon shading) is the consensus minority.
+
 ## How to reproduce
 
 ```bash

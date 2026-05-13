@@ -31,9 +31,20 @@ The conformance suite's prior default (`color_space: Linear`) therefore asked th
 
 Adapters return `actual_color_space` in their render response so the runner can flag any deviation from the declared plan.
 
-### Open methodology question: directional intensity convention
+### Directional intensity convention (resolved in run 10)
 
-three.js since r155 uses physically-correct intensity scaling — a `DirectionalLight` with intensity `1.0` is dimmer by a factor of π than the same setting in legacy three.js or in Unity URP. three-vrm's reference output for "intensity 1 directional light + sRGB output" implicitly assumes intensity is scaled by `Math.PI`. The conformance corpus currently declares `directional.intensity = 1.0` without specifying which convention applies. Tracking this as a follow-up — moving to a `Math.PI`-scaled convention would re-baseline three-vrm renders and likely move the corpus mean again. Filed as part of the [#1838](https://github.com/pixiv/three-vrm/issues/1838) close-out.
+three.js since r155 uses physically-correct intensity scaling — a `DirectionalLight` with intensity `1.0` is dimmer by a factor of π than the same setting in legacy three.js or in Unity URP. three-vrm's spec-intended MToon baseline ([pixiv/three-vrm#1838](https://github.com/pixiv/three-vrm/issues/1838)) assumes `intensity = Math.PI`.
+
+**Convention** (v1.0): Test plans declare `directional.intensity = 1.0` as the canonical value. Per-adapter compensation:
+
+| Adapter | Scaling applied |
+|---|---|
+| three-vrm | `state.directional.intensity = d.intensity * Math.PI` — required because three.js's `DirectionalLight` uses lux (physically-correct). |
+| vrm-metal-kit | None — VRMMetalKit's lighting model already produces output consistent with intensity 1.0 = "Unity URP intensity 1.0" semantics. |
+| godot-vrm | None — Godot 4's `DirectionalLight3D.light_energy` defaults match the same convention. |
+| univrm (in design) | TBD — verify at L3 implementation time against UniVRM's lighting setup. |
+
+Resolved in run 10 (`docs/findings.md`) after measuring that applying `Math.PI` in the three-vrm adapter moved `mtoon_default` centerline from `(126,126,126)` to `(195,195,195)`, the `godot-vrm vs three-vrm` corpus pair mean from 0.8398 to 0.8972 (+0.0574), and the corpus max SSIM above 0.99 for the first time on non-outline tests. The scaling is renderer-specific compensation — done at the adapter boundary, not in the test plan — so adapters for renderers that don't use physically-correct intensity (most non-three.js renderers) require no change.
 
 ## Tone mapping
 

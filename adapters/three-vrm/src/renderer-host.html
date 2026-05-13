@@ -106,7 +106,13 @@
         // direction so travel through the scene matches the requested dir.
         state.directional.position.set(-d.dir[0], -d.dir[1], -d.dir[2]).multiplyScalar(5);
         state.directional.color.setRGB(d.color[0], d.color[1], d.color[2]);
-        state.directional.intensity = d.intensity;
+        // three.js since r155 uses physically-correct directional-light
+        // intensity (lux); three-vrm's spec-intended MToon baseline assumes
+        // intensity=Math.PI (≈ legacy three.js / Unity URP "intensity 1.0").
+        // Test plans declare 1.0; the adapter scales by π to match the
+        // cross-renderer convention. See docs/methodology.md "directional
+        // intensity convention" and pixiv/three-vrm#1838.
+        state.directional.intensity = d.intensity * Math.PI;
         state.directional.castShadow = !!params.cast_shadows;
         if (state.renderer) {
           state.renderer.shadowMap.enabled = !!params.cast_shadows;
