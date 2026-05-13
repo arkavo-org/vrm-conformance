@@ -1,0 +1,11 @@
+# Unity-generated, machine-specific or rebuildable; never commit.
+UniVRMConformance/Library/
+UniVRMConformance/Temp/
+UniVRMConformance/Logs/
+UniVRMConformance/UserSettings/
+UniVRMConformance/obj/
+UniVRMConformance/*.csproj
+UniVRMConformance/*.sln
+
+# Launcher postmortems
+last-run.log
