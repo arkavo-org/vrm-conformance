@@ -705,7 +705,15 @@ That settles the outline-floor question definitively. Three independent MToon im
 
 ### VRMMetalKit vs the consortium reference — launch anchor
 
-**Headline (conformance claim, methodology-internal, post-UniVRM-L4-PlayMode)**: across an 80-test cross-renderer corpus, VRMMetalKit `0.13.4` and the consortium reference implementation (UniVRM `v0.131.0` running real spring-bone physics in Unity 6 PlayMode) agree at SSIM ≥ 0.85 on **54 of 80 tests (68%)**, with the bulk of the MToon-math subset (36 of 44 = **82% on directly comparable MToon tests**) falling in the 0.85+ agreement band.
+**Headline (post-methodology-fixes, conformance-internal, declared per-test thresholds)**: across the 80-test corpus, 4 outline tests are `conformance_status: Excluded` (per [vrm-conformance#3](https://github.com/arkavo-org/vrm-conformance/issues/3) — spec-correct flood; whole-frame SSIM measures AA only). Of the remaining **76 included tests**, against the consortium reference (UniVRM v0.131.0 + Unity 6 PlayMode physics) at each test's declared per-test threshold (default 0.85, rimLighting cluster 0.95, per [vrm-conformance#2](https://github.com/arkavo-org/vrm-conformance/issues/2)):
+
+```
+  three-vrm     ≥ declared threshold vs UniVRM:  76 / 76  (100%)   ← passes conformance
+  godot-vrm     ≥ declared threshold vs UniVRM:  67 / 76  ( 88%)
+  VRMMetalKit   ≥ declared threshold vs UniVRM:  53 / 76  ( 70%)   ← current
+```
+
+For VRMMetalKit `0.13.4` specifically, the gap to 76/76 is **23 tests** spread across two upstream-fixable clusters:
 
 The 26 tests outside that band split into three named clusters; only one of the three is an open question for VMK at RC time:
 

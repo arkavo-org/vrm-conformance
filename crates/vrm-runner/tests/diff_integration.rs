@@ -52,6 +52,7 @@ fn synthetic_plan(id: &str, threshold: f32) -> TestPlan {
             mode: DiffMode::Ssim,
             threshold,
             reference_renderer: "test-renderer".into(),
+            conformance_status: Default::default(),
         },
         ignore_renderers: Vec::new(),
         properties: Vec::new(),

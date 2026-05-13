@@ -64,6 +64,22 @@ Outlines render via separate pass (most), geometry shader (some), or screen-spac
 
 **v1.0 standardizes on MSAA 4x.** SSIM uses a wider local tolerance band on outline regions.
 
+### Outline at parameter extremes — methodology exclusion (per vrm-conformance#3)
+
+For outline tests at width ≥ 0.05 m on the 30-cm-radius test sphere, the spec-mandated inverted-hull rendering produces a near-fully-flooded mesh. Whole-frame SSIM measures *only* silhouette anti-aliasing on these renders — there is no main-mesh interior signal to compare. Empirical evidence: three-vrm and UniVRM (the consortium reference) agree at **SSIM 0.9988** on `mtoon_outline_world_0p1` (essentially pixel-identical), while VRMMetalKit sits at 0.6315 on the same test — entirely from MSAA sample-pattern differences. Reading 0.63 as "VMK fails outline rendering" misreads the metric.
+
+**`mtoon_outline_world_0p05`, `_world_0p1`, `_screen_0p05`, and `_screen_0p1` are emitted with `diff.conformance_status: Excluded`.** They render (so visual regressions are still caught) but don't count toward the corpus's headline conformance pass-rate. Outline tests at width ≤ 0.03 (where the outline is a thin band and the main mesh interior is visible) remain `Included`.
+
+A ring-band SSIM mode (compare only the annulus between expected main-mesh silhouette and expected outline-shell silhouette) is the proper long-term fix; until then, exclusion + visual inspection is the methodology-correct call.
+
+## Conformance threshold
+
+The v1.0 conformance threshold is **SSIM ≥ 0.85 against the consortium reference (UniVRM)**, per-test, with `mtoon_rimLightingMix_*` at the tighter 0.95 (no engine-residual cluster on those tests). Per [vrm-conformance#2](https://github.com/arkavo-org/vrm-conformance/issues/2).
+
+**This is not the old 0.985.** That earlier threshold was scoped for "this renderer produces byte-stable output across runs" (self-diff stability). It is not achievable cross-renderer between independent MToon implementations — even three-vrm and UniVRM (the closest pair) only cross 0.985 on 12% of tests. The 0.85 operational threshold reflects the engine-level residual cluster (silhouette AA + sRGB OETF rounding + projection-matrix float differences) that every cross-renderer corpus carries by construction.
+
+Future tightening (post-1.0) can ratchet the MToon-material threshold toward 0.90 once dedicated engine-alignment work (MSAA sample-pattern matching, color-pipeline alignment) is in scope. The threshold for a 1.0 conformance claim is 0.85; tighter would over-claim.
+
 ## Spring bone determinism
 
 `VRMC_springBone` does not pin a fixed time-step. Adapters must guarantee deterministic stepping at 60 Hz with reset between tests.

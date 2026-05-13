@@ -141,11 +141,91 @@ for i, (test_id, entries) in enumerate(sorted(by_id.items()), 1):
 print()
 print(f"==> Processed {len(results)} test_ids; skipped {len(skipped)}")
 
-# Aggregate
+# Aggregate — old "consensus passed" (every renderer agrees with every
+# other at the declared threshold). Kept for back-compat; the conformance
+# headline below is the load-bearing number.
 passed = sum(1 for r in results if r["consensus_passed"])
 failed = len(results) - passed
 print(f"    consensus_passed: {passed}/{len(results)}")
 print(f"    consensus_failed: {failed}/{len(results)}")
+
+# Load per-test plan metadata so we can compute the methodology-internal
+# conformance pass-rate: VMK vs the consortium reference (UniVRM), at
+# each test's *declared* threshold, with conformance_status==Excluded
+# filtered out. Per vrm-conformance#2 + #3.
+def _read_plan_meta(plan_path):
+    """Parse the few YAML fields we need without a yaml dep."""
+    meta = {
+        "threshold": None,
+        "reference_renderer": None,
+        "conformance_excluded": False,
+        "conformance_excluded_reason": None,
+    }
+    if not plan_path or not os.path.exists(plan_path):
+        return meta
+    in_diff = False
+    in_status = False
+    with open(plan_path) as f:
+        for raw in f:
+            line = raw.rstrip()
+            indent = len(line) - len(line.lstrip())
+            stripped = line.strip()
+            if stripped.startswith("diff:"):
+                in_diff, in_status = True, False
+                continue
+            if in_diff and indent == 0:
+                in_diff, in_status = False, False
+            if in_diff:
+                if stripped.startswith("threshold:"):
+                    meta["threshold"] = float(stripped.split(":", 1)[1].strip())
+                elif stripped.startswith("reference_renderer:"):
+                    meta["reference_renderer"] = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+                elif stripped.startswith("conformance_status:"):
+                    in_status = True
+                elif in_status and stripped.startswith("kind:"):
+                    if stripped.split(":", 1)[1].strip().lower() == "excluded":
+                        meta["conformance_excluded"] = True
+                elif in_status and stripped.startswith("reason:"):
+                    meta["conformance_excluded_reason"] = stripped.split(":", 1)[1].strip()
+    return meta
+
+print()
+print("    Conformance pass-rate against the consortium reference (UniVRM):")
+conformance_pairs = [
+    ("vrm-metal-kit", "univrm"),
+    ("three-vrm", "univrm"),
+    ("godot-vrm", "univrm"),
+]
+included_count = 0
+excluded_count = 0
+plan_meta = {}
+for r in results:
+    plan_meta[r["test_id"]] = _read_plan_meta(find_plan(r["test_id"]))
+    if plan_meta[r["test_id"]]["conformance_excluded"]:
+        excluded_count += 1
+    else:
+        included_count += 1
+print(f"      included: {included_count}  excluded: {excluded_count} (see docs/methodology.md)")
+for renderer, reference in conformance_pairs:
+    if renderer == reference:
+        continue
+    pass_count = 0
+    total_included = 0
+    for r in results:
+        meta = plan_meta[r["test_id"]]
+        if meta["conformance_excluded"]:
+            continue
+        if renderer not in r["renderers"] or reference not in r["renderers"]:
+            continue
+        total_included += 1
+        i = r["renderers"].index(renderer)
+        j = r["renderers"].index(reference)
+        threshold = meta["threshold"] or r["threshold"]
+        if r["ssim_matrix"][i][j] >= threshold:
+            pass_count += 1
+    pct = (100.0 * pass_count / total_included) if total_included else 0.0
+    print(f"      {renderer:14s} ≥ declared threshold vs {reference}: {pass_count}/{total_included} ({pct:.0f}%)")
+print()
 
 # Per-pair stats
 pair_scores = collections.defaultdict(list)
@@ -180,11 +260,37 @@ for r in sorted_by_div[:15]:
     print(f"      {r['test_id']:<40s}  {s:.4f}  outliers={r['outliers']}")
 
 # Write the full report
+conformance_pass_rates = {}
+for renderer, reference in conformance_pairs:
+    if renderer == reference:
+        continue
+    pass_count = 0
+    total_included = 0
+    for r in results:
+        meta = plan_meta[r["test_id"]]
+        if meta["conformance_excluded"]:
+            continue
+        if renderer not in r["renderers"] or reference not in r["renderers"]:
+            continue
+        total_included += 1
+        i = r["renderers"].index(renderer)
+        j = r["renderers"].index(reference)
+        threshold = meta["threshold"] or r["threshold"]
+        if r["ssim_matrix"][i][j] >= threshold:
+            pass_count += 1
+    conformance_pass_rates[f"{renderer} vs {reference}"] = {
+        "pass": pass_count,
+        "total_included": total_included,
+        "excluded": excluded_count,
+    }
+
 report = {
     "manifest": manifest_path,
     "test_id_count": len(results),
     "consensus_passed": passed,
     "consensus_failed": failed,
+    "conformance_pass_rates": conformance_pass_rates,
+    "conformance_excluded_count": excluded_count,
     "skipped": skipped,
     "pair_stats": {
         f"{p[0]} vs {p[1]}": {

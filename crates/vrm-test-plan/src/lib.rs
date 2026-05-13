@@ -149,6 +149,27 @@ pub struct Diff {
     pub mode: DiffMode,
     pub threshold: f32,
     pub reference_renderer: String,
+    /// Conformance-pass-rate status for this test. `Included` (the default) means
+    /// this test counts toward the corpus's headline pass-rate. `Excluded` means
+    /// the test renders (so regressions are still surfaced visually) but the
+    /// SSIM number does not roll into the conformance claim — for tests where
+    /// whole-frame SSIM is the wrong metric (see `docs/methodology.md`).
+    ///
+    /// Per [vrm-conformance#3]: outline tests at width ≥ 0.05 m produce a
+    /// spec-correct flooded mesh; whole-frame SSIM only measures silhouette
+    /// anti-aliasing on a frame with no other signal.
+    #[serde(default)]
+    pub conformance_status: ConformanceStatus,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ConformanceStatus {
+    #[default]
+    Included,
+    Excluded {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

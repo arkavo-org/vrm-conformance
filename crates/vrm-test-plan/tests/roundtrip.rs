@@ -170,6 +170,7 @@ fn plan_without_physics_serializes_without_field() {
             mode: DiffMode::Ssim,
             threshold: 0.985,
             reference_renderer: "x".into(),
+            conformance_status: Default::default(),
         },
         ignore_renderers: Vec::new(),
         properties: Vec::new(),
