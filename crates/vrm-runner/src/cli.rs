@@ -73,6 +73,31 @@ pub enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Execute a batched corpus through a batch-mode adapter (UniVRM).
+    /// Mirrors `ExecuteTestPlan` shape but takes a directory of plans
+    /// and invokes the adapter once for the whole batch. See
+    /// `docs/superpowers/specs/2026-05-12-adapter-univrm-design.md`.
+    ExecuteTestBatch {
+        /// Directory containing `*.test.yaml` test plans. Each plan is
+        /// paired with its sibling `.vrm` (same stem).
+        #[arg(long)]
+        plans: Utf8PathBuf,
+        /// Path to the adapter launcher (e.g.
+        /// `adapters/univrm/launcher.sh` for real Unity, or a mock
+        /// fixture for tests).
+        #[arg(long)]
+        adapter_bin: Utf8PathBuf,
+        /// Directory where rendered PNGs and the per-renderer local
+        /// manifest are written.
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        /// Renderer name recorded in the local manifest.
+        #[arg(long, default_value = "univrm")]
+        renderer_name: String,
+        /// Emit JSON summary to stdout.
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the operation catalog.
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -256,6 +281,16 @@ pub fn run(cli: Cli) -> Result<()> {
                 std::process::exit(1);
             }
             Ok(())
+        }
+        Cmd::ExecuteTestBatch {
+            plans: _,
+            adapter_bin: _,
+            output_dir: _,
+            renderer_name: _,
+            json: _,
+        } => {
+            // Stub: real implementation lands in Task 8 (execute_batch::run).
+            anyhow::bail!("execute-test-batch: not yet implemented (stub)");
         }
         Cmd::Describe { format } => {
             let catalog = json!({
