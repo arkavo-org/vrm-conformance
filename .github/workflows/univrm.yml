@@ -1,0 +1,76 @@
+name: univrm
+
+# Builds the Unity project in batchmode + runs EditMode tests on
+# macos-latest. No rendering — that needs a display + Metal context
+# the GitHub-hosted runner doesn't reliably provide for batchmode
+# without -nographics. Render-path coverage runs locally on the
+# maintainer's Mac Studio via scripts/smoke-univrm.sh (L3 plan).
+#
+# Modelled on .github/workflows/swift.yml (vrm-metal-kit's build-only
+# CI shape) and .github/workflows/godot-vrm.yml (game-engine-driven
+# adapter shape).
+#
+# No untrusted-input usage: this workflow does not read PR titles,
+# commit messages, issue bodies, or any other user-controlled fields
+# into run: commands.
+
+on:
+  pull_request:
+    paths:
+      - 'adapters/univrm/**'
+      - 'crates/vrm-runner/**'
+      - '.github/workflows/univrm.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'adapters/univrm/**'
+      - 'crates/vrm-runner/**'
+      - '.github/workflows/univrm.yml'
+
+jobs:
+  build-validate:
+    runs-on: macos-latest
+
+    # Unity license activation requires three secrets to be set as
+    # repo-level secrets. With Unity Personal these are free; the
+    # game-ci docs describe the activation flow:
+    # https://game.ci/docs/github/activation
+    #
+    # If the secrets are not set, this job will exit non-zero on the
+    # `game-ci/unity-test-runner` step. This is intentional — until
+    # someone activates a license, the workflow correctly reports
+    # "not testable in CI."
+    env:
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      # Cache the Library/ folder. Without this, every CI run re-imports
+      # UniVRM from its UPM git URL (~5+ minutes).
+      - uses: actions/cache@v4
+        with:
+          path: adapters/univrm/UniVRMConformance/Library
+          key: Library-univrm-${{ hashFiles('adapters/univrm/UniVRMConformance/Packages/manifest.json') }}
+          restore-keys: |
+            Library-univrm-
+
+      - name: Run EditMode tests
+        uses: game-ci/unity-test-runner@v4
+        with:
+          projectPath: adapters/univrm/UniVRMConformance
+          unityVersion: 2022.3.50f1
+          testMode: EditMode
+          artifactsPath: artifacts/univrm-test-results
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: univrm-test-results
+          path: artifacts/univrm-test-results
