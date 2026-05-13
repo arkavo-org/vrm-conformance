@@ -375,3 +375,56 @@ fn partial_output_marks_missing_tests_as_errors() {
         error_entry
     );
 }
+
+// =====================================================================
+// Task 8 — malformed _meta envelope contract tests
+// =====================================================================
+
+#[test]
+fn malformed_meta_fails_with_clear_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let plans_dir = tmp.path().join("plans");
+    std::fs::create_dir_all(&plans_dir).unwrap();
+    write_synthetic_plan_files(&plans_dir, "z");
+
+    let output_dir = tmp.path().join("out");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let opts = RunOptions {
+        plans_dir: Utf8PathBuf::from_path_buf(plans_dir).unwrap(),
+        adapter_bin: fixture("mock-univrm-bad-meta.sh"),
+        output_dir: Utf8PathBuf::from_path_buf(output_dir).unwrap(),
+        renderer_name: "univrm".into(),
+    };
+
+    let err = run_batch(&opts).expect_err("should fail on missing total_tests");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("total_tests") || msg.contains("_meta"),
+        "error message should mention the missing field or _meta envelope; got: {msg}"
+    );
+}
+
+#[test]
+fn missing_meta_envelope_fails_with_clear_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let plans_dir = tmp.path().join("plans");
+    std::fs::create_dir_all(&plans_dir).unwrap();
+    write_synthetic_plan_files(&plans_dir, "y");
+
+    let output_dir = tmp.path().join("out");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let opts = RunOptions {
+        plans_dir: Utf8PathBuf::from_path_buf(plans_dir).unwrap(),
+        adapter_bin: fixture("mock-univrm-missing-meta.sh"),
+        output_dir: Utf8PathBuf::from_path_buf(output_dir).unwrap(),
+        renderer_name: "univrm".into(),
+    };
+
+    let err = run_batch(&opts).expect_err("should fail without _meta envelope");
+    assert!(
+        err.to_string().contains("_meta"),
+        "error message should mention _meta; got: {err}"
+    );
+}
