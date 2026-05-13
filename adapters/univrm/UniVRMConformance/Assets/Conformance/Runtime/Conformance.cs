@@ -117,7 +117,7 @@ namespace Conformance
     }
 
     [Serializable]
-    internal class ManifestDto
+    public class ManifestDto
     {
         public int manifest_version;
         public string output_dir;
@@ -127,7 +127,7 @@ namespace Conformance
     }
 
     [Serializable]
-    internal class TestEntryDto
+    public class TestEntryDto
     {
         public string test_id;
         public string vrm_path;
@@ -135,7 +135,7 @@ namespace Conformance
     }
 
     [Serializable]
-    internal class MetaDto
+    public class MetaDto
     {
         public bool _meta;
         public int manifest_version;
@@ -147,7 +147,7 @@ namespace Conformance
     }
 
     [Serializable]
-    internal class EntryDto
+    public class EntryDto
     {
         public string test_id;
         public string status;
@@ -155,7 +155,7 @@ namespace Conformance
     }
 
     [Serializable]
-    internal class ErrorDto
+    public class ErrorDto
     {
         public int code;
         public string message;
@@ -163,7 +163,7 @@ namespace Conformance
     }
 
     [Serializable]
-    internal class ErrorDataDto
+    public class ErrorDataDto
     {
         public string phase;
     }
