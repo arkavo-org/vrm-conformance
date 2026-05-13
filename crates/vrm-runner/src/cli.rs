@@ -283,14 +283,38 @@ pub fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::ExecuteTestBatch {
-            plans: _,
-            adapter_bin: _,
-            output_dir: _,
-            renderer_name: _,
-            json: _,
+            plans,
+            adapter_bin,
+            output_dir,
+            renderer_name,
+            json: emit_json,
         } => {
-            // Stub: real implementation lands in Task 8 (execute_batch::run).
-            anyhow::bail!("execute-test-batch: not yet implemented (stub)");
+            let opts = crate::execute_batch::RunOptions {
+                plans_dir: plans,
+                adapter_bin,
+                output_dir,
+                renderer_name,
+            };
+            let summary = crate::execute_batch::run(&opts)?;
+            if emit_json {
+                let payload = json!({
+                    "ok": summary.error_count == 0,
+                    "total_tests": summary.total_tests,
+                    "ok_count": summary.ok_count,
+                    "error_count": summary.error_count,
+                    "local_manifest": summary.local_manifest_path,
+                });
+                println!("{}", serde_json::to_string(&payload)?);
+            } else {
+                println!(
+                    "batched {} tests: {} ok, {} error → {}",
+                    summary.total_tests,
+                    summary.ok_count,
+                    summary.error_count,
+                    summary.local_manifest_path
+                );
+            }
+            Ok(())
         }
         Cmd::Describe { format } => {
             let catalog = json!({

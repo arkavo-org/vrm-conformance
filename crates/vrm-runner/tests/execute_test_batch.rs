@@ -371,8 +371,7 @@ fn partial_output_marks_missing_tests_as_errors() {
             .as_str()
             .unwrap()
             .contains("batch terminated"),
-        "missing test should be marked as batch-terminated; got: {:?}",
-        error_entry
+        "missing test should be marked as batch-terminated; got: {error_entry:?}"
     );
 }
 
@@ -426,5 +425,51 @@ fn missing_meta_envelope_fails_with_clear_error() {
     assert!(
         err.to_string().contains("_meta"),
         "error message should mention _meta; got: {err}"
+    );
+}
+
+// =====================================================================
+// Task 9 — end-to-end CLI invocation test
+// =====================================================================
+
+#[test]
+fn cli_invocation_end_to_end_with_mock() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let plans_dir = tmp.path().join("plans");
+    std::fs::create_dir_all(&plans_dir).unwrap();
+    write_synthetic_plan_files(&plans_dir, "cli1");
+
+    let output_dir = tmp.path().join("out");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let out = Command::new(runner_bin())
+        .args([
+            "execute-test-batch",
+            "--plans",
+            plans_dir.to_str().unwrap(),
+            "--adapter-bin",
+            fixture("mock-univrm-ok.sh").as_str(),
+            "--output-dir",
+            output_dir.to_str().unwrap(),
+            "--renderer-name",
+            "univrm",
+            "--json",
+        ])
+        .output()
+        .expect("spawn runner");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "runner should succeed end-to-end; stdout={stdout} stderr={stderr}"
+    );
+    let summary: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("JSON summary on stdout");
+    assert_eq!(summary["total_tests"], 1);
+    assert_eq!(summary["ok_count"], 1);
+    assert_eq!(summary["error_count"], 0);
+    assert!(
+        output_dir.join("local-manifest.json").exists(),
+        "local-manifest.json should be written"
     );
 }
