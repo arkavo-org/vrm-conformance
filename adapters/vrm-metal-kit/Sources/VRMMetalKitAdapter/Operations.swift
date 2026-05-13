@@ -354,13 +354,28 @@ final class Operations: @unchecked Sendable {
         session.renderer.viewMatrix = lookAt(eye: position, center: target, up: up)
 
         // ----- lighting -----
-        // The operation contract's `directional.dir` is the direction the
-        // light *travels* (light → scene). VRMMetalKit's `setLight` takes
-        // the direction *toward* the light (scene → light); negate.
+        // VRMMetalKit's `setLight(direction:)` takes direction-of-travel
+        // (light → scene) — same convention as the operation contract.
+        // Pass `dir` through unchanged.
+        //
+        // Confirmed against VMK internals (per VMK maintainer 2026-05-13):
+        //   - VRMUniforms.swift:28-31 default stores direction-of-travel;
+        //   - setup3PointLighting (VRMRenderer.swift:382-384) doc-comments
+        //     "Light direction points FROM light TO scene";
+        //   - MToonShader.metal:606 computes NdotL = dot(normal, -lightDirection)
+        //     — the shader negates internally, so the stored value must be
+        //     direction-of-travel for standard lit shading.
+        //
+        // Historical: this line used `-dir` until 2026-05-13. The negation
+        // produced an antipodally inverted lit pole (all three world-axis
+        // signs flipped on the lit-pole position), which surfaced visibly
+        // as a Y-mirrored shadow on tests like mtoon_shadingShift_0p8 —
+        // reported upstream as VMK#204 before the adapter root cause was
+        // identified.
         if let dir = session.directionalDir,
            let color = session.directionalColor,
            let intensity = session.directionalIntensity {
-            session.renderer.setLight(0, direction: -dir, color: color, intensity: intensity)
+            session.renderer.setLight(0, direction: dir, color: color, intensity: intensity)
             session.renderer.disableLight(1)
             session.renderer.disableLight(2)
         }
