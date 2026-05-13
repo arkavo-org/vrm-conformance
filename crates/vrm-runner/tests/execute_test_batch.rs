@@ -335,3 +335,43 @@ fn happy_path_writes_local_manifest_with_blake3() {
         );
     }
 }
+
+#[test]
+fn partial_output_marks_missing_tests_as_errors() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let plans_dir = tmp.path().join("plans");
+    std::fs::create_dir_all(&plans_dir).unwrap();
+    write_synthetic_plan_files(&plans_dir, "a1");
+    write_synthetic_plan_files(&plans_dir, "a2");
+    write_synthetic_plan_files(&plans_dir, "a3");
+
+    let output_dir = tmp.path().join("out");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let opts = RunOptions {
+        plans_dir: Utf8PathBuf::from_path_buf(plans_dir).unwrap(),
+        adapter_bin: fixture("mock-univrm-partial.sh"),
+        output_dir: Utf8PathBuf::from_path_buf(output_dir.clone()).unwrap(),
+        renderer_name: "univrm".into(),
+    };
+
+    let summary = run_batch(&opts).expect("run");
+    assert_eq!(summary.total_tests, 3, "all 3 declared tests should appear");
+    // mock-partial emits ceil(3/2) = 2 ok entries; 1 missing.
+    assert_eq!(summary.ok_count, 2);
+    assert_eq!(summary.error_count, 1);
+
+    let manifest_path = output_dir.join("local-manifest.json");
+    let manifest_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    let entries = manifest_json["entries"].as_array().unwrap();
+    let error_entry = entries.iter().find(|e| e["status"] == "error").unwrap();
+    assert!(
+        error_entry["error_message"]
+            .as_str()
+            .unwrap()
+            .contains("batch terminated"),
+        "missing test should be marked as batch-terminated; got: {:?}",
+        error_entry
+    );
+}
