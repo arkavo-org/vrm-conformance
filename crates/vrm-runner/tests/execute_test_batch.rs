@@ -45,12 +45,12 @@ fn execute_test_batch_subcommand_is_registered() {
     );
 }
 
+use camino::Utf8PathBuf;
 use vrm_runner::execute_batch::build_manifest;
 use vrm_test_plan::{
-    AmbientLight, Camera, Diff, DiffMode, DirectionalLight, Lighting, Output, PostProcessing,
-    TestPlan, ToneMapping, ColorSpace,
+    AmbientLight, Camera, ColorSpace, Diff, DiffMode, DirectionalLight, Lighting, Output,
+    PostProcessing, TestPlan, ToneMapping,
 };
-use camino::Utf8PathBuf;
 
 fn synthetic_plan(id: &str) -> TestPlan {
     TestPlan {
@@ -110,8 +110,14 @@ fn manifest_carries_two_entries_with_absolute_paths() {
 
     let manifest = build_manifest(
         &[
-            (synthetic_plan("a"), Utf8PathBuf::from_path_buf(vrm_a.clone()).unwrap()),
-            (synthetic_plan("b"), Utf8PathBuf::from_path_buf(vrm_b.clone()).unwrap()),
+            (
+                synthetic_plan("a"),
+                Utf8PathBuf::from_path_buf(vrm_a.clone()).unwrap(),
+            ),
+            (
+                synthetic_plan("b"),
+                Utf8PathBuf::from_path_buf(vrm_b.clone()).unwrap(),
+            ),
         ],
         Utf8PathBuf::from_path_buf(output_dir.clone()).unwrap(),
         "univrm".into(),
@@ -142,7 +148,10 @@ fn manifest_serializes_to_expected_json_shape() {
     std::fs::create_dir_all(&output_dir).unwrap();
 
     let manifest = build_manifest(
-        &[(synthetic_plan("x"), Utf8PathBuf::from_path_buf(vrm).unwrap())],
+        &[(
+            synthetic_plan("x"),
+            Utf8PathBuf::from_path_buf(vrm).unwrap(),
+        )],
         Utf8PathBuf::from_path_buf(output_dir).unwrap(),
         "univrm".into(),
     );
@@ -208,8 +217,45 @@ fn parse_skips_blank_lines() {
     assert_eq!(parsed.entries.len(), 1);
 }
 
-use vrm_runner::execute_batch::{write_local_manifest, LocalManifestEntry};
 use std::fs;
+use vrm_runner::execute_batch::{write_local_manifest, LocalManifestEntry};
+
+// =====================================================================
+// Task 6 — top-level run() helpers
+// =====================================================================
+
+use vrm_runner::execute_batch::{run as run_batch, RunOptions};
+
+fn workspace_root() -> std::path::PathBuf {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+}
+
+fn fixture(name: &str) -> Utf8PathBuf {
+    Utf8PathBuf::from_path_buf(
+        workspace_root()
+            .join("crates/vrm-runner/tests/fixtures")
+            .join(name),
+    )
+    .unwrap()
+}
+
+fn write_synthetic_plan_files(
+    dir: &std::path::Path,
+    id: &str,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let plan = synthetic_plan(id);
+    let plan_path = dir.join(format!("{id}.test.yaml"));
+    let vrm_path = dir.join(format!("{id}.vrm"));
+    std::fs::write(&plan_path, serde_yml::to_string(&plan).unwrap()).unwrap();
+    std::fs::write(&vrm_path, b"fake vrm").unwrap();
+    (plan_path, vrm_path)
+}
 
 #[test]
 fn local_manifest_writes_expected_shape() {
@@ -239,8 +285,53 @@ fn local_manifest_writes_expected_shape() {
     assert_eq!(v["entries"][0]["test_id"], "a");
     assert_eq!(v["entries"][0]["renderer_name"], "univrm");
     assert!(
-        v["entries"][0]["blake3"].as_str().unwrap().starts_with("blake3:"),
+        v["entries"][0]["blake3"]
+            .as_str()
+            .unwrap()
+            .starts_with("blake3:"),
         "blake3 should be prefixed; got: {:?}",
         v["entries"][0]["blake3"]
     );
+}
+
+// =====================================================================
+// Task 6 — happy-path contract test
+// =====================================================================
+
+#[test]
+fn happy_path_writes_local_manifest_with_blake3() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let plans_dir = tmp.path().join("plans");
+    std::fs::create_dir_all(&plans_dir).unwrap();
+    write_synthetic_plan_files(&plans_dir, "alpha");
+    write_synthetic_plan_files(&plans_dir, "bravo");
+
+    let output_dir = tmp.path().join("out");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let opts = RunOptions {
+        plans_dir: Utf8PathBuf::from_path_buf(plans_dir).unwrap(),
+        adapter_bin: fixture("mock-univrm-ok.sh"),
+        output_dir: Utf8PathBuf::from_path_buf(output_dir.clone()).unwrap(),
+        renderer_name: "univrm".into(),
+    };
+
+    let summary = run_batch(&opts).expect("run");
+    assert_eq!(summary.total_tests, 2);
+    assert_eq!(summary.ok_count, 2);
+    assert_eq!(summary.error_count, 0);
+
+    let manifest_path = output_dir.join("local-manifest.json");
+    let manifest_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    let entries = manifest_json["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    for entry in entries {
+        assert_eq!(entry["renderer_name"], "univrm");
+        assert!(
+            entry["blake3"].as_str().unwrap().starts_with("blake3:"),
+            "blake3 should be filled in; got: {:?}",
+            entry["blake3"]
+        );
+    }
 }

@@ -7,7 +7,9 @@
 
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
-use vrm_test_plan::{AnimationConfig, Camera, Lighting, Output, PhysicsConfig, PostProcessing, TestPlan};
+use vrm_test_plan::{
+    AnimationConfig, Camera, Lighting, Output, PhysicsConfig, PostProcessing, TestPlan,
+};
 
 /// Top-level JSON document the Rust runner writes for the adapter to
 /// consume. Schema version is pinned at the top so future changes can
@@ -73,9 +75,7 @@ fn absolutize(p: &Utf8PathBuf) -> Utf8PathBuf {
     let abs = if std_path.is_absolute() {
         std_path.to_path_buf()
     } else {
-        std::env::current_dir()
-            .expect("current_dir")
-            .join(std_path)
+        std::env::current_dir().expect("current_dir").join(std_path)
     };
     Utf8PathBuf::from_path_buf(abs).expect("absolute path is utf-8")
 }
@@ -145,8 +145,9 @@ pub fn parse_results_ndjson(s: &str) -> anyhow::Result<BatchResults> {
     let meta_line = lines
         .next()
         .ok_or_else(|| anyhow::anyhow!("results file is empty; expected _meta envelope"))?;
-    let meta_value: serde_json::Value = serde_json::from_str(meta_line)
-        .map_err(|e| anyhow::anyhow!("failed to parse first line as JSON: {e}; line={meta_line}"))?;
+    let meta_value: serde_json::Value = serde_json::from_str(meta_line).map_err(|e| {
+        anyhow::anyhow!("failed to parse first line as JSON: {e}; line={meta_line}")
+    })?;
     if meta_value.get("_meta").and_then(|v| v.as_bool()) != Some(true) {
         anyhow::bail!(
             "first line must be a _meta envelope (object with \"_meta\": true); got: {meta_line}"
@@ -199,10 +200,7 @@ struct LocalManifestEnvelope<'a> {
 /// Write the per-renderer local manifest. Computes BLAKE3 for any
 /// entry whose `blake3` field is `None` by reading the PNG bytes at
 /// `output_path`.
-pub fn write_local_manifest(
-    path: &Path,
-    entries: &[LocalManifestEntry],
-) -> anyhow::Result<()> {
+pub fn write_local_manifest(path: &Path, entries: &[LocalManifestEntry]) -> anyhow::Result<()> {
     let mut materialized: Vec<LocalManifestEntry> = Vec::with_capacity(entries.len());
     for entry in entries {
         let mut e = entry.clone();
@@ -221,6 +219,192 @@ pub fn write_local_manifest(
     let bytes = serde_json::to_vec_pretty(&envelope)?;
     std::fs::write(path, bytes)?;
     Ok(())
+}
+
+// =====================================================================
+// Top-level `run` — discovery, manifest emission, adapter invocation,
+// results ingestion, local-manifest writing
+// =====================================================================
+
+use std::process::Command;
+
+#[derive(Debug, Clone)]
+pub struct RunOptions {
+    pub plans_dir: Utf8PathBuf,
+    pub adapter_bin: Utf8PathBuf,
+    pub output_dir: Utf8PathBuf,
+    pub renderer_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunSummary {
+    pub total_tests: usize,
+    pub ok_count: usize,
+    pub error_count: usize,
+    pub local_manifest_path: Utf8PathBuf,
+}
+
+/// Discover `*.test.yaml` files in `opts.plans_dir`, pair each with a
+/// sibling `.vrm` (same stem), build the manifest, invoke the adapter
+/// binary, parse the results NDJSON, and write the per-renderer local
+/// manifest. Returns a summary; does not panic on per-test errors
+/// (those land in the local manifest as `status: "error"`).
+pub fn run(opts: &RunOptions) -> anyhow::Result<RunSummary> {
+    let pairs = discover_plan_vrm_pairs(&opts.plans_dir)?;
+    if pairs.is_empty() {
+        anyhow::bail!(
+            "no *.test.yaml files found in {}; nothing to run",
+            opts.plans_dir
+        );
+    }
+
+    std::fs::create_dir_all(opts.output_dir.as_std_path())?;
+
+    let manifest = build_manifest(&pairs, opts.output_dir.clone(), opts.renderer_name.clone());
+
+    // Write manifest + results paths into the output dir so they end up
+    // in a stable location (helps debugging; not protocol-load-bearing).
+    let manifest_path = opts.output_dir.join("manifest.json");
+    let results_path = opts.output_dir.join("results.ndjson");
+    std::fs::write(
+        manifest_path.as_std_path(),
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
+
+    // Invoke the adapter. Two positional args: manifest path, results
+    // path. The mock fixtures and the real launcher.sh both use this
+    // contract.
+    let status = Command::new(opts.adapter_bin.as_std_path())
+        .arg(manifest_path.as_std_path())
+        .arg(results_path.as_std_path())
+        .status();
+
+    // Read whatever the adapter wrote, even if the exit was non-zero —
+    // partial output is a defined success condition.
+    let parsed = match std::fs::read_to_string(results_path.as_std_path()) {
+        Ok(s) => parse_results_ndjson(&s)?,
+        Err(e) => {
+            anyhow::bail!(
+                "adapter ({}) did not produce a readable results file at {}: {e}",
+                opts.adapter_bin,
+                results_path
+            );
+        }
+    };
+    // The adapter's exit code is informational at this layer. We don't
+    // fail the run on non-zero exit because partial output is expected
+    // to surface as per-test errors. Future scope: surface the exit
+    // code in the summary so callers can choose to gate on it.
+    let _ = status;
+
+    // Build local-manifest entries from the parsed results, padding
+    // missing test_ids (declared in _meta but not present in entries)
+    // as errors.
+    let local_entries = reconcile_to_local_manifest(&parsed, &pairs, &opts.renderer_name);
+    let local_manifest_path = opts.output_dir.join("local-manifest.json");
+    write_local_manifest(local_manifest_path.as_std_path(), &local_entries)?;
+
+    let ok_count = local_entries.iter().filter(|e| e.status == "ok").count();
+    let error_count = local_entries.len() - ok_count;
+    Ok(RunSummary {
+        total_tests: local_entries.len(),
+        ok_count,
+        error_count,
+        local_manifest_path,
+    })
+}
+
+fn discover_plan_vrm_pairs(
+    plans_dir: &Utf8PathBuf,
+) -> anyhow::Result<Vec<(TestPlan, Utf8PathBuf)>> {
+    let mut pairs = Vec::new();
+    for entry in std::fs::read_dir(plans_dir.as_std_path())? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
+            continue;
+        }
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) if n.ends_with(".test.yaml") => n.to_owned(),
+            _ => continue,
+        };
+        let stem = name.trim_end_matches(".test.yaml");
+        let vrm_path = plans_dir.join(format!("{stem}.vrm"));
+        if !vrm_path.exists() {
+            tracing::warn!(
+                "skipping {}: sibling .vrm not found at {vrm_path}",
+                path.display()
+            );
+            continue;
+        }
+        let plan_bytes = std::fs::read(&path)?;
+        let plan: TestPlan = serde_yml::from_slice(&plan_bytes)
+            .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))?;
+        pairs.push((plan, vrm_path));
+    }
+    // Stable ordering — discovery order is filesystem-dependent.
+    pairs.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+    Ok(pairs)
+}
+
+fn reconcile_to_local_manifest(
+    parsed: &BatchResults,
+    pairs: &[(TestPlan, Utf8PathBuf)],
+    renderer_name: &str,
+) -> Vec<LocalManifestEntry> {
+    use std::collections::HashMap;
+    let by_id: HashMap<&str, &ResultEntry> = parsed
+        .entries
+        .iter()
+        .map(|e| (e.test_id.as_str(), e))
+        .collect();
+    let mut out = Vec::with_capacity(pairs.len());
+    for (plan, _vrm) in pairs {
+        if let Some(entry) = by_id.get(plan.id.as_str()) {
+            match entry.status {
+                ResultStatus::Ok => out.push(LocalManifestEntry {
+                    test_id: entry.test_id.clone(),
+                    renderer_name: renderer_name.to_string(),
+                    renderer_version: parsed.meta.renderer_version.clone(),
+                    output_path: entry.output_path.clone().unwrap_or_default(),
+                    blake3: entry.blake3.clone(),
+                    actual_color_space: entry
+                        .actual_color_space
+                        .clone()
+                        .unwrap_or_else(|| "unknown".into()),
+                    status: "ok".into(),
+                    error_message: None,
+                }),
+                ResultStatus::Error => out.push(LocalManifestEntry {
+                    test_id: entry.test_id.clone(),
+                    renderer_name: renderer_name.to_string(),
+                    renderer_version: parsed.meta.renderer_version.clone(),
+                    output_path: String::new(),
+                    blake3: None,
+                    actual_color_space: "n/a".into(),
+                    status: "error".into(),
+                    error_message: entry
+                        .error
+                        .as_ref()
+                        .map(|e| format!("code={} message={}", e.code, e.message)),
+                }),
+            }
+        } else {
+            // Declared in the plan dir; missing from the results file.
+            // Treat as "batch terminated before this test ran."
+            out.push(LocalManifestEntry {
+                test_id: plan.id.clone(),
+                renderer_name: renderer_name.to_string(),
+                renderer_version: parsed.meta.renderer_version.clone(),
+                output_path: String::new(),
+                blake3: None,
+                actual_color_space: "n/a".into(),
+                status: "error".into(),
+                error_message: Some("batch terminated before this test ran".into()),
+            });
+        }
+    }
+    out
 }
 
 #[cfg(test)]
