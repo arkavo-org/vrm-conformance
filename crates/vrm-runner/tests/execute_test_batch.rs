@@ -429,6 +429,39 @@ fn missing_meta_envelope_fails_with_clear_error() {
 }
 
 // =====================================================================
+// Spawn-failure contract test
+// =====================================================================
+
+#[test]
+fn spawn_failure_reports_clear_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let plans_dir = tmp.path().join("plans");
+    std::fs::create_dir_all(&plans_dir).unwrap();
+    write_synthetic_plan_files(&plans_dir, "spawn_test");
+
+    let output_dir = tmp.path().join("out");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let opts = RunOptions {
+        plans_dir: Utf8PathBuf::from_path_buf(plans_dir).unwrap(),
+        adapter_bin: Utf8PathBuf::from("/definitely/not/a/real/binary"),
+        output_dir: Utf8PathBuf::from_path_buf(output_dir).unwrap(),
+        renderer_name: "univrm".into(),
+    };
+
+    let err = run_batch(&opts).expect_err("should fail when adapter binary does not exist");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("spawn") || msg.contains("adapter") || msg.contains("/definitely/not/a/real/binary"),
+        "error should mention spawn failure or the bogus path; got: {msg}"
+    );
+    assert!(
+        !msg.contains("did not produce a readable results file"),
+        "error should not misattribute to missing results file; got: {msg}"
+    );
+}
+
+// =====================================================================
 // Task 9 — end-to-end CLI invocation test
 // =====================================================================
 

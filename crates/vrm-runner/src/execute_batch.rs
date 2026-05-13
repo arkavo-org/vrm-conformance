@@ -277,7 +277,8 @@ pub fn run(opts: &RunOptions) -> anyhow::Result<RunSummary> {
     let status = Command::new(opts.adapter_bin.as_std_path())
         .arg(manifest_path.as_std_path())
         .arg(results_path.as_std_path())
-        .status();
+        .status()
+        .map_err(|e| anyhow::anyhow!("failed to spawn adapter {}: {e}", opts.adapter_bin))?;
 
     // Read whatever the adapter wrote, even if the exit was non-zero —
     // partial output is a defined success condition.
