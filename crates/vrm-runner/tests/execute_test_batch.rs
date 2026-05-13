@@ -207,3 +207,40 @@ fn parse_skips_blank_lines() {
     let parsed = parse_results_ndjson(input).expect("parse");
     assert_eq!(parsed.entries.len(), 1);
 }
+
+use vrm_runner::execute_batch::{write_local_manifest, LocalManifestEntry};
+use std::fs;
+
+#[test]
+fn local_manifest_writes_expected_shape() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output_dir = tmp.path();
+
+    // Synthesize a tiny "PNG" so BLAKE3 has something to hash.
+    let png_a = output_dir.join("a.png");
+    fs::write(&png_a, b"fake png bytes").unwrap();
+
+    let entries = vec![LocalManifestEntry {
+        test_id: "a".into(),
+        renderer_name: "univrm".into(),
+        renderer_version: "v0.131.2".into(),
+        output_path: png_a.to_string_lossy().to_string(),
+        blake3: None, // writer fills this from the file on disk
+        actual_color_space: "Srgb".into(),
+        status: "ok".into(),
+        error_message: None,
+    }];
+
+    let manifest_path = output_dir.join("local-manifest.json");
+    write_local_manifest(&manifest_path, &entries).expect("write");
+
+    let written = fs::read_to_string(&manifest_path).expect("read manifest back");
+    let v: serde_json::Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(v["entries"][0]["test_id"], "a");
+    assert_eq!(v["entries"][0]["renderer_name"], "univrm");
+    assert!(
+        v["entries"][0]["blake3"].as_str().unwrap().starts_with("blake3:"),
+        "blake3 should be prefixed; got: {:?}",
+        v["entries"][0]["blake3"]
+    );
+}

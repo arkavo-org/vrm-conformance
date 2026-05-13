@@ -164,6 +164,65 @@ pub fn parse_results_ndjson(s: &str) -> anyhow::Result<BatchResults> {
     Ok(BatchResults { meta, entries })
 }
 
+// =====================================================================
+// Local manifest writer (per-renderer goldens-cache output)
+// =====================================================================
+
+use std::path::Path;
+
+/// One entry in `goldens-cache/<renderer>/local-manifest.json`.
+/// Format mirrors what `scripts/bootstrap-goldens.sh` already produces
+/// for the per-test adapters; UniVRM writes the same shape so the
+/// downstream consensus tooling doesn't need a UniVRM-specific path.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LocalManifestEntry {
+    pub test_id: String,
+    pub renderer_name: String,
+    pub renderer_version: String,
+    pub output_path: String,
+    /// If `None` at write time, the writer hashes the file at
+    /// `output_path` and fills this in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blake3: Option<String>,
+    pub actual_color_space: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LocalManifestEnvelope<'a> {
+    manifest_version: u32,
+    entries: &'a [LocalManifestEntry],
+}
+
+/// Write the per-renderer local manifest. Computes BLAKE3 for any
+/// entry whose `blake3` field is `None` by reading the PNG bytes at
+/// `output_path`.
+pub fn write_local_manifest(
+    path: &Path,
+    entries: &[LocalManifestEntry],
+) -> anyhow::Result<()> {
+    let mut materialized: Vec<LocalManifestEntry> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let mut e = entry.clone();
+        if e.blake3.is_none() && e.status == "ok" {
+            let bytes = std::fs::read(&e.output_path)
+                .map_err(|err| anyhow::anyhow!("read {}: {err}", e.output_path))?;
+            let hash = blake3::hash(&bytes);
+            e.blake3 = Some(format!("blake3:{}", hash.to_hex()));
+        }
+        materialized.push(e);
+    }
+    let envelope = LocalManifestEnvelope {
+        manifest_version: 1,
+        entries: &materialized,
+    };
+    let bytes = serde_json::to_vec_pretty(&envelope)?;
+    std::fs::write(path, bytes)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
