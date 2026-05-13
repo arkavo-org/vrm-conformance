@@ -42,7 +42,7 @@ log_path="$script_dir/last-run.log"
 "$UNITY_BIN" \
   -batchmode \
   -projectPath "$project_path" \
-  -executeMethod Conformance.RunBatch \
+  -executeMethod Conformance.Conformance.RunBatch \
   -logFile - \
   -- \
   "$manifest" \

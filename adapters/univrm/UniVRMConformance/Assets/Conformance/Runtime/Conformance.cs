@@ -1,16 +1,23 @@
-// L1+L2 stub (post-refactor): parses the manifest, writes one `_meta` line
-// + one `Unimplemented` entry per test_id, exits cleanly. Real rendering
-// arrives in L3 Task 11; spring-bone physics in L4.
+// L3: real per-test rendering through UniVRM v0.131.0 + Built-in RP.
+// Phase 1 ops (load_vrm, set_camera, set_lighting, set_post_processing,
+// render) are implemented. Phase 2 (spring-bone physics) deferred to L4 —
+// spring-bone tests render in rest pose at L3.
 //
-// DTOs live in Manifest.cs. The full per-test rendering pipeline replaces
-// this Unimplemented loop in Task 11.
+// Invoked from launcher.sh as:
+//   Unity -batchmode -projectPath ... -executeMethod Conformance.RunBatch -- manifest.json results.ndjson
+//
+// The `--` separator routes everything after it into
+// `Environment.GetCommandLineArgs()` as plain strings (Unity passes
+// everything past `--` through unmodified).
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using UniGLTF;
 using UnityEditor;
 using UnityEngine;
+using UniVRM10;
 
 namespace Conformance
 {
@@ -49,27 +56,16 @@ namespace Conformance
                     _meta = true,
                     manifest_version = manifest.manifest_version,
                     renderer_name = manifest.renderer_name,
-                    renderer_version = "L1L2-stub",
+                    renderer_version = "v0.131.0",
                     unity_version = Application.unityVersion,
                     render_pipeline = "Built-in RP",
                     total_tests = manifest.tests.Length,
                 };
                 WriteLine(stream, JsonUtility.ToJson(meta));
 
-                // One entry per test_id: all Unimplemented at this layer.
                 foreach (var t in manifest.tests)
                 {
-                    var entry = new Manifest.EntryDto
-                    {
-                        test_id = t.test_id,
-                        status = "error",
-                        error = new Manifest.ErrorDto
-                        {
-                            code = -32000,
-                            message = "Unimplemented (L1+L2 stub)",
-                            data = new Manifest.ErrorDataDto { phase = "L3" },
-                        },
-                    };
+                    var entry = RenderOne(manifest.output_dir, t);
                     WriteLine(stream, JsonUtility.ToJson(entry));
                 }
 
@@ -80,6 +76,106 @@ namespace Conformance
                 Debug.LogError($"Conformance.RunBatch: unhandled exception: {e}");
                 EditorApplication.Exit(1);
             }
+        }
+
+        // Render one test. Returns the EntryDto to append to the NDJSON.
+        // Per-test failures produce a status="error" entry; they never
+        // throw out of this method (batch must continue).
+        private static Manifest.EntryDto RenderOne(string outputDir, Manifest.TestEntryDto t)
+        {
+            // Pre-flight reject of unsupported post-processing.
+            try
+            {
+                SceneSetup.AssertPostProcessingSupported(t.post_processing);
+            }
+            catch (SceneSetup.UnsupportedFeatureException ex)
+            {
+                return new Manifest.EntryDto
+                {
+                    test_id = t.test_id,
+                    status = "error",
+                    error = new Manifest.ErrorDto
+                    {
+                        code = -32602,
+                        message = $"unsupported {ex.Feature}: {ex.Value}",
+                        data = new Manifest.ErrorDataDto
+                        {
+                            feature = ex.Feature,
+                            value = ex.Value,
+                            supported = ex.Supported,
+                        },
+                    },
+                };
+            }
+
+            GameObject vrmGo = null;
+            GameObject lightGo = null;
+            GameObject cameraGo = null;
+            try
+            {
+                // Load.
+                var loadTask = Vrm10.LoadPathAsync(
+                    t.vrm_path,
+                    canLoadVrm0X: false,
+                    showMeshes: true,
+                    awaitCaller: new ImmediateCaller(),
+                    ct: System.Threading.CancellationToken.None);
+                if (!loadTask.IsCompletedSuccessfully)
+                {
+                    return ErrorEntry(t.test_id, -32001, "LoadFailed", "L3", loadTask.Exception?.ToString());
+                }
+                var vrm = loadTask.Result;
+                vrmGo = vrm.gameObject;
+
+                // Camera + Light objects.
+                cameraGo = new GameObject("Camera");
+                var cam = cameraGo.AddComponent<Camera>();
+                SceneSetup.ConfigureCamera(cam, t.camera);
+
+                lightGo = new GameObject("Directional");
+                var light = lightGo.AddComponent<Light>();
+                SceneSetup.ConfigureLighting(light, t.lighting);
+
+                // Capture.
+                var outputPath = Path.Combine(outputDir, t.test_id + ".png");
+                var captureResult = Capture.Render(cam, t.output, outputPath);
+
+                return new Manifest.EntryDto
+                {
+                    test_id = t.test_id,
+                    status = "ok",
+                    output_path = captureResult.outputPath,
+                    actual_color_space = captureResult.actualColorSpace,
+                    render_seconds = captureResult.renderSeconds,
+                };
+            }
+            catch (Exception e)
+            {
+                return ErrorEntry(t.test_id, -32002, "RenderFailed", "L3", e.ToString());
+            }
+            finally
+            {
+                if (cameraGo != null) UnityEngine.Object.DestroyImmediate(cameraGo);
+                if (lightGo != null) UnityEngine.Object.DestroyImmediate(lightGo);
+                if (vrmGo != null) UnityEngine.Object.DestroyImmediate(vrmGo);
+            }
+        }
+
+        private static Manifest.EntryDto ErrorEntry(string test_id, int code, string label, string phase, string detail)
+        {
+            const int max = 1000;
+            if (detail != null && detail.Length > max) detail = detail.Substring(0, max) + "…";
+            return new Manifest.EntryDto
+            {
+                test_id = test_id,
+                status = "error",
+                error = new Manifest.ErrorDto
+                {
+                    code = code,
+                    message = $"{label}: {detail ?? "no detail"}",
+                    data = new Manifest.ErrorDataDto { phase = phase },
+                },
+            };
         }
 
         private static List<string> ExtractAdapterArgs()
@@ -105,9 +201,6 @@ namespace Conformance
         {
             var bytes = Encoding.UTF8.GetBytes(json + "\n");
             stream.Write(bytes, 0, bytes.Length);
-            // Flush-to-disk after each entry: survives OOM kill / segfault
-            // mid-batch. See docs/superpowers/specs/2026-05-12-adapter-
-            // univrm-design.md "Partial output" for rationale.
             stream.Flush(flushToDisk: true);
         }
     }
