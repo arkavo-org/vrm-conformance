@@ -35,4 +35,12 @@ fn execute_test_batch_subcommand_is_registered() {
         stdout.contains("--output-dir"),
         "help must mention --output-dir flag; got: {stdout}"
     );
+    assert!(
+        stdout.contains("--renderer-name"),
+        "help must mention --renderer-name flag; got: {stdout}"
+    );
+    assert!(
+        stdout.contains("--json"),
+        "help must mention --json flag; got: {stdout}"
+    );
 }
