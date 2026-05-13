@@ -460,6 +460,83 @@ Up to run 7, every divergence finding was filed against a renderer that was actu
 - **Run 9 bootstrap**: re-render the full 80-test corpus through all three real adapters with the new default and re-measure pairwise SSIM. Compare against run 7 numbers to validate the prediction above.
 - **Directional-intensity-by-π**: three-vrm assumes `Math.PI` scaling (legacy three.js convention). Our plan declares `intensity: 1.0` without specifying which convention applies. Decide whether to scale in the adapter (preserves the human-readable `1.0`) or in the plan (requires updating every test). Tracked as an open methodology question in `docs/methodology.md`.
 
+## Ninth run: methodology refinement validated (color_space: Srgb)
+
+**Date**: 2026-05-12, vrm-conformance commit `b6ad01b`. Same hardware (M4 Max), same renderer revisions as run 7 (three-vrm 3.5.0, vrm-metal-kit 0.13.3, godot-vrm @ Godot 4.6.2). The only material change between run 7 and run 9 is the corpus default `color_space` flip from `Linear` to `Srgb` shipped in commit `524c334` (run 8 was the methodology change itself; this run measures it).
+
+### Corpus-wide before/after
+
+| pair | run 7 mean | run 9 mean | Δ | run 7 min | run 9 min |
+|---|---|---|---|---|---|
+| `three-vrm` vs `vrm-metal-kit` | 0.7879 | **0.8975** | **+0.1096** | 0.6313 | 0.6313 |
+| `godot-vrm` vs `three-vrm` | 0.7042 | **0.8398** | **+0.1356** | 0.1840 | 0.1840 |
+| `godot-vrm` vs `vrm-metal-kit` | 0.8709 | 0.8714 | +0.0005 | 0.5301 | 0.5303 |
+
+The two pairs involving three-vrm jumped substantially. The pair not involving three-vrm stayed flat. That's exactly the prediction in run 8: three-vrm's output shifted (brighter — its renderer now applies the sRGB OETF on output), bringing it closer to both other renderers; godot-vrm and vrm-metal-kit didn't move because neither's color-space configuration changed in a way that produces different output bytes for this corpus.
+
+`three-vrm vs vrm-metal-kit` at 0.8975 is the highest pair mean the project has ever measured. The corpus is now within ~0.09 of the v1.0-standard 0.985 SSIM threshold. consensus_passed still 0/80 (the threshold is above the corpus max of 0.9749), but the gap closed substantially in one methodology refinement.
+
+### Pixel-level recovery — `mtoon_default` centerline
+
+| renderer | run 7 (x=512, y=512) | run 9 | Δ |
+|---|---|---|---|
+| three-vrm | (53, 53, 53) | **(126, 126, 126)** | **+73 per channel** |
+| vrm-metal-kit | (164, 164, 164) | (164, 164, 164) | 0 |
+| godot-vrm | (255, 255, 255) | (255, 255, 255) | 0 |
+
+three-vrm went from `0.208` linear (8-bit) to `0.494` linear. The new value is the result of three-vrm's MToon shader writing its linear-space output through `THREE.SRGBColorSpace` (linear shading + sRGB OETF on output) instead of `LinearSRGBColorSpace` (raw linear, no OETF). The remaining gap vs VRMMetalKit's `0.643` is consistent with the still-open `Math.PI` intensity-scaling question flagged in `docs/methodology.md` — three.js since r155 uses physically-correct directional-light intensity, and three-vrm's spec-intended baseline assumes `intensity = Math.PI` rather than the literal `1.0` our plans declare. Closing that gap is a follow-up; the color-space change alone moved three-vrm 73 channel-units toward the other two renderers.
+
+VRMMetalKit's framebuffer format changed (`rgba8Unorm` → `rgba8Unorm_srgb`) under the same methodology shift, but the centerline bytes are byte-identical to run 7. The MToon shader in VRMMetalKit appears to apply the sRGB OETF in-shader regardless of framebuffer format, so changing the format was a no-op for the rendered output bytes. The `actual_color_space` field in the result envelope reports the new convention; the underlying pixel data hasn't changed.
+
+godot-vrm was already writing sRGB-encoded PNGs unconditionally per its session.gd policy (commit on file), so its output is unchanged.
+
+### Top 15 most-divergent test_ids — pattern shift
+
+Outline cluster (8 tests) still dominates the floor — same 0.1840 / 0.3588 / etc. values, same three-way disagreement on outline rendering. The methodology change doesn't touch outline interpretation; that remains gated on the asset-side investigation flagged when [pixiv/three-vrm#1839](https://github.com/pixiv/three-vrm/issues/1839) was closed.
+
+What's new in the top 15:
+
+| test_id | run 7 | run 9 |
+|---|---|---|
+| `mtoon_shadingShift_0p8` | not top-15 | **0.8409** (new floor for shading tests) |
+| `swing_springbone_segment_0p1` | 0.7097 | 0.8534 |
+| `swing_springbone_joints_16` | 0.7096 | 0.8535 |
+| `swing_springbone_segment_0p2` | not top-15 | 0.8547 |
+| `swing_springbone_joints_8` | 0.7096 | 0.8565 |
+| `swing_springbone_default` | not top-15 | 0.8577 |
+| `swing_springbone_drag_0` | not top-15 | 0.8577 |
+
+The 5 swing-springbone tests in the top-15 now cluster around 0.85 (up from ~0.71 in run 7), the same shift magnitude as the corpus-wide mean. They were never the dominant divergence — outline was — and the methodology change moved them in lockstep with the rest of the MToon corpus. The chain-skinned cylinder geometry is the same; the methodology change is what's lifting them.
+
+`mtoon_shadingShift_0p8` cracking the top-15 at 0.8409 is the new floor for MToon shading tests (excluding outline). Worth a follow-up sample to see whether the remaining shading divergence is three-vrm vs the other two (color-space-related residual) or VRMMetalKit/godot-vrm vs three-vrm (genuine shader-interpretation gap).
+
+### Cumulative nine-run progression
+
+| Run | mean (3v vs VMK) | min | upstream events |
+|---|---|---|---|
+| 1 (50cfd7d) | 0.7447 | 0.6313 | first corpus baseline |
+| 2 (0.13.1) | 0.7002 | 0.1840 | #181/#182 closed; #185+#1839 surfaced |
+| 3 (0.13.1+chain) | 0.6994 | 0.1840 | chain-skinned mesh wired |
+| 4 (0.13.2+chain) | 0.7439 | 0.6313 | #185 closed in 0.13.2 |
+| 5 (0.13.3+chain) | 0.7879 | 0.6313 | #183 closed in 0.13.3 |
+| 6 (godot-vrm L3) | 0.7879 | 0.1840 | godot-vrm joins as third real renderer (n=44) |
+| 7 (godot-vrm L4) | 0.7879 | 0.1840 | godot-vrm full 80-test coverage |
+| 8 (methodology refinement) | — | — | color_space: Srgb default shipped; no re-render |
+| **9 (run 9 re-bootstrap)** | **0.8975** | **0.1840** | **methodology change validated by data** |
+
+Eight upstream tickets filed and closed (#181, #182, #183, #185 against VRMMetalKit; #1838 closed not-a-bug against three-vrm; #1839 closed pending our asset-side investigation; godot-vrm L3 + L4 self-shipped). The three-vrm/VMK pair mean is now +0.1528 above the original run-1 baseline, the largest single-session improvement of the project's history, driven by a methodology refinement rather than an upstream fix.
+
+### What this validates
+
+- **The methodology refinement was the right call.** The data confirms run 8's prediction directionally and to within an order of magnitude on the magnitude. three-vrm-side divergence wasn't a three-vrm bug; it was a suite-side choice about which output color space to ask for.
+- **The four-renderer panel will work.** When UniVRM (Unity, in-design per `rfcs/0003` and `docs/superpowers/plans/2026-05-12-adapter-univrm-scaffold.md`) lands as renderer #4, the consensus diff will have a fourth voter to disambiguate the remaining ~0.10 gap to the 0.985 threshold. The two largest remaining clusters (outline rendering + the ~0.84 shading-tail) are exactly the kinds of disagreement a ground-truth oracle is designed to resolve.
+
+### Open follow-ups
+
+- **`Math.PI` intensity scaling.** Three-vrm's spec-intended baseline assumes directional intensity `Math.PI`. Our plans declare `1.0`. Closing this would likely move three-vrm's centerline from `(126,...)` to something closer to `(188,...)` and tighten the three-vrm/VMK pair further. Decide whether to scale in the three-vrm adapter (preserves human-readable `1.0` in plans) or in the plan (requires touching every test_id). Not blocking the corpus.
+- **`mtoon_shadingShift_0p8` and other ~0.84 cluster shading tests.** Sample pixel data to identify which renderer is the outlier on each. With three renderers, consensus can call it — but it's worth a dedicated look before treating any of them as ground truth.
+- **Outline floor (0.1840) unchanged.** Asset-side investigation still pending from the [three-vrm#1839](https://github.com/pixiv/three-vrm/issues/1839) close-out (try a known-good MToon asset from `vrm-c/UniVRM-Samples` and see whether outlines render as a thin silhouette band there).
+
 ## How to reproduce
 
 ```bash
