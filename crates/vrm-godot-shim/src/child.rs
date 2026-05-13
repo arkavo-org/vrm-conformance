@@ -66,11 +66,16 @@ pub fn spawn_godot(
     // flag combo confirmed by docs/superpowers/plans/2026-05-11-adapter-godot-vrm-L3.md
     // Spike 1. Linux CI needs a follow-up spike (likely xvfb-run +
     // --display-driver x11 --rendering-driver vulkan).
-    cmd.arg("--display-driver").arg("macos")
-        .arg("--rendering-driver").arg("metal")
-        .arg("--audio-driver").arg("Dummy")
-        .arg("--path").arg(project_dir)
-        .arg("--script").arg(main_script)
+    cmd.arg("--display-driver")
+        .arg("macos")
+        .arg("--rendering-driver")
+        .arg("metal")
+        .arg("--audio-driver")
+        .arg("Dummy")
+        .arg("--path")
+        .arg(project_dir)
+        .arg("--script")
+        .arg(main_script)
         .arg("--")
         .arg(port.to_string())
         .stdin(Stdio::null())
@@ -160,11 +165,7 @@ mod tests {
     fn spawn_with_missing_binary_returns_godot_missing() {
         let old = env::var_os("GODOT_BIN");
         env::set_var("GODOT_BIN", "/definitely/not/a/real/binary/xyzzy");
-        let result = spawn_godot(
-            &PathBuf::from("."),
-            "src/main.gd",
-            12345,
-        );
+        let result = spawn_godot(&PathBuf::from("."), "src/main.gd", 12345);
         match old {
             Some(v) => env::set_var("GODOT_BIN", v),
             None => env::remove_var("GODOT_BIN"),
@@ -178,8 +179,8 @@ mod tests {
     #[test]
     fn accept_timeout_fires_when_no_one_connects() {
         let (listener, _port) = bind_ephemeral().expect("bind");
-        let err = accept_with_timeout(&listener, Duration::from_millis(100))
-            .expect_err("should timeout");
+        let err =
+            accept_with_timeout(&listener, Duration::from_millis(100)).expect_err("should timeout");
         match err {
             ChildError::AcceptTimeout { .. } => {}
             other => panic!("expected AcceptTimeout, got {other:?}"),

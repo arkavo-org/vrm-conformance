@@ -22,11 +22,7 @@ pub enum BridgeError {
 
 /// Forward one round of: stdin frame -> TCP line -> TCP line -> stdout frame.
 /// Returns `Ok(true)` on a successful round, `Ok(false)` on clean stdin EOF.
-pub fn forward_one<R, W, S>(
-    stdin: &mut R,
-    stdout: &mut W,
-    tcp: &mut S,
-) -> Result<bool, BridgeError>
+pub fn forward_one<R, W, S>(stdin: &mut R, stdout: &mut W, tcp: &mut S) -> Result<bool, BridgeError>
 where
     R: Read,
     W: Write,
