@@ -1,0 +1,28 @@
+{
+  "name": "Conformance.Tests.PlayMode",
+  "rootNamespace": "Conformance.Tests.Play",
+  "references": [
+    "Conformance",
+    "VRM10",
+    "UniGLTF",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "versionDefines": [
+    {
+      "name": "com.unity.test-framework",
+      "expression": "1.0.0",
+      "define": "UNITY_TEST_FRAMEWORK"
+    }
+  ],
+  "noEngineReferences": false
+}

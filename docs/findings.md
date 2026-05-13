@@ -705,22 +705,42 @@ That settles the outline-floor question definitively. Three independent MToon im
 
 ### VRMMetalKit vs the consortium reference — launch anchor
 
-**Headline (conformance claim, methodology-internal)**: across an 80-test cross-renderer corpus, VRMMetalKit `0.13.4` and the consortium reference implementation (UniVRM `v0.131.0`) agree at SSIM ≥ 0.85 on **72 of 80 tests (90%)**, with the bulk of the corpus — **65 of 80 tests (81%)** — falling in the 0.85–0.95 agreement band. The remaining 8 tests are accounted for in three named clusters described below; none of them is an MToon-math error.
+**Headline (conformance claim, methodology-internal, post-UniVRM-L4-PlayMode)**: across an 80-test cross-renderer corpus, VRMMetalKit `0.13.4` and the consortium reference implementation (UniVRM `v0.131.0` running real spring-bone physics in Unity 6 PlayMode) agree at SSIM ≥ 0.85 on **54 of 80 tests (68%)**, with the bulk of the MToon-math subset (36 of 44 = **82% on directly comparable MToon tests**) falling in the 0.85+ agreement band.
 
-**Supporting statistic**: corpus-wide mean SSIM 0.8726, median 0.8695, max 0.9688 (`mtoon_default`).
+The 26 tests outside that band split into three named clusters; only one of the three is an open question for VMK at RC time:
+
+- **8 outline tests** (SSIM 0.63–0.86): deliberate stress assets, spec-correct flood, see Outline cluster below.
+- **5 shadingToony tests** (SSIM 0.78–0.83): real renderer-side divergence, **filed as [VMK#205](https://github.com/arkavo-org/VRMMetalKit/issues/205)** before RC tag.
+- **18 swing-springbone tests** (SSIM 0.7985–0.8025): VMK's `animate_root_transform` produces output byte-identical to no-animation, **filed as [VMK#206](https://github.com/arkavo-org/VRMMetalKit/issues/206)** before RC tag.
+
+**Roadmap**: if VMK#205 (shadingToony) and VMK#206 (animate_root_transform) both close before RC tag, the conformance pass-rate at 0.85 lifts from 54/80 (68%) to a projected ~72/80 (90%) — the originally-claimed number, now with full physics. The shadingToony fix lifts 5 tests; the animate_root_transform fix lifts the 18 swing tests from "asymmetric pose comparison" back into the cross-renderer bulk band.
+
+**Supporting statistic**: corpus-wide mean SSIM 0.8573 (was 0.8726 with L3 rest-pose; the drop reflects swing-test divergence becoming visible after L4 made the comparison fair). Median 0.8675, max 0.9688 (`mtoon_default`).
+
+> **Why the headline dropped 22 percentage points**: before UniVRM L4 PlayMode landed, all 36 spring-bone tests (settle + swing) showed structurally identical "pass" SSIMs (~0.87) because UniVRM was rendering in rest pose while VMK was rendering with active physics. The previous 90% conformance claim was inflated by 18 swing tests that hadn't yet had their comparison made informative. The current 68% is the first **honest** number — and it explicitly identifies VMK#206 as the largest single contributor to the gap.
 
 **Honest note on the declared 0.985 threshold**: every test plan in this corpus carries `diff.threshold: 0.985`, the v1.0 self-diff target. That threshold was scoped for "this renderer producing byte-identical output across runs," not "this renderer matches an independent implementation pixel-perfect." Under 0.985, *zero* of 80 tests pass for any cross-renderer pair, including the closest pair in the corpus (three-vrm ↔ UniVRM at 0.9988 max). For the cross-renderer-vs-reference question — which is what the VMK launch is making — 0.85 is the operationally meaningful threshold across the bulk-of-corpus band, and per-test thresholds need to be brought in line with that in a methodology pass before they become useful as RC gates.
 
-**Conformance pass-rate at several thresholds, VMK 0.13.4 ↔ UniVRM v0.131.0**:
+**Conformance pass-rate at several thresholds, VMK 0.13.4 ↔ UniVRM v0.131.0 (PlayMode physics)**:
 
 ```
   SSIM ≥ 0.985:   0 / 80 ( 0%)   ← declared threshold; aspirational, not operational
   SSIM ≥ 0.950:   7 / 80 ( 9%)
   SSIM ≥ 0.900:  12 / 80 (15%)
   SSIM ≥ 0.875:  19 / 80 (24%)
-  SSIM ≥ 0.850:  72 / 80 (90%)   ← bulk-of-corpus agreement
-  SSIM ≥ 0.800:  75 / 80 (94%)
+  SSIM ≥ 0.850:  54 / 80 (68%)   ← honest bulk-band (drop from 72 reflects post-L4 swing divergence)
+  SSIM ≥ 0.800:  72 / 80 (90%)
   SSIM ≥ 0.750:  78 / 80 (98%)
+```
+
+By category:
+
+```
+  MToon material tests (44):   36/44 ≥ 0.85 (82%)   ← stable comparison; primary conformance claim
+  Spring-bone settle (18):     18/18 ≥ 0.85 (100%)  ← both render mostly-rest-pose; informative once
+                                                       deep-settle parameter sweeps are added
+  Spring-bone swing (18):       0/18 ≥ 0.85 (0%)    ← VMK#206 (animate_root_transform no-op);
+                                                       blocked until upstream fix
 ```
 
 Reference pair for calibration — three-vrm ↔ UniVRM (the closest pair in the corpus):
@@ -733,21 +753,19 @@ Reference pair for calibration — three-vrm ↔ UniVRM (the closest pair in the
 
 Even between three-vrm and the consortium reference — two implementations that share the most spec-interpretation heritage — only 12% of tests cross 0.985. **0.985 is not a meaningful cross-renderer threshold.**
 
-**Per-test distribution behind the mean**:
+**Per-test distribution behind the mean (post-L4)**:
 
 ```
 VMK 0.13.4 ↔ UniVRM v0.131.0 — 80-test SSIM distribution
   min:    0.6315   (mtoon_outline_world_0p1; see Outline cluster below)
-  p10:    0.8551
-  median: 0.8695
-  mean:   0.8726
-  p90:    0.9463
+  median: 0.8675
+  mean:   0.8573
   max:    0.9688
 
 Bucket distribution:
   SSIM 0.50–0.70  1 test   ( 1.2%)   ← outline cluster (worst case)
-  SSIM 0.70–0.85  7 tests  ( 8.8%)   ← outline cluster + shadingToony cluster
-  SSIM 0.85–0.95 65 tests  (81.2%)   ← bulk-of-corpus agreement
+  SSIM 0.70–0.85 25 tests  (31.2%)   ← outline + shadingToony + swing-springbone clusters
+  SSIM 0.85–0.95 47 tests  (58.8%)   ← MToon-math + settle-springbone bulk band
   SSIM 0.95–1.00  7 tests  ( 8.8%)
 ```
 
@@ -777,7 +795,13 @@ This is *not* methodology noise — it's a substantive shading-math difference b
 
 The bulk-band tests sit at ~0.87 mean rather than 1.0 because of cross-engine rendering choices the MToon spec deliberately doesn't constrain — silhouette anti-aliasing differences (MSAA 4× with different sample patterns produces different edge pixels), glTF→engine coordinate-convention conversions, sRGB OETF rounding, mip-level selection. These are catalogued as expected divergence in [`docs/methodology.md`](./methodology.md) and aren't expected to close further without engine-level changes outside MToon's scope.
 
-**The framing for launch copy**: VRMMetalKit `0.13.4` matches the MToon-1.0 consortium reference (UniVRM `v0.131.0`) within the 0.85 SSIM agreement band on 72 of 80 tests (90%) across the conformance corpus. The 8 tests outside that band split into one cluster of deliberate stress assets (outline rendering at parameter extremes; spec-correct), one cluster of substantive shading-math divergence (`shadingToony`; pending an upstream fix), and engine-level residual documented in the methodology. *None of the gap is MToon-math error.*
+**4. Spring-bone swing cluster (`swing_springbone_*`; SSIM 0.7985–0.8025): VMK#206, animate_root_transform no-op.**
+
+All 18 of VRMMetalKit's swing-springbone PNGs are **SHA256-byte-identical** to their corresponding settle-springbone PNGs (proof in [VMK#206](https://github.com/arkavo-org/VRMMetalKit/issues/206) issue body). The `animate_root_transform` operation completes without error but has no visible effect on the rendered output — the avatar root stays at its loaded position regardless of the animation's target translation. UniVRM, three-vrm, and godot-vrm all show the expected post-animation displacement; only VMK doesn't.
+
+three-vrm ↔ UniVRM on the same swing tests = **0.9555 mean SSIM** (close to the MToon-math agreement band), demonstrating the test design itself works as intended once the renderer's animation pipeline does its job. A VMK fix here lifts 18 tests from the 0.80 cluster up into the 0.85+ bulk band in one shot.
+
+**The framing for launch copy (post-L4, honest)**: VRMMetalKit `0.13.4` matches the MToon-1.0 consortium reference (UniVRM `v0.131.0` with PlayMode physics) within the 0.85 SSIM agreement band on **54 of 80 tests (68%)** across the conformance corpus, with **36 of 44 directly comparable MToon-math tests (82%)** in the agreement band. The 26 tests outside split into one cluster of deliberate stress assets (outline rendering at parameter extremes; spec-correct), one cluster of substantive shading-math divergence (`shadingToony`; [VMK#205](https://github.com/arkavo-org/VRMMetalKit/issues/205)), and one cluster of animation-pipeline divergence (`animate_root_transform`; [VMK#206](https://github.com/arkavo-org/VRMMetalKit/issues/206)). Closing both filed upstream issues before RC tag projects the corpus-wide pass-rate at 0.85 to ~72/80 (90%). *None of the gap is MToon-math error; all of it has a named cluster and a known path to closure.*
 
 ### Outline-test SSIM matrix (illustrative for `mtoon_outline_world_0p1`)
 

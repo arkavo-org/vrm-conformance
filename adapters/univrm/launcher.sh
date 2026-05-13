@@ -33,21 +33,45 @@ project_path="$script_dir/UniVRMConformance"
 log_path="$script_dir/last-run.log"
 
 # `-batchmode` (without `-nographics`) keeps Metal initialized so the
-# RenderTexture readback path works. `-quit` is implicit when the
-# entry point calls EditorApplication.Exit().
+# RenderTexture readback path works. `-quit` is implicit on PlayMode
+# test exit.
+#
+# L4 path: `-runTests -testPlatform PlayMode -testFilter ...` boots into
+# PlayMode (so UniVRM's FastSpringBone runtime initializes —
+# Application.isPlaying must be true), then runs our [UnityTest]
+# coroutine that drives the batch. Spring-bone physics now actually run
+# instead of no-opping on EditMode like the L3 -executeMethod path did.
 #
 # `-logFile -` writes Unity's stdout/stderr to this process's stdout;
 # we tee it to last-run.log for postmortems. The runner does NOT read
 # stdout — it only consumes results.ndjson.
-"$UNITY_BIN" \
-  -batchmode \
-  -projectPath "$project_path" \
-  -executeMethod Conformance.Conformance.RunBatch \
-  -logFile - \
-  -- \
-  "$manifest" \
-  "$results" \
-  2>&1 | tee "$log_path"
+#
+# Set L3_EDITMODE=1 to force the legacy EditMode entry (no spring-bone
+# physics; faster boot). Default is PlayMode (L4).
+if [ "${L3_EDITMODE:-0}" = "1" ]; then
+  "$UNITY_BIN" \
+    -batchmode \
+    -projectPath "$project_path" \
+    -executeMethod Conformance.Conformance.RunBatch \
+    -logFile - \
+    -- \
+    "$manifest" \
+    "$results" \
+    2>&1 | tee "$log_path"
+else
+  "$UNITY_BIN" \
+    -batchmode \
+    -projectPath "$project_path" \
+    -runTests \
+    -testPlatform PlayMode \
+    -testFilter "Conformance.Tests.Play.BatchRunner.RunBatchInPlayMode" \
+    -testResults "$(dirname "$results")/playmode-test-results.xml" \
+    -logFile - \
+    -- \
+    "$manifest" \
+    "$results" \
+    2>&1 | tee "$log_path"
+fi
 
 unity_exit=${PIPESTATUS[0]}
 exit "$unity_exit"
