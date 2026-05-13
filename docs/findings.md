@@ -782,7 +782,7 @@ swing_springbone_segment_0p1 0.8199 outliers all four
 
 `mtoon_shadingToony_*` becomes the new attention cluster: the four renderers diverge non-trivially on the shading-toony parameter, suggesting either a spec-interpretation ambiguity or a methodology artifact (the `shadingToony` parameter interacts with how each renderer computes the lit-vs-shaded transition). Worth a dedicated per-test investigation similar to the `mtoon_shadingShift_0p8` deep-dive.
 
-The `swing_springbone_*` divergence is expected at this layer — UniVRM L3 renders spring-bone tests in **rest pose** (physics not stepped), while the other three renderers run their physics implementations. UniVRM L4 (spring-bone stepping) is required to settle whether the remaining divergence is animation-driven or renderer-driven.
+The `swing_springbone_*` divergence is expected at this layer — UniVRM renders spring-bone tests in **rest pose** (physics not stepped), while the other three renderers run their physics implementations. Full spring-bone stepping is partially implemented: `PhysicsDriver.cs` carries `RestoreInitialTransform` + `Process(dt)` loops mirroring the godot-vrm L4 convention, but UniVRM v0.131.0's FastSpringBone runtime constructs its Burst job buffers only when `Application.isPlaying == true`, and `Unity -batchmode -executeMethod` runs in EditMode. Closing this gap properly requires a separate PlayMode batch entry point (`EditorApplication.EnterPlaymode()` → re-enter at a PlayMode method). Deferred to a follow-up L4-PlayMode plan; spring-bone tests render rest-pose for now (with the avatar root parked at `animation.root_transform.translation_end` to keep camera framing consistent with the test plan).
 
 ### Bonus: UniVRM L3 capabilities verified in this run
 

@@ -13,12 +13,14 @@ runner ◀───results.ndjson───────────────�
 
 | Phase | Status |
 |---|---|
-| L1 — project skeleton + UPM pin | scaffolded |
-| L2 — Rust runner subcommand + NDJSON contract + mock-fixture tests | scaffolded |
-| L3 — Phase 1 ops real (`load_vrm`, `set_camera`, `set_lighting`, `set_post_processing`, `render`) | deferred |
-| L4 — Phase 2 spring-bone physics ops | deferred |
+| L1 — project skeleton + UPM pin | shipped |
+| L2 — Rust runner subcommand + NDJSON contract + mock-fixture tests | shipped |
+| L3 — Phase 1 ops real (`load_vrm`, `set_camera`, `set_lighting`, `set_post_processing`, `render`) | **shipped** |
+| L4 — Phase 2 spring-bone physics ops (manual 60 Hz stepping) | partial; PlayMode batch required |
 
-Through L2, the runner side speaks the full batch contract end-to-end against mock-binary fixtures (`crates/vrm-runner/tests/fixtures/mock-univrm-*.sh`). The Unity side compiles cleanly with UniVRM v0.131.0 pinned via UPM but `Conformance.RunBatch` is a stub — every test returns `-32000 Unimplemented` with `data.phase: "L3"`. Real rendering arrives in the L3 plan.
+L3 covers Phase 1 end-to-end: VRM load via `Vrm10.LoadPathAsync(awaitCaller: new ImmediateCaller())`, camera + directional + ambient via `SceneSetup` with glTF→Unity Z-mirror, `RenderTexture` → `ReadPixels` → `EncodeToPNG` via `Capture`. All 80 test_ids render successfully through the adapter; the full corpus's `goldens-cache/univrm/local-manifest.json` reports 80 OK / 0 error.
+
+L4 is **partially implemented**. `PhysicsDriver.cs` carries the manual-stepping logic (`RestoreInitialTransform` + `Process(1/60)` × `settle_steps` + per-frame `Process(1/fps)` during `animate_root_transform`), but UniVRM v0.131.0's `Vrm10FastSpringboneRuntimeStandalone` constructs its Burst-compiled job buffers only when `Application.isPlaying == true` (see `Packages/VRM10/Runtime/Components/Vrm10Runtime/Springbone/Vrm10FastSpringboneRuntimeStandalone.cs`). `-batchmode -executeMethod` runs in EditMode, so the driver detects EditMode and no-ops cleanly; spring-bone tests render in **rest pose** at L3 (with the avatar root parked at `animation.root_transform.translation_end` for swing-test framing). Full L4 stepping needs a PlayMode batch entry point — separate follow-up plan.
 
 ## Runtime dependency
 
@@ -52,7 +54,7 @@ cargo test -p vrm-runner --test execute_test_batch
   -logFile -
 
 # Smoke (L3+, requires real rendering)
-scripts/smoke-univrm.sh   # not present until L3
+scripts/smoke-univrm.sh   # one-test E2E through the adapter
 ```
 
 CI (`.github/workflows/univrm.yml`) runs both the Rust contract tests (via the workspace `rust.yml`) and the Unity EditMode tests (via `game-ci/unity-test-runner`) on `macos-latest`.

@@ -127,6 +127,10 @@ namespace Conformance
                 var vrm = loadTask.Result;
                 vrmGo = vrm.gameObject;
 
+                // L4: disable auto-update so spring-bone stepping is
+                // deterministic and entirely driver-owned.
+                PhysicsDriver.DisableAutoUpdate(vrm);
+
                 // Camera + Light objects.
                 cameraGo = new GameObject("Camera");
                 var cam = cameraGo.AddComponent<Camera>();
@@ -135,6 +139,13 @@ namespace Conformance
                 lightGo = new GameObject("Directional");
                 var light = lightGo.AddComponent<Light>();
                 SceneSetup.ConfigureLighting(light, t.lighting);
+
+                // L4: spring-bone physics — settle from rest pose, then
+                // optionally animate root transform while stepping
+                // spring-bone. Both are no-ops when the corresponding DTO
+                // field is null (Phase 1 MToon tests).
+                PhysicsDriver.Settle(vrm, t.physics);
+                PhysicsDriver.AnimateRootTransform(vrm, t.animation);
 
                 // Capture.
                 var outputPath = Path.Combine(outputDir, t.test_id + ".png");

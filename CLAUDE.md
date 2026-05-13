@@ -129,6 +129,7 @@ Cross-renderer pixel-exact comparison is impossible for non-PBR toon shading —
 - `adapters/three-vrm/` — Phase 1 ops real; Playwright headless Chromium running three.js + three-vrm. Reserved ops return `Unimplemented`. Requires `npx playwright install chromium` after `npm install`.
 - `adapters/babylon-vrm/` — L1+L2 scaffold; renderer integration deferred to L3. Exists to give consensus diff a third real renderer when ready.
 - `adapters/godot-vrm/` — Godot 4 / GDScript paired with the `crates/vrm-godot-shim/` Rust shim. L4 (Phase 1 + spring-bone physics real). Full 80-test corpus renders end-to-end. Runner consumes `target/release/vrm-godot-shim` as `--adapter-bin`. Requires Godot 4.x on `PATH`.
+- `adapters/univrm/` — Unity 6 / UniVRM v0.131.0 / Built-in RP. L3 — Phase 1 ops real (44 MToon variants + 36 spring-bone tests render end-to-end through `Unity -batchmode -executeMethod Conformance.Conformance.RunBatch`). Spring-bone tests render in **rest pose** at L3; full L4 stepping requires PlayMode batch (UniVRM's FastSpringBone runtime gates on `Application.isPlaying`) — separate follow-up. Uses **batched one-shot via filesystem** (RFC-0003); runner consumes `adapters/univrm/launcher.sh` as `--adapter-bin` via `execute-test-batch`. Requires Unity 6000.4.6f1 + Personal license activated locally; CI does build-validate only.
 
 ### CI guardrails
 
