@@ -423,6 +423,44 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "consensus_passed": { "type": "boolean" }
                             }
                         }
+                    },
+                    "execute-test-batch": {
+                        "summary": "Execute a batched corpus through a batch-mode adapter (UniVRM). Builds a JSON manifest, invokes the adapter once for the whole batch, ingests an NDJSON results file.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["plans", "adapter_bin", "output_dir"],
+                            "properties": {
+                                "plans": {
+                                    "type": "string",
+                                    "description": "directory of .test.yaml files"
+                                },
+                                "adapter_bin": {
+                                    "type": "string",
+                                    "description": "path to the adapter launcher"
+                                },
+                                "output_dir": {
+                                    "type": "string",
+                                    "description": "PNG and local-manifest output directory"
+                                },
+                                "renderer_name": {
+                                    "type": "string",
+                                    "default": "univrm",
+                                    "description": "renderer name recorded in local manifest"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "total_tests": { "type": "integer" },
+                                "ok_count": { "type": "integer" },
+                                "error_count": { "type": "integer" },
+                                "local_manifest": {
+                                    "type": "string",
+                                    "description": "path to local-manifest.json"
+                                }
+                            }
+                        }
                     }
                 }
             });
