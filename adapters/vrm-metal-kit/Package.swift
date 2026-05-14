@@ -21,7 +21,20 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
-        // 0.13.6 (commit a610223) closes:
+        // 0.13.7 (commit a6e2d6d) closes:
+        //   - PR #231 (MToon: VRM 0.x `_ShadeToony`/`_ShadeShift` conversion
+        //          now happens in VRM0MaterialProperty.toMToonMaterial()
+        //          rather than the shader, so VRM 1.0 raw-NdotL toon-ramp
+        //          path is no longer double-converting legacy materials.
+        //          Also: defensive shader clamping for rimLightingMixFactor,
+        //          shared `setupBrightToonLighting()` preset, Rec.709 luma
+        //          AvatarSample_A regression test, AvatarSample_A.png
+        //          regenerated. Shader hunk touches MToonShader.metal
+        //          (+58/-31), VRMGeometry.swift (+5/-59), VRMRenderer.swift
+        //          (+33/-15) — non-trivial despite the "test follow-ups"
+        //          framing of the release notes. VMK#228 (rim lift) and
+        //          VMK#213 (shadingToony curve) remain open going in.
+        // 0.13.6 (commit a610223) closed:
         //   - #214 PR (pipeline cache: include pixel format + sample count
         //          in PSO cache key — adapter's config.colorPixelFormat
         //          write actually reaches the pipeline state object now)
@@ -65,7 +78,7 @@ let package = Package(
         // All nine were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "a610223f30b45f9a8a7604b57c78989018d0e1b2"
+            revision: "a6e2d6d7a7798a8e6a153ad6563d4f31929ee7bf"
         ),
     ],
     targets: [
