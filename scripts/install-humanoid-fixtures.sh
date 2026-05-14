@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+#
+# Materialize the humanoid fixture (AvatarSample_A) into assets/humanoid/
+# so the test plans in test-plans/manual/humanoid/ can run.
+#
+# The asset is NOT redistributed by this repo — it ships under the VRM
+# Platform License 1.0 (see VMK's LICENSE-MODELS.md). This script locates
+# an existing copy and symlinks it.
+#
+# Resolution order:
+#   1. $VRM_HUMANOID_FIXTURE points at the .vrm.glb directly
+#   2. $VMK_REPO/AvatarSample_A_1.0.vrm.glb (env var to a VRMMetalKit clone)
+#   3. ~/Projects/VRMMetalKit/AvatarSample_A_1.0.vrm.glb (default checkout)
+#
+# Usage:
+#   scripts/install-humanoid-fixtures.sh
+
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+DEST="$ROOT/assets/humanoid"
+mkdir -p "$DEST"
+
+find_fixture() {
+    local basename="$1"
+    if [ -n "${VRM_HUMANOID_FIXTURE:-}" ] && [ "$(basename "$VRM_HUMANOID_FIXTURE")" = "$basename" ]; then
+        echo "$VRM_HUMANOID_FIXTURE"; return
+    fi
+    if [ -n "${VMK_REPO:-}" ] && [ -f "$VMK_REPO/$basename" ]; then
+        echo "$VMK_REPO/$basename"; return
+    fi
+    if [ -f "$HOME/Projects/VRMMetalKit/$basename" ]; then
+        echo "$HOME/Projects/VRMMetalKit/$basename"; return
+    fi
+    return 1
+}
+
+install_one() {
+    local basename="$1"
+    local destname="$2"
+    local src
+    if ! src=$(find_fixture "$basename"); then
+        echo "  $basename: NOT FOUND (set VRM_HUMANOID_FIXTURE or VMK_REPO, or clone VRMMetalKit into ~/Projects/)" >&2
+        return 1
+    fi
+    ln -sf "$src" "$DEST/$destname"
+    echo "  $destname -> $src"
+}
+
+echo "==> Installing humanoid fixtures into $DEST"
+install_one "AvatarSample_A_1.0.vrm.glb" "avatarA_1_0.vrm" || true
+install_one "AvatarSample_A_0.0.vrm.glb" "avatarA_0_0.vrm" || true
+
+echo
+echo "==> Done. Run humanoid plans with:"
+echo "    scripts/render-humanoid.sh           # all available adapters"

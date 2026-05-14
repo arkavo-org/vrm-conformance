@@ -61,3 +61,7 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Humanoid fixtures: symlinks to upstream-licensed VRM avatars
+# (VRM Platform License 1.0). Materialized by scripts/install-humanoid-fixtures.sh.
+assets/humanoid/
