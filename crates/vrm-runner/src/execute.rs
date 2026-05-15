@@ -19,6 +19,9 @@ pub struct ExecuteOptions {
     /// If provided, diff the produced render against this reference PNG and
     /// include the result in `ExecuteResult::diff`.
     pub reference: Option<Utf8PathBuf>,
+    /// If provided, dump bone positions after render and diff against
+    /// this JSON reference file (same shape as `DumpBonePositionsResult`).
+    pub reference_positions: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +32,8 @@ pub struct ExecuteResult {
     pub actual_color_space: ops::ColorSpace,
     /// Populated only when `ExecuteOptions::reference` was set.
     pub diff: Option<vrm_diff_engine::result::DiffResult>,
+    /// Populated only when `ExecuteOptions::reference_positions` was set.
+    pub position_diff: Option<vrm_diff_engine::positions::PositionDiffReport>,
 }
 
 pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteResult> {
@@ -122,6 +127,23 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         )
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
 
+    let position_dump: Option<ops::DumpBonePositionsResult> = if opts.reference_positions.is_some()
+    {
+        progress(opts, "dump_bone_positions", &plan.id, json!({}));
+        let r: ops::DumpBonePositionsResult = adapter
+            .call(
+                "dump_bone_positions",
+                ops::DumpBonePositionsParams {
+                    session_id: session_id.clone(),
+                    spring_index: None,
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+        Some(r)
+    } else {
+        None
+    };
+
     progress(opts, "dispose", &plan.id, json!({}));
     let _: ops::UnitResult = adapter
         .call("dispose", ops::DisposeParams { session_id })
@@ -144,12 +166,26 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         None
     };
 
+    let position_diff =
+        if let (Some(ref_path), Some(dump)) = (&opts.reference_positions, position_dump.as_ref()) {
+            progress(
+                opts,
+                "position_diff",
+                &plan.id,
+                json!({ "reference_positions": ref_path }),
+            );
+            Some(crate::diff::diff_positions_one(plan, dump, ref_path)?)
+        } else {
+            None
+        };
+
     Ok(ExecuteResult {
         test_id: plan.id.clone(),
         renderer: opts.renderer_name.clone(),
         output_png,
         actual_color_space: render.actual_color_space,
         diff,
+        position_diff,
     })
 }
 
@@ -174,5 +210,20 @@ fn progress(opts: &ExecuteOptions, phase: &str, test_id: &str, extra: serde_json
             }
         }
         eprintln!("{}", serde_json::to_string(&o).unwrap_or_default());
+    }
+}
+
+#[cfg(test)]
+mod reference_positions_tests {
+    use super::*;
+
+    #[test]
+    fn execute_options_and_result_carry_position_fields() {
+        // Structural test: asserts these fields exist on the types.
+        // Compile success IS the assertion.
+        fn _structural(opts: &ExecuteOptions, r: &ExecuteResult) {
+            let _: &Option<Utf8PathBuf> = &opts.reference_positions;
+            let _: &Option<vrm_diff_engine::positions::PositionDiffReport> = &r.position_diff;
+        }
     }
 }

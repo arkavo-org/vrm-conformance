@@ -31,6 +31,12 @@ pub enum Cmd {
         /// render against it and includes a DiffResult in the JSON summary.
         #[arg(long)]
         reference: Option<Utf8PathBuf>,
+        /// Optional reference positions JSON (same shape as
+        /// `DumpBonePositionsResult`); when set, the runner calls
+        /// `dump_bone_positions` after render and includes a
+        /// `position_diff` block in the JSON summary.
+        #[arg(long, value_name = "PATH")]
+        reference_positions: Option<Utf8PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -132,6 +138,7 @@ pub fn run(cli: Cli) -> Result<()> {
             output_dir,
             renderer_name,
             reference,
+            reference_positions,
             json: emit_json,
         } => {
             let plan_value = load_plan(&plan)?;
@@ -143,19 +150,29 @@ pub fn run(cli: Cli) -> Result<()> {
                 renderer_name,
                 emit_progress_ndjson: emit_json,
                 reference,
+                reference_positions,
             };
             let result = execute_plan(&plan_value, &opts)?;
             if emit_json {
+                let overall_passed = match (&result.diff, &result.position_diff) {
+                    (Some(d), Some(p)) => d.overall_passed() && p.passed,
+                    (Some(d), None) => d.overall_passed(),
+                    (None, Some(p)) => p.passed,
+                    (None, None) => true,
+                };
                 let mut summary = json!({
                     "ok": true,
                     "test_id": result.test_id,
                     "renderer": result.renderer,
                     "output_png": result.output_png,
-                    "actual_color_space": format!("{:?}", result.actual_color_space)
+                    "actual_color_space": format!("{:?}", result.actual_color_space),
+                    "overall_passed": overall_passed,
                 });
                 if let Some(diff) = &result.diff {
                     summary["diff"] = serde_json::to_value(diff)?;
-                    summary["overall_passed"] = serde_json::Value::Bool(diff.overall_passed());
+                }
+                if let Some(pos_diff) = &result.position_diff {
+                    summary["position_diff"] = serde_json::to_value(pos_diff)?;
                 }
                 println!("{}", serde_json::to_string(&summary)?);
             } else {
@@ -170,6 +187,14 @@ pub fn run(cli: Cli) -> Result<()> {
                         } else {
                             "FAIL"
                         }
+                    );
+                }
+                if let Some(pos_diff) = &result.position_diff {
+                    println!(
+                        "  position_diff: per_joint_max={:.4}m chain_summed={:.4}m ({})",
+                        pos_diff.per_joint_max_drift_m,
+                        pos_diff.chain_summed_drift_m,
+                        if pos_diff.passed { "PASS" } else { "FAIL" }
                     );
                 }
             }

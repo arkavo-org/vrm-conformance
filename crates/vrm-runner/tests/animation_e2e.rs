@@ -76,6 +76,7 @@ fn execute_plan_with_animation_against_mock_succeeds() {
         renderer_name: renderer_name.into(),
         emit_progress_ndjson: false,
         reference: None,
+        reference_positions: None,
     };
 
     let result = execute_plan(&plan, &opts).expect("execute_plan must succeed");
