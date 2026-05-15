@@ -357,7 +357,8 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "adapter_args": { "type": "array", "items": { "type": "string" } },
                                 "asset_dir": { "type": "string" },
                                 "output_dir": { "type": "string" },
-                                "reference": { "type": "string" }
+                                "reference": { "type": "string" },
+                                "reference_positions": { "type": "string", "description": "Path to a positions JSON file (DumpBonePositionsResult shape) to diff dumped bone positions against." }
                             }
                         },
                         "output_schema": {
@@ -369,6 +370,7 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "output_png": { "type": "string" },
                                 "actual_color_space": { "type": "string" },
                                 "diff": { "type": ["object", "null"] },
+                                "position_diff": { "type": ["object", "null"], "description": "Present only when reference_positions was provided. Two-threshold position-space diff report (see vrm_diff_engine::positions::PositionDiffReport).", "properties": { "per_joint_max_drift_m": { "type": "number" }, "chain_summed_drift_m": { "type": "number" }, "per_joint_tolerance_m": { "type": "number" }, "chain_max_drift_m": { "type": "number" }, "worst_joint_index": { "type": "integer" }, "passed": { "type": "boolean" } } },
                                 "overall_passed": { "type": "boolean" }
                             }
                         }
