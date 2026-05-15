@@ -139,6 +139,11 @@ pub struct PositionConsensusReport {
 /// every other renderer. R is an outlier if that mean exceeds the median
 /// renderer's mean by `outlier_threshold_m` or more.
 ///
+/// Pairs that produce INFINITY drift (structural failures from joint-count
+/// mismatches) flag BOTH renderers in the pair as outliers regardless of
+/// `outlier_threshold_m`, and exclude that pair from the mean/median
+/// calculation. This prevents INF from poisoning the threshold comparison.
+///
 /// Returns no outliers when fewer than 3 renderers are supplied (no
 /// triangulation possible — same convention as the existing pairwise
 /// SSIM consensus).
@@ -155,16 +160,25 @@ pub fn position_consensus(
         };
     }
 
+    let mut structural_outliers: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
     let mut per_renderer_mean_drift: Vec<(String, f32)> = Vec::with_capacity(n);
     for (i, (name_i, pos_i)) in entries.iter().enumerate() {
         let mut sum = 0.0_f32;
         let mut cnt = 0u32;
-        for (j, (_, pos_j)) in entries.iter().enumerate() {
+        for (j, (name_j, pos_j)) in entries.iter().enumerate() {
             if i == j {
                 continue;
             }
             // Loose tolerances — we want the numeric drift, not pass/fail.
             let r = diff_positions(pos_i, pos_j, f32::INFINITY, f32::INFINITY);
+            if r.per_joint_max_drift_m.is_infinite() {
+                structural_outliers.insert(name_i.clone());
+                structural_outliers.insert(name_j.clone());
+                // Exclude this INF pair from mean/median to prevent poisoning.
+                continue;
+            }
             sum += r.per_joint_max_drift_m;
             cnt += 1;
         }
@@ -176,11 +190,16 @@ pub fn position_consensus(
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = sorted[n / 2];
 
-    let outliers: Vec<String> = per_renderer_mean_drift
+    let mut outliers: Vec<String> = per_renderer_mean_drift
         .iter()
-        .filter(|(_, m)| (m - median).abs() >= outlier_threshold_m)
+        .filter(|(name, m)| {
+            structural_outliers.contains(name) || (m - median).abs() >= outlier_threshold_m
+        })
         .map(|(name, _)| name.clone())
         .collect();
+    // Deduplicate (a renderer can be both structural AND distance-based outlier).
+    outliers.sort();
+    outliers.dedup();
 
     let total: f32 = per_renderer_mean_drift.iter().map(|(_, m)| *m).sum();
     let mean_pairwise_drift_m = total / n as f32;
@@ -422,5 +441,31 @@ mod position_consensus_tests {
         let report = position_consensus(&entries, 0.010);
         assert!(report.outliers.is_empty());
         assert_eq!(report.mean_pairwise_drift_m, 0.0);
+    }
+
+    #[test]
+    fn structural_mismatch_flags_both_renderers() {
+        // short (1 joint) vs long (2 joints) is a chain-length mismatch —
+        // diff_positions returns INFINITY for that pair. Both renderers in
+        // the mismatch pair must be flagged regardless of outlier_threshold_m.
+        let short = pos(vec![[0.0, 1.0, 0.0]]);
+        let long = pos(vec![[0.0, 1.0, 0.0], [0.0, 0.5, 0.0]]);
+        let agreer = pos(vec![[0.0, 1.0, 0.0]]); // same length as short
+        let entries = vec![
+            ("three-vrm".into(), short),
+            ("vrm-metal-kit".into(), long),
+            ("godot-vrm".into(), agreer),
+        ];
+        // vrm-metal-kit mismatches with both three-vrm and godot-vrm (they are
+        // length-1; vrm-metal-kit is length-2). All three pairs involving
+        // vrm-metal-kit are INF. three-vrm and godot-vrm agree (both length-1),
+        // but each also has one INF pair (with vrm-metal-kit), so they are
+        // tagged as structural outliers too by the bidirectional tagging rule.
+        let report = position_consensus(&entries, 0.010);
+        assert!(
+            report.outliers.contains(&"vrm-metal-kit".to_string()),
+            "vrm-metal-kit must be flagged for chain-length mismatch; outliers = {:?}",
+            report.outliers
+        );
     }
 }
