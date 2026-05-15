@@ -238,6 +238,43 @@ func reset_physics(params: Dictionary) -> Dictionary:
         vrm_secondary.do_process(1.0/60.0)
     return _ok({})
 
+func dump_bone_positions(params: Dictionary) -> Dictionary:
+    # No spring-bone manager: return empty result deterministically,
+    # mirroring the step_physics no-op behavior for spring-bone-less VRMs.
+    if vrm_secondary == null:
+        return _ok({"springs": []})
+
+    var skel: Skeleton3D = vrm_secondary.get_node_or_null(vrm_secondary.skeleton) as Skeleton3D
+    if skel == null:
+        return _ok({"springs": []})
+
+    var want_idx: int = -1
+    if params.has("spring_index"):
+        want_idx = int(params.get("spring_index"))
+
+    var skel_xform: Transform3D = skel.global_transform
+    var springs_out: Array = []
+    var spring_bones: Array = vrm_secondary.spring_bones
+    for i in range(spring_bones.size()):
+        if want_idx >= 0 and i != want_idx:
+            continue
+        var spring = spring_bones[i]  # VRMSpringBone — avoid explicit type to not require addon preload
+        var joint_positions: Array = []
+        for bone_name in spring.joint_nodes:
+            var bone_idx := skel.find_bone(bone_name)
+            if bone_idx < 0:
+                continue
+            var pose: Transform3D = skel.get_bone_global_pose(bone_idx)
+            var world_pos: Vector3 = skel_xform * pose.origin
+            joint_positions.append([world_pos.x, world_pos.y, world_pos.z])
+        var name_str: String = spring.resource_name if spring.resource_name != "" else ("spring_%d" % i)
+        springs_out.append({
+            "name": name_str,
+            "joint_positions": joint_positions,
+        })
+
+    return _ok({"springs": springs_out})
+
 func animate_root_transform(params: Dictionary) -> Dictionary:
     if scene == null:
         return _err(-32002, "RenderFailed", { "reason": "no session active; call load_vrm first" })

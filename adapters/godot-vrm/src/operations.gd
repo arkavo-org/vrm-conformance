@@ -21,6 +21,7 @@ const PHASE1_METHODS := [
     "load_vrm", "set_camera", "set_lighting",
     "set_post_processing", "render", "dispose",
     "step_physics", "reset_physics", "animate_root_transform",
+    "dump_bone_positions",
 ]
 
 # Async to support `render` which awaits frames.
@@ -46,6 +47,8 @@ static func dispatch(tree: SceneTree, session: Session, id: Variant, method: Str
                 outcome = session.reset_physics(params if typeof(params) == TYPE_DICTIONARY else {})
             "animate_root_transform":
                 outcome = session.animate_root_transform(params if typeof(params) == TYPE_DICTIONARY else {})
+            "dump_bone_positions":
+                outcome = session.dump_bone_positions(params if typeof(params) == TYPE_DICTIONARY else {})
             _:
                 outcome = { "ok": false, "error": { "code": -32601, "message": "internal: PHASE1 method not routed: " + method } }
         if outcome.get("ok"):

@@ -33,6 +33,10 @@ func test_phase1_methods_include_physics_ops() -> void:
     _assert_eq(has_reset, true, "reset_physics in PHASE1")
     _assert_eq(has_animate, true, "animate_root_transform in PHASE1")
 
+func test_phase1_methods_include_dump_bone_positions() -> void:
+    var has_dump: bool = Operations.PHASE1_METHODS.has("dump_bone_positions")
+    _assert_eq(has_dump, true, "dump_bone_positions in PHASE1")
+
 func test_set_environment_returns_v1x() -> void:
     var r: Dictionary = await Operations.dispatch(null, null, 4, "set_environment", {})
     _assert_eq(r.get("error", {}).get("data", {}).get("phase"), "v1.x", "phase label")
