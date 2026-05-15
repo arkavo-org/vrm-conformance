@@ -186,6 +186,51 @@ Translation-only in v0.1 — rotation excitation lands when there's a real test 
 
 The runner calls `animate_root_transform` after `reset_physics` (so the chain starts from a settled rest pose) and before `render` whenever the test plan has an `animation.root_transform` block.
 
+### `dump_bone_positions`
+
+```json
+{
+  "input": {
+    "session_id": "string",
+    "spring_index": null
+  },
+  "output": {
+    "springs": [
+      {
+        "name": "hair_chain",
+        "joint_positions": [[0.0, 1.5, 0.0], [0.0, 1.4, 0.02]]
+      }
+    ]
+  }
+}
+```
+
+Returns world-space joint positions for one or all spring-bone chains in the session, captured as of the most recent state-advancing op (`render`, `step_physics`, `reset_physics`, `animate_root_transform`). Does NOT advance physics itself.
+
+**Params:**
+
+| field | type | required | notes |
+|---|---|---|---|
+| `session_id` | string | yes | from `load_vrm` |
+| `spring_index` | integer | no | omit (or `null`) to dump all springs; out-of-range returns `-32602` |
+
+`joint_positions` is in world space, in the VRM 1.0 coordinate system, joint-order head-to-tail.
+
+**Errors:**
+
+- `-32602` InvalidParams — unknown `session_id` or out-of-range `spring_index`
+- `-32000` Unimplemented — adapter does not have a spring-bone system (e.g. univrm L3 in rest-pose-only mode)
+
+**Adapter support (as of phase 1):**
+
+| adapter | status |
+|---|---|
+| mock | deterministic empty array (mock has no springs) |
+| three-vrm | implemented (chain reconstruction via `VRMSpringBoneJoint.child` walks) |
+| vrm-metal-kit | implemented (reads `session.model.springBone.springs[].joints[].node` → `nodes[idx].worldPosition`) |
+| godot-vrm | implemented (reads `vrm_secondary.spring_bones[].joint_nodes` → Skeleton3D global pose) |
+| univrm | returns `-32000 Unimplemented` (phase: "L3") |
+
 ## Reserved operations (Phase 2+)
 
 Required to be **declared** by every adapter (`describe` lists them) but may return a structured `Unimplemented` error in v0.1:

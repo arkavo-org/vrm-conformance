@@ -102,6 +102,23 @@ Static avatars under `step_physics` only exercise gravity settling. Testing iner
 
 **Sweep corpus (Phase 2D-e)**: `emit-springbone-swing-sweep` emits a parallel 18-asset corpus where every plan carries an `animation.root_transform` block (15 cm sideways translation over 0.25 s @ 60 Hz, after the standard 30-step settle). The corpus exercises every spring-bone axis under inertia rather than only at equilibrium — a regression in any renderer's drag, stiffness, or chain-length handling now surfaces against the swing reference.
 
+## Spring bone position-diff thresholds
+
+Cross-renderer SSIM is necessary but not sufficient for spring-bone tests: two valid renderers can produce visibly different chain poses because collision response and time-integration are not pinned by the spec. The `dump_bone_positions` op exposes per-joint world coordinates so position divergence can be measured directly.
+
+Two thresholds — single-joint outliers and chain-wide drift are different bug shapes:
+
+| context | per-joint tolerance | chain-summed tolerance |
+|---|---|---|
+| settle (no `animate_root_transform`) | 5 mm | 20 mm |
+| swing (with `animate_root_transform`) | 10 mm | 40 mm |
+
+Settle thresholds reflect that two correctly-converged renderers should agree to within sub-cm at equilibrium. Swing thresholds widen because sub-frame stepping divergence accumulates during animation.
+
+`vrm-runner execute-test-plan --reference-positions <renderer>=<positions.json>` runs the diff. `vrm-runner consensus-diff --render-positions <name>=<path>` produces N-way outlier flagging.
+
+These thresholds are operational, not spec-defined. Future tightening follows the same trajectory as the cross-renderer SSIM thresholds.
+
 ## Render queue / transparency ordering
 
 Z-write behavior under `transparentWithZWrite=true` plus `renderQueueOffsetNumber` is the most common source of real-world MToon visual bugs.
