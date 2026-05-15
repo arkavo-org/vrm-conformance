@@ -281,4 +281,35 @@ final class JsonRpcServerTests: XCTestCase {
         let readBack = try Framing.readMessage(from: reader)
         XCTAssertEqual(readBack, payload)
     }
+
+    func testDumpBonePositionsOnUnknownSessionReturnsInvalidParams() throws {
+        // dump_bone_positions with an unknown session_id must return -32602.
+        // Regression guard: confirms the op is dispatched (not -32601 method-not-found).
+        let request = #"""
+        {"jsonrpc":"2.0","id":50,"method":"dump_bone_positions","params":{"session_id":"no-such"}}
+        """#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+    }
+
+    func testDumpBonePositionsMissingSessionIdReturnsInvalidParams() throws {
+        // dump_bone_positions without a session_id key must return -32602.
+        let request = #"{"jsonrpc":"2.0","id":51,"method":"dump_bone_positions","params":{}}"#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+    }
 }

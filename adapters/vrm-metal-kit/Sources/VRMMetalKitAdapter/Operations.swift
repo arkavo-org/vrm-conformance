@@ -139,6 +139,7 @@ final class Operations: @unchecked Sendable {
         case "step_physics":            return handleStepPhysics(params: params)
         case "reset_physics":           return handleResetPhysics(params: params)
         case "animate_root_transform":  return handleAnimateRootTransform(params: params)
+        case "dump_bone_positions":     return handleDumpBonePositions(params: params)
         case "dispose":                 return handleDispose(params: params)
         default:
             if let phase = Operations.reservedPhases[method] {
@@ -584,6 +585,70 @@ final class Operations: @unchecked Sendable {
             session.renderer.warmupPhysics(steps: settleSteps)
         }
         return .ok(.object([:]))
+    }
+
+    /// Dump world-space joint positions for every spring chain (or one
+    /// selected chain) after the current physics state.
+    ///
+    /// Access path: `session.model.springBone.springs[i]` → `VRMSpring`
+    /// with `.name` and `.joints: [VRMSpringJoint]`. Each joint carries a
+    /// `.node: Int` index into `session.model.nodes`. The node exposes
+    /// `.worldPosition: SIMD3<Float>` — the same property used by
+    /// `BoneTrajectoryDumper.recordFrame` in VRMMetalKit.
+    ///
+    /// Result shape:
+    /// ```json
+    /// {"springs":[{"name":"hair_L","joint_positions":[[x,y,z],...]},...]}
+    /// ```
+    ///
+    /// `spring_index` (optional): when present, only that chain is returned;
+    /// an out-of-range index yields an empty `springs` array (not an error).
+    private func handleDumpBonePositions(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else {
+            return invalidParams("missing session_id")
+        }
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+
+        guard let springBone = session.model.springBone else {
+            // Model has no spring chains — return an empty but valid result.
+            return .ok(.object(["springs": .array([])]))
+        }
+
+        let allSprings = springBone.springs
+        let springIndex: Int? = {
+            if case .number(let n) = obj["spring_index"], let i = Int(exactly: n) { return i }
+            return nil
+        }()
+
+        let chains: [VRMSpring]
+        if let idx = springIndex {
+            guard idx >= 0 && idx < allSprings.count else {
+                return .ok(.object(["springs": .array([])]))
+            }
+            chains = [allSprings[idx]]
+        } else {
+            chains = allSprings
+        }
+
+        let nodes = session.model.nodes
+        let dumped: [JSONValue] = chains.enumerated().map { (i, spring) in
+            let name = spring.name ?? "spring_\(i)"
+            let jointPositions: [JSONValue] = spring.joints.compactMap { joint in
+                guard joint.node >= 0 && joint.node < nodes.count else { return nil }
+                let p = nodes[joint.node].worldPosition
+                return .array([.number(Double(p.x)), .number(Double(p.y)), .number(Double(p.z))])
+            }
+            return .object([
+                "name": .string(name),
+                "joint_positions": .array(jointPositions),
+            ])
+        }
+
+        return .ok(.object(["springs": .array(dumped)]))
     }
 
     /// Linearly translate the avatar root over `duration_seconds` and run
