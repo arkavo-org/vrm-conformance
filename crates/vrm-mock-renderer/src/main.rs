@@ -95,6 +95,9 @@ fn dispatch(
         "step_physics" => json_result(handlers::step_physics(registry, params)),
         "reset_physics" => json_result(handlers::reset_physics(registry, params)),
         "animate_root_transform" => json_result(handlers::animate_root_transform(registry, params)),
+        "dump_bone_positions" => {
+            json_result(handlers::dump_bone_positions(registry, deser(params)?))
+        }
 
         // Reserved-but-declared ops: return Unimplemented with the phase
         // the operation belongs to. Matches the Swift adapter's labels.

@@ -115,10 +115,71 @@ pub fn animate_root_transform(
     Ok(ops::UnitResult {})
 }
 
+/// Mock has no spring-bone system. Returns an empty springs array for any
+/// loaded session; unknown `session_id` returns -32602 InvalidParams.
+pub fn dump_bone_positions(
+    registry: &mut SessionRegistry,
+    params: ops::DumpBonePositionsParams,
+) -> Result<ops::DumpBonePositionsResult, RpcError> {
+    let _session = registry
+        .get(&params.session_id)
+        .ok_or_else(|| invalid_session(&params.session_id))?;
+    Ok(ops::DumpBonePositionsResult {
+        springs: Vec::new(),
+    })
+}
+
 fn invalid_session(id: &str) -> RpcError {
     RpcError {
         code: -32602,
         message: format!("invalid session_id: {id}"),
         data: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use camino::Utf8PathBuf;
+    use vrm_asset_generator::params::MToonParams;
+    use vrm_ops::tools::{DumpBonePositionsParams, DumpBonePositionsResult};
+
+    fn make_test_session() -> (SessionRegistry, String) {
+        let mut registry = SessionRegistry::new();
+        let session = Session {
+            asset_path: Utf8PathBuf::from("test.vrm"),
+            params: MToonParams::defaults("test"),
+            camera: None,
+            lighting: None,
+            post_processing: None,
+        };
+        let id = registry.insert(session);
+        (registry, id)
+    }
+
+    #[test]
+    fn dump_positions_on_unknown_session_returns_invalid_params() {
+        let mut registry = SessionRegistry::default();
+        let params = DumpBonePositionsParams {
+            session_id: "nope".into(),
+            spring_index: None,
+        };
+        let err = dump_bone_positions(&mut registry, params).unwrap_err();
+        assert_eq!(err.code, -32602, "expected InvalidParams, got {err:?}");
+    }
+
+    #[test]
+    fn dump_positions_returns_empty_springs_for_loaded_session() {
+        let (mut registry, session_id) = make_test_session();
+        let params = DumpBonePositionsParams {
+            session_id,
+            spring_index: None,
+        };
+        let result: DumpBonePositionsResult = dump_bone_positions(&mut registry, params).unwrap();
+        assert_eq!(
+            result.springs.len(),
+            0,
+            "mock has no springs; expected empty result"
+        );
     }
 }
