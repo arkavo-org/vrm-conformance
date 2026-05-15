@@ -212,6 +212,40 @@
         }
       };
 
+      // Walk all spring-bone joints in the manager and return world positions.
+      // three-vrm v3's VRMSpringBoneManager exposes a flat Set<VRMSpringBoneJoint>
+      // via `.joints`; there is no per-chain grouping on the manager itself (the
+      // chain metadata lives only in the loader). We therefore emit one entry per
+      // joint, each carrying a single world-space XYZ position. Callers that need
+      // chain grouping should use the asset's .meta.json for chain boundaries.
+      window.__dumpBonePositions = function (params) {
+        if (!state.vrm || !state.vrm.springBoneManager) {
+          return { springs: [] };
+        }
+        const mgr = state.vrm.springBoneManager;
+        const joints = mgr.joints; // Set<VRMSpringBoneJoint>
+        if (!joints || joints.size === 0) {
+          return { springs: [] };
+        }
+        const wantIdx = (typeof params.spring_index === "number") ? params.spring_index : null;
+        const out = [];
+        let idx = 0;
+        joints.forEach(function (joint) {
+          if (wantIdx !== null && idx !== wantIdx) {
+            idx++;
+            return;
+          }
+          const v = new THREE.Vector3();
+          joint.bone.getWorldPosition(v);
+          out.push({
+            name: joint.bone.name || ("joint_" + idx),
+            joint_positions: [[v.x, v.y, v.z]],
+          });
+          idx++;
+        });
+        return { springs: out };
+      };
+
       window.__dispose = function () {
         if (state.vrm) {
           state.scene.remove(state.vrm.scene);

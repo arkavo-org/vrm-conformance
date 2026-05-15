@@ -151,6 +151,17 @@ export class BrowserSession {
     );
   }
 
+  async dumpBonePositions(
+    params: unknown,
+  ): Promise<{ springs: Array<{ name: string; joint_positions: number[][] }> }> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    return await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (p) => (window as any).__dumpBonePositions(p),
+      params,
+    );
+  }
+
   async render(params: {
     width: number;
     height: number;

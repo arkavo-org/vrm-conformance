@@ -104,6 +104,12 @@ export async function dispatch(
         await ctx.session.animateRootTransform(params);
         return { ok: true, result: {} };
       }
+      case "dump_bone_positions": {
+        const p = params as { session_id?: string; spring_index?: number };
+        if (!p?.session_id) return badParams("missing session_id");
+        const result = await ctx.session.dumpBonePositions(p);
+        return { ok: true, result };
+      }
       default: {
         const phase = PHASE_BY_RESERVED_METHOD[method];
         if (phase) {
@@ -175,6 +181,7 @@ export function knownMethods(): string[] {
     "step_physics",
     "reset_physics",
     "animate_root_transform",
+    "dump_bone_positions",
     ...Object.keys(PHASE_BY_RESERVED_METHOD),
   ];
 }

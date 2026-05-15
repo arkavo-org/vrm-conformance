@@ -154,3 +154,60 @@ test("multiple framed requests handled back-to-back", async () => {
     await new Promise((r) => h.child.on("exit", r));
   }
 });
+
+test("dump_bone_positions with missing session_id returns InvalidParams (-32602)", async () => {
+  const h = spawnAdapter();
+  try {
+    const resp = await rpc(h, 7, "dump_bone_positions", {});
+    assert.equal(resp.error?.code, -32602);
+  } finally {
+    h.stdin.end();
+    await new Promise((r) => h.child.on("exit", r));
+  }
+});
+
+test(
+  "dump_bone_positions after load_vrm returns springs array with correct shape",
+  { timeout: 60_000 },
+  async () => {
+    const { mkdtempSync, existsSync } = await import("node:fs");
+    const { execFileSync } = await import("node:child_process");
+    const { tmpdir } = await import("node:os");
+    const generator = path.resolve(__dirname, "..", "..", "..", "target", "release", "vrm-asset-generator");
+    if (!existsSync(generator)) {
+      // Skip gracefully if release binary is absent (CI doesn't build release for TS adapter tests).
+      return;
+    }
+    const dir = mkdtempSync(path.join(tmpdir(), "three-vrm-dump-"));
+    execFileSync(generator, ["emit-springbone-sweep", "--output-dir", dir], { stdio: "inherit" });
+    const vrmPath = path.join(dir, "springbone_default.vrm");
+
+    const h = spawnAdapter();
+    try {
+      const loadResp = await rpc(h, 1, "load_vrm", { path: vrmPath });
+      assert.ok(!loadResp.error, `load_vrm failed: ${JSON.stringify(loadResp.error)}`);
+      const sessionId: string = (loadResp.result as { session_id: string }).session_id;
+
+      const dumpResp = await rpc(h, 2, "dump_bone_positions", { session_id: sessionId });
+      assert.ok(!dumpResp.error, `dump_bone_positions failed: ${JSON.stringify(dumpResp.error)}`);
+
+      const result = dumpResp.result as { springs: Array<{ name: string; joint_positions: number[][] }> };
+      assert.ok(Array.isArray(result.springs), "result.springs must be an array");
+      // springbone_default.vrm has spring bones — the list must be non-empty.
+      assert.ok(result.springs.length > 0, `expected at least one spring entry, got ${result.springs.length}`);
+      for (const s of result.springs) {
+        assert.ok(typeof s.name === "string", "each entry must have a string name");
+        assert.ok(Array.isArray(s.joint_positions), "joint_positions must be an array");
+        for (const pos of s.joint_positions) {
+          assert.strictEqual(pos.length, 3, "each position must be [x, y, z]");
+          for (const v of pos) {
+            assert.ok(typeof v === "number", "position component must be a number");
+          }
+        }
+      }
+    } finally {
+      h.stdin.end();
+      await new Promise((r) => h.child.on("exit", r));
+    }
+  },
+);
