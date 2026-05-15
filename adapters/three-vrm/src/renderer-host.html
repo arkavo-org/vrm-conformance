@@ -212,12 +212,26 @@
         }
       };
 
-      // Walk all spring-bone joints in the manager and return world positions.
+      // Walk all spring-bone joints and reconstruct per-chain grouping.
+      //
       // three-vrm v3's VRMSpringBoneManager exposes a flat Set<VRMSpringBoneJoint>
-      // via `.joints`; there is no per-chain grouping on the manager itself (the
-      // chain metadata lives only in the loader). We therefore emit one entry per
-      // joint, each carrying a single world-space XYZ position. Callers that need
-      // chain grouping should use the asset's .meta.json for chain boundaries.
+      // via `.joints`. Each VRMSpringBoneJoint has a public readonly `.bone`
+      // (head Object3D) and `.child` (tail Object3D). The VRM loader builds
+      // N-1 joints for an N-node chain, connecting them via bone→child linkage:
+      //   Joint 0: bone=node0, child=node1
+      //   Joint 1: bone=node1, child=node2
+      //   Joint 2: bone=node2, child=node3 (tip — no joint object for node3)
+      //
+      // Chain reconstruction:
+      //   1. Collect child-bone set (bones that appear as `.child` of some joint).
+      //   2. Roots = joints whose `.bone` is NOT in that child-bone set.
+      //   3. Walk each chain: follow the joint whose `.bone === current.child`.
+      //   4. For the last joint in a chain, also record `.child` world position
+      //      so all N nodes appear in joint_positions[].
+      //
+      // This matches the op contract: springs[] has one entry per
+      // VRMC_springBone.springs[i], and joint_positions[] is the head-to-tail
+      // world positions for that chain.
       window.__dumpBonePositions = function (params) {
         if (!state.vrm || !state.vrm.springBoneManager) {
           return { springs: [] };
@@ -227,22 +241,49 @@
         if (!joints || joints.size === 0) {
           return { springs: [] };
         }
+
+        // Build bone → joint lookup
+        const boneToJoint = new Map();
+        joints.forEach(function (j) { boneToJoint.set(j.bone, j); });
+
+        // Build set of bones that serve as a child (not a root bone)
+        const childBones = new Set();
+        joints.forEach(function (j) { if (j.child) childBones.add(j.child); });
+
+        // Roots: joints whose bone is not used as a child by any other joint
+        const roots = [];
+        joints.forEach(function (j) {
+          if (!childBones.has(j.bone)) roots.push(j);
+        });
+
+        // Walk each chain from its root, collecting world positions
         const wantIdx = (typeof params.spring_index === "number") ? params.spring_index : null;
         const out = [];
-        let idx = 0;
-        joints.forEach(function (joint) {
-          if (wantIdx !== null && idx !== wantIdx) {
-            idx++;
-            return;
-          }
+        for (let i = 0; i < roots.length; i++) {
+          if (wantIdx !== null && i !== wantIdx) continue;
+          const root = roots[i];
+          const positions = [];
           const v = new THREE.Vector3();
-          joint.bone.getWorldPosition(v);
+          let cur = root;
+          while (cur) {
+            cur.bone.getWorldPosition(v);
+            positions.push([v.x, v.y, v.z]);
+            const nextJoint = cur.child ? boneToJoint.get(cur.child) : null;
+            if (!nextJoint) {
+              // cur is the last joint in the chain — also record its child (tip)
+              if (cur.child) {
+                cur.child.getWorldPosition(v);
+                positions.push([v.x, v.y, v.z]);
+              }
+              break;
+            }
+            cur = nextJoint;
+          }
           out.push({
-            name: joint.bone.name || ("joint_" + idx),
-            joint_positions: [[v.x, v.y, v.z]],
+            name: root.bone.name || ("spring_" + i),
+            joint_positions: positions,
           });
-          idx++;
-        });
+        }
         return { springs: out };
       };
 

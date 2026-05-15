@@ -193,8 +193,16 @@ test(
 
       const result = dumpResp.result as { springs: Array<{ name: string; joint_positions: number[][] }> };
       assert.ok(Array.isArray(result.springs), "result.springs must be an array");
-      // springbone_default.vrm has spring bones — the list must be non-empty.
-      assert.ok(result.springs.length > 0, `expected at least one spring entry, got ${result.springs.length}`);
+      // springbone_default.vrm has exactly 1 spring chain of 4 joints.
+      // Each springs[] entry maps 1:1 to VRMC_springBone.springs[i] per the op
+      // contract, and joint_positions[] contains world positions head-to-tail.
+      assert.strictEqual(result.springs.length, 1, `expected 1 spring chain (one entry per VRM chain), got ${result.springs.length}`);
+      assert.ok(typeof result.springs[0].name === "string", "chain entry must have a string name");
+      assert.strictEqual(
+        result.springs[0].joint_positions.length,
+        4,
+        `expected 4 joint positions (joint_count=4 for springbone_default), got ${result.springs[0].joint_positions.length}`,
+      );
       for (const s of result.springs) {
         assert.ok(typeof s.name === "string", "each entry must have a string name");
         assert.ok(Array.isArray(s.joint_positions), "joint_positions must be an array");
