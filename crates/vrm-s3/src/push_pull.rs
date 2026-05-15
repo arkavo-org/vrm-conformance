@@ -51,6 +51,8 @@ pub async fn push_png(file: &Utf8Path, test_id: &str, opts: &PushOptions) -> Res
         image_blake3: blake3_str,
         byte_size: bytes.len() as u64,
         submitted_at: now_rfc3339(),
+        positions_url: None,
+        positions_blake3: None,
     })
 }
 

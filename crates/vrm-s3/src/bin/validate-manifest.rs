@@ -29,6 +29,28 @@ fn main() -> Result<()> {
         if !e.image_blake3.starts_with("blake3:") {
             errors.push(format!("[{i}] image_blake3 must start with blake3:"));
         }
+        match (&e.positions_url, &e.positions_blake3) {
+            (Some(_url), Some(hash)) => {
+                if !hash.starts_with("blake3:") || hash.len() != "blake3:".len() + 64 {
+                    errors.push(format!(
+                        "[{i}] positions_blake3 malformed (expected blake3:<64-hex>): {hash}"
+                    ));
+                }
+            }
+            (Some(_), None) => {
+                errors.push(format!(
+                    "[{i}] positions_url set without positions_blake3 ({})",
+                    e.test_id
+                ));
+            }
+            (None, Some(_)) => {
+                errors.push(format!(
+                    "[{i}] positions_blake3 set without positions_url ({})",
+                    e.test_id
+                ));
+            }
+            (None, None) => {}
+        }
         for (name, val) in [
             ("os", &e.metadata.os),
             ("os_version", &e.metadata.os_version),

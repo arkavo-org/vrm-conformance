@@ -21,6 +21,8 @@ fn manifest_round_trips_json() {
             image_blake3: "blake3:abcdef".into(),
             byte_size: 12345,
             submitted_at: "2026-05-10T12:00:00Z".into(),
+            positions_url: None,
+            positions_blake3: None,
         }],
     };
     let s = serde_json::to_string(&m).unwrap();

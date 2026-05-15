@@ -20,6 +20,12 @@ pub struct ManifestEntry {
     pub image_blake3: String,
     pub byte_size: u64,
     pub submitted_at: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub positions_url: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub positions_blake3: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,7 +85,81 @@ mod tests {
             image_blake3: image_blake3.into(),
             byte_size: 100,
             submitted_at: "2026-05-10T12:00:00Z".into(),
+            positions_url: None,
+            positions_blake3: None,
         }
+    }
+
+    #[test]
+    fn entry_with_positions_roundtrips() {
+        let e = ManifestEntry {
+            test_id: "springbone_default".into(),
+            renderer_name: "three-vrm".into(),
+            renderer_version: "0.1.0".into(),
+            git_hash: "deadbeef".into(),
+            metadata: sample_metadata(),
+            image_url: "s3://b/x.png".into(),
+            image_blake3: "blake3:aaa".into(),
+            byte_size: 100,
+            submitted_at: "2026-05-15T12:00:00Z".into(),
+            positions_url: Some("s3://b/x.positions.json".into()),
+            positions_blake3: Some("blake3:bbb".into()),
+        };
+        let s = serde_json::to_string(&e).unwrap();
+        let back: ManifestEntry = serde_json::from_str(&s).unwrap();
+        assert_eq!(
+            back.positions_url.as_deref(),
+            Some("s3://b/x.positions.json")
+        );
+        assert_eq!(back.positions_blake3.as_deref(), Some("blake3:bbb"));
+    }
+
+    #[test]
+    fn entry_without_positions_omits_fields_from_json() {
+        let e = ManifestEntry {
+            test_id: "t".into(),
+            renderer_name: "r".into(),
+            renderer_version: "v".into(),
+            git_hash: "g".into(),
+            metadata: sample_metadata(),
+            image_url: "s3://b/x.png".into(),
+            image_blake3: "blake3:aaa".into(),
+            byte_size: 1,
+            submitted_at: "2026-05-15T12:00:00Z".into(),
+            positions_url: None,
+            positions_blake3: None,
+        };
+        let v: serde_json::Value = serde_json::to_value(&e).unwrap();
+        assert!(
+            v.get("positions_url").is_none(),
+            "None positions_url must be omitted, got {v}"
+        );
+        assert!(
+            v.get("positions_blake3").is_none(),
+            "None positions_blake3 must be omitted, got {v}"
+        );
+    }
+
+    #[test]
+    fn entry_existing_json_without_positions_parses() {
+        // Backward compat: entries from before this change have no positions
+        // fields. Must deserialize cleanly.
+        let raw = r#"{
+            "test_id": "old",
+            "renderer_name": "three-vrm",
+            "renderer_version": "0.1.0",
+            "git_hash": "deadbeef",
+            "os": "macos", "os_version": "14",
+            "gpu_vendor": "Apple", "gpu_model": "M2",
+            "driver_version": "M3", "build_flags": "rel",
+            "image_url": "s3://b/x.png",
+            "image_blake3": "blake3:aaa",
+            "byte_size": 1,
+            "submitted_at": "2026-05-10T12:00:00Z"
+        }"#;
+        let e: ManifestEntry = serde_json::from_str(raw).unwrap();
+        assert!(e.positions_url.is_none());
+        assert!(e.positions_blake3.is_none());
     }
 
     #[test]

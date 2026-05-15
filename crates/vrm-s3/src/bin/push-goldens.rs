@@ -136,5 +136,7 @@ fn local_manifest_entry(
         submitted_at: time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string()),
+        positions_url: None,
+        positions_blake3: None,
     })
 }
