@@ -153,13 +153,15 @@ pub struct DumpBonePositionsParams {
     pub spring_index: Option<usize>,
 }
 
+/// Per-spring joint positions captured at a single simulation instant (world-space XYZ, metres).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpringPositions {
     pub name: String,
     pub joint_positions: Vec<[f32; 3]>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Result of `dump_bone_positions`: one `SpringPositions` entry per spring chain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DumpBonePositionsResult {
     pub springs: Vec<SpringPositions>,
 }
@@ -169,7 +171,7 @@ pub struct DumpBonePositionsResult {
 pub struct UnitResult {}
 
 #[cfg(test)]
-mod dump_bone_positions_tests {
+mod tests {
     use super::*;
 
     #[test]
@@ -195,6 +197,8 @@ mod dump_bone_positions_tests {
             v.get("spring_index").is_none(),
             "spring_index None should be omitted, got {v}"
         );
+        let back: DumpBonePositionsParams = serde_json::from_value(v).unwrap();
+        assert_eq!(back.spring_index, None);
     }
 
     #[test]
@@ -207,9 +211,6 @@ mod dump_bone_positions_tests {
         };
         let s = serde_json::to_string(&r).unwrap();
         let back: DumpBonePositionsResult = serde_json::from_str(&s).unwrap();
-        assert_eq!(back.springs.len(), 1);
-        assert_eq!(back.springs[0].name, "hair_chain");
-        assert_eq!(back.springs[0].joint_positions.len(), 2);
-        assert_eq!(back.springs[0].joint_positions[1], [0.0, 0.95, 0.0]);
+        assert_eq!(back, r);
     }
 }
