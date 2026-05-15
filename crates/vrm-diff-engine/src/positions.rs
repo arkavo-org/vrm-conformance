@@ -20,6 +20,8 @@ pub struct PositionDiffReport {
 /// Returns a structural-failure report when joint counts differ. Callers
 /// MUST treat `passed = false` as a hard failure regardless of magnitudes —
 /// counts must match for thresholds to be meaningful.
+/// In the mismatch branch, `worst_joint_index` is set to 0 as a sentinel
+/// and should be ignored — it is not a real index into either chain.
 pub fn diff_positions(
     actual: &SpringPositions,
     reference: &SpringPositions,
@@ -150,6 +152,16 @@ mod tests {
         assert!(
             !report.passed,
             "different joint counts MUST fail; this is a structural error not a threshold one"
+        );
+        assert!(
+            report.per_joint_max_drift_m.is_infinite(),
+            "structural failure should set per_joint drift to INF, got {}",
+            report.per_joint_max_drift_m
+        );
+        assert!(
+            report.chain_summed_drift_m.is_infinite(),
+            "structural failure should set chain_summed drift to INF, got {}",
+            report.chain_summed_drift_m
         );
     }
 }
