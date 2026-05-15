@@ -135,6 +135,81 @@ pub struct AnimateRootTransformParams {
     pub fps: u32,
 }
 
+/// Dump world-space joint positions for spring-bone chains as of the most
+/// recent state-advancing op (`render`, `step_physics`, `reset_physics`,
+/// `animate_root_transform`). The op itself does NOT advance physics.
+///
+/// If `spring_index` is omitted, all springs in the loaded model are
+/// returned. If provided, only that spring's positions are returned;
+/// out-of-range indices return `-32602 InvalidParams`.
+///
+/// Adapters that have no spring-bone system or return rest-pose only (e.g.
+/// univrm L3) MAY return `-32000 Unimplemented` with the standard phase
+/// envelope.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DumpBonePositionsParams {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spring_index: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SpringPositions {
+    pub name: String,
+    pub joint_positions: Vec<[f32; 3]>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DumpBonePositionsResult {
+    pub springs: Vec<SpringPositions>,
+}
+
 /// Empty result type for ops that return no payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitResult {}
+
+#[cfg(test)]
+mod dump_bone_positions_tests {
+    use super::*;
+
+    #[test]
+    fn dump_bone_positions_params_roundtrip_with_spring_index() {
+        let p = DumpBonePositionsParams {
+            session_id: "sess-1".into(),
+            spring_index: Some(2),
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let back: DumpBonePositionsParams = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.session_id, "sess-1");
+        assert_eq!(back.spring_index, Some(2));
+    }
+
+    #[test]
+    fn dump_bone_positions_params_omits_spring_index_when_none() {
+        let p = DumpBonePositionsParams {
+            session_id: "sess-1".into(),
+            spring_index: None,
+        };
+        let v: serde_json::Value = serde_json::to_value(&p).unwrap();
+        assert!(
+            v.get("spring_index").is_none(),
+            "spring_index None should be omitted, got {v}"
+        );
+    }
+
+    #[test]
+    fn dump_bone_positions_result_roundtrip() {
+        let r = DumpBonePositionsResult {
+            springs: vec![SpringPositions {
+                name: "hair_chain".into(),
+                joint_positions: vec![[0.0, 1.0, 0.0], [0.0, 0.95, 0.0]],
+            }],
+        };
+        let s = serde_json::to_string(&r).unwrap();
+        let back: DumpBonePositionsResult = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.springs.len(), 1);
+        assert_eq!(back.springs[0].name, "hair_chain");
+        assert_eq!(back.springs[0].joint_positions.len(), 2);
+        assert_eq!(back.springs[0].joint_positions[1], [0.0, 0.95, 0.0]);
+    }
+}
