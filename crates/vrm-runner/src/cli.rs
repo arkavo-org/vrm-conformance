@@ -76,6 +76,18 @@ pub enum Cmd {
         /// Override the plan's `diff.threshold`. Optional.
         #[arg(long)]
         threshold: Option<f32>,
+        /// One `name=path` pair per renderer pointing to its
+        /// `DumpBonePositionsResult` JSON file. Repeat the flag. When
+        /// provided alongside `--render`, position consensus is also
+        /// computed and included in the JSON output.
+        #[arg(long = "render-positions", value_parser = parse_named_path)]
+        render_positions: Vec<(String, Utf8PathBuf)>,
+        /// Override the default 1 cm outlier threshold for position
+        /// consensus. A renderer whose mean pairwise drift vs all peers
+        /// exceeds the median renderer's mean by this much (in metres)
+        /// is flagged as an outlier.
+        #[arg(long, default_value_t = 0.010)]
+        position_outlier_threshold_m: f32,
         #[arg(long)]
         json: bool,
     },
@@ -262,9 +274,12 @@ pub fn run(cli: Cli) -> Result<()> {
             plan,
             renders,
             threshold,
+            render_positions,
+            position_outlier_threshold_m,
             json: emit_json,
         } => {
-            use vrm_diff_engine::consensus::{consensus_diff, RendererRender};
+            use vrm_diff_engine::consensus::{consensus_diff, position_consensus, RendererRender};
+            use vrm_ops::tools::DumpBonePositionsResult;
 
             let plan_value = load_plan(&plan)?;
             let effective_threshold = threshold.unwrap_or(plan_value.diff.threshold);
@@ -277,32 +292,99 @@ pub fn run(cli: Cli) -> Result<()> {
                 })
                 .collect();
 
-            let result = consensus_diff(&plan_value.id, &render_refs, effective_threshold)?;
+            let result = if !render_refs.is_empty() {
+                Some(consensus_diff(
+                    &plan_value.id,
+                    &render_refs,
+                    effective_threshold,
+                )?)
+            } else {
+                None
+            };
+
+            // Position consensus — only when positions were supplied.
+            let pos_result = if !render_positions.is_empty() {
+                let mut entries: Vec<(String, vrm_ops::tools::SpringPositions)> =
+                    Vec::with_capacity(render_positions.len());
+                for (name, path) in &render_positions {
+                    let raw = std::fs::read_to_string(path).map_err(|e| {
+                        anyhow::anyhow!("failed to read positions file {path}: {e}")
+                    })?;
+                    let dump: DumpBonePositionsResult =
+                        serde_json::from_str(&raw).map_err(|e| {
+                            anyhow::anyhow!("failed to parse positions JSON {path}: {e}")
+                        })?;
+                    // Phase 1: first spring only.
+                    if let Some(first) = dump.springs.into_iter().next() {
+                        entries.push((name.clone(), first));
+                    }
+                }
+                Some(position_consensus(&entries, position_outlier_threshold_m))
+            } else {
+                None
+            };
+
+            let overall_passed = match (&result, &pos_result) {
+                (Some(r), Some(p)) => r.consensus_passed && p.outliers.is_empty(),
+                (Some(r), None) => r.consensus_passed,
+                (None, Some(p)) => p.outliers.is_empty(),
+                (None, None) => true,
+            };
 
             if emit_json {
-                println!("{}", serde_json::to_string(&result)?);
-            } else {
-                println!(
-                    "{}: {} renderer(s), threshold={:.4}",
-                    result.test_id,
-                    result.renderers.len(),
-                    result.threshold,
-                );
-                for (i, name) in result.renderers.iter().enumerate() {
-                    println!(
-                        "  {name}: agreement={}/{}",
-                        result.agreement_count[i],
-                        result.renderers.len() - 1
-                    );
+                let mut out = serde_json::Map::new();
+                if let Some(ref r) = result {
+                    // Flatten the ConsensusResult fields into the top-level output
+                    // (preserving backward-compat with callers that already parse this).
+                    if let serde_json::Value::Object(map) = serde_json::to_value(r)? {
+                        for (k, v) in map {
+                            out.insert(k, v);
+                        }
+                    }
                 }
-                if result.consensus_passed {
-                    println!("  consensus: PASS");
-                } else {
-                    println!("  consensus: FAIL  outliers={:?}", result.outliers);
+                if let Some(ref p) = pos_result {
+                    out.insert("position_consensus".into(), serde_json::to_value(p)?);
+                }
+                out.insert("overall_passed".into(), overall_passed.into());
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::Value::Object(out))?
+                );
+            } else {
+                if let Some(ref r) = result {
+                    println!(
+                        "{}: {} renderer(s), threshold={:.4}",
+                        r.test_id,
+                        r.renderers.len(),
+                        r.threshold,
+                    );
+                    for (i, name) in r.renderers.iter().enumerate() {
+                        println!(
+                            "  {name}: agreement={}/{}",
+                            r.agreement_count[i],
+                            r.renderers.len() - 1
+                        );
+                    }
+                    if r.consensus_passed {
+                        println!("  consensus: PASS");
+                    } else {
+                        println!("  consensus: FAIL  outliers={:?}", r.outliers);
+                    }
+                }
+                if let Some(ref p) = pos_result {
+                    println!(
+                        "  position consensus: mean_drift={:.4}m threshold={:.4}m",
+                        p.mean_pairwise_drift_m, p.outlier_threshold_m,
+                    );
+                    if p.outliers.is_empty() {
+                        println!("  position consensus: PASS");
+                    } else {
+                        println!("  position consensus: FAIL  outliers={:?}", p.outliers);
+                    }
                 }
             }
 
-            if !result.consensus_passed {
+            if !overall_passed {
                 std::process::exit(1);
             }
             Ok(())
@@ -421,10 +503,10 @@ pub fn run(cli: Cli) -> Result<()> {
                         }
                     },
                     "consensus-diff": {
-                        "summary": "N-way cross-renderer consensus diff. Each --render name=path contributes one renderer to the pool; outputs the full SSIM matrix, per-renderer agreement counts, and outlier names. Exit non-zero when any renderer is an outlier (disagrees with a peer at threshold).",
+                        "summary": "N-way cross-renderer consensus diff. Each --render name=path contributes one renderer to the SSIM pool; --render-positions name=path adds per-renderer spring-bone position JSON for position consensus. Outputs the full SSIM matrix, per-renderer agreement counts, outlier names, and (when positions supplied) a position_consensus block. Exit non-zero when any renderer is an outlier.",
                         "input_schema": {
                             "type": "object",
-                            "required": ["plan", "renders"],
+                            "required": ["plan"],
                             "properties": {
                                 "plan": { "type": "string" },
                                 "renders": {
@@ -432,7 +514,17 @@ pub fn run(cli: Cli) -> Result<()> {
                                     "items": { "type": "string", "description": "name=path" },
                                     "minItems": 2
                                 },
-                                "threshold": { "type": "number" }
+                                "threshold": { "type": "number" },
+                                "render_positions": {
+                                    "type": "array",
+                                    "items": { "type": "string", "description": "name=path to DumpBonePositionsResult JSON" },
+                                    "description": "Per-renderer spring-bone position files for N-way position consensus. Phase 1: first spring chain only."
+                                },
+                                "position_outlier_threshold_m": {
+                                    "type": "number",
+                                    "default": 0.010,
+                                    "description": "A renderer whose mean pairwise drift vs all peers exceeds the median by this amount (metres) is flagged as a position outlier."
+                                }
                             }
                         },
                         "output_schema": {
@@ -447,7 +539,17 @@ pub fn run(cli: Cli) -> Result<()> {
                                 },
                                 "agreement_count": { "type": "array", "items": { "type": "integer" } },
                                 "outliers": { "type": "array", "items": { "type": "string" } },
-                                "consensus_passed": { "type": "boolean" }
+                                "consensus_passed": { "type": "boolean" },
+                                "position_consensus": {
+                                    "type": "object",
+                                    "description": "Present only when --render-positions was supplied.",
+                                    "properties": {
+                                        "mean_pairwise_drift_m": { "type": "number" },
+                                        "outliers": { "type": "array", "items": { "type": "string" } },
+                                        "outlier_threshold_m": { "type": "number" }
+                                    }
+                                },
+                                "overall_passed": { "type": "boolean" }
                             }
                         }
                     },

@@ -27,7 +27,9 @@
 
 use camino::Utf8Path;
 use serde::{Deserialize, Serialize};
+use vrm_ops::tools::SpringPositions;
 
+use crate::positions::diff_positions;
 use crate::ssim::{ssim_pngs, SsimError};
 
 /// One renderer's contribution to a consensus diff: the path to its
@@ -123,6 +125,71 @@ pub fn consensus_diff(
         outliers: outliers.clone(),
         consensus_passed: outliers.is_empty(),
     })
+}
+
+/// Per-renderer position consensus report.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PositionConsensusReport {
+    pub mean_pairwise_drift_m: f32,
+    pub outliers: Vec<String>,
+    pub outlier_threshold_m: f32,
+}
+
+/// For each renderer R, compute the mean per-joint drift between R and
+/// every other renderer. R is an outlier if that mean exceeds the median
+/// renderer's mean by `outlier_threshold_m` or more.
+///
+/// Returns no outliers when fewer than 3 renderers are supplied (no
+/// triangulation possible — same convention as the existing pairwise
+/// SSIM consensus).
+pub fn position_consensus(
+    entries: &[(String, SpringPositions)],
+    outlier_threshold_m: f32,
+) -> PositionConsensusReport {
+    let n = entries.len();
+    if n < 3 {
+        return PositionConsensusReport {
+            mean_pairwise_drift_m: 0.0,
+            outliers: Vec::new(),
+            outlier_threshold_m,
+        };
+    }
+
+    let mut per_renderer_mean_drift: Vec<(String, f32)> = Vec::with_capacity(n);
+    for (i, (name_i, pos_i)) in entries.iter().enumerate() {
+        let mut sum = 0.0_f32;
+        let mut cnt = 0u32;
+        for (j, (_, pos_j)) in entries.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            // Loose tolerances — we want the numeric drift, not pass/fail.
+            let r = diff_positions(pos_i, pos_j, f32::INFINITY, f32::INFINITY);
+            sum += r.per_joint_max_drift_m;
+            cnt += 1;
+        }
+        let mean = if cnt > 0 { sum / cnt as f32 } else { 0.0 };
+        per_renderer_mean_drift.push((name_i.clone(), mean));
+    }
+
+    let mut sorted: Vec<f32> = per_renderer_mean_drift.iter().map(|(_, m)| *m).collect();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = sorted[n / 2];
+
+    let outliers: Vec<String> = per_renderer_mean_drift
+        .iter()
+        .filter(|(_, m)| (m - median).abs() >= outlier_threshold_m)
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    let total: f32 = per_renderer_mean_drift.iter().map(|(_, m)| *m).sum();
+    let mean_pairwise_drift_m = total / n as f32;
+
+    PositionConsensusReport {
+        mean_pairwise_drift_m,
+        outliers,
+        outlier_threshold_m,
+    }
 }
 
 #[cfg(test)]
@@ -305,5 +372,55 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, SsimError::Dimension(..)));
+    }
+}
+
+#[cfg(test)]
+mod position_consensus_tests {
+    use super::*;
+    use vrm_ops::tools::SpringPositions;
+
+    fn pos(joints: Vec<[f32; 3]>) -> SpringPositions {
+        SpringPositions {
+            name: "c".into(),
+            joint_positions: joints,
+        }
+    }
+
+    #[test]
+    fn three_renderers_in_agreement_have_no_outlier() {
+        let a = pos(vec![[0.0, 1.0, 0.0], [0.0, 0.95, 0.0]]);
+        let entries = vec![
+            ("three-vrm".into(), a.clone()),
+            ("vrm-metal-kit".into(), a.clone()),
+            ("godot-vrm".into(), a.clone()),
+        ];
+        let report = position_consensus(&entries, 0.010);
+        assert!(report.outliers.is_empty());
+    }
+
+    #[test]
+    fn single_outlier_above_threshold_is_flagged() {
+        let baseline = pos(vec![[0.0, 1.0, 0.0], [0.0, 0.95, 0.0]]);
+        let drifted = pos(vec![[0.0, 1.0, 0.0], [0.05, 0.95, 0.0]]); // 5 cm off
+        let entries = vec![
+            ("three-vrm".into(), baseline.clone()),
+            ("vrm-metal-kit".into(), drifted),
+            ("godot-vrm".into(), baseline),
+        ];
+        let report = position_consensus(&entries, 0.010);
+        assert_eq!(report.outliers, vec!["vrm-metal-kit".to_string()]);
+    }
+
+    #[test]
+    fn fewer_than_three_renderers_returns_no_outliers() {
+        let baseline = pos(vec![[0.0, 1.0, 0.0]]);
+        let entries = vec![
+            ("three-vrm".into(), baseline.clone()),
+            ("vrm-metal-kit".into(), baseline),
+        ];
+        let report = position_consensus(&entries, 0.010);
+        assert!(report.outliers.is_empty());
+        assert_eq!(report.mean_pairwise_drift_m, 0.0);
     }
 }
