@@ -212,13 +212,13 @@ Returns world-space joint positions for one or all spring-bone chains in the ses
 | field | type | required | notes |
 |---|---|---|---|
 | `session_id` | string | yes | from `load_vrm` |
-| `spring_index` | integer | no | omit (or `null`) to dump all springs; out-of-range returns `-32602` |
+| `spring_index` | integer | no | omit (or `null`) to dump all springs; out-of-range returns empty springs array (permissive probe semantics) |
 
 `joint_positions` is in world space, in the VRM 1.0 coordinate system, joint-order head-to-tail.
 
 **Errors:**
 
-- `-32602` InvalidParams — unknown `session_id` or out-of-range `spring_index`
+- `-32602` InvalidParams — unknown `session_id`
 - `-32000` Unimplemented — adapter does not have a spring-bone system (e.g. univrm L3 in rest-pose-only mode)
 
 **Adapter support (as of phase 1):**

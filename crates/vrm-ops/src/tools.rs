@@ -141,7 +141,8 @@ pub struct AnimateRootTransformParams {
 ///
 /// If `spring_index` is omitted, all springs in the loaded model are
 /// returned. If provided, only that spring's positions are returned;
-/// out-of-range indices return `-32602 InvalidParams`.
+/// out-of-range indices return an empty `springs` array — this is
+/// intentionally permissive so callers can probe spring count without state.
 ///
 /// Adapters that have no spring-bone system or return rest-pose only (e.g.
 /// univrm L3) MAY return `-32000 Unimplemented` with the standard phase
