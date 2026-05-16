@@ -121,7 +121,7 @@ pub fn base_material(p: &MToonParams) -> Value {
     })
 }
 
-use crate::spring_bone::SpringBoneParams;
+use crate::spring_bone::{ColliderShape, SpringBoneParams, SpringBoneSceneParams};
 
 /// Build a VRMC_springBone extension JSON object given the joint node
 /// indices (in chain order, head-to-tail) and the per-spring params.
@@ -129,8 +129,35 @@ use crate::spring_bone::SpringBoneParams;
 /// Spec reference: https://github.com/vrm-c/vrm-specification/tree/master/specification/VRMC_springBone-1.0
 ///
 /// v0.1 emits one named spring with no colliders. Multi-chain and
-/// collider scenarios are out of scope for 2D-a.
+/// collider scenarios are out of scope for 2D-a. Delegates to
+/// `vrmc_spring_bone_scene` for backward compat.
 pub fn vrmc_spring_bone(joint_nodes: &[usize], params: &SpringBoneParams) -> Value {
+    let scene = SpringBoneSceneParams::single_spring(params.clone());
+    vrmc_spring_bone_scene(joint_nodes, &scene, &[])
+}
+
+/// Emit VRMC_springBone extension JSON for a scene with optional colliders.
+///
+/// `joint_nodes` is in chain order, head-to-tail (phase 1 single-chain only;
+/// phase 6 multi-chain will accept Vec<Vec<usize>>).
+///
+/// `collider_attach_nodes[i]` is the glTF node index that collider `i` is
+/// attached to. The caller resolves Head / NewIntermediateNode → node index
+/// during emit.
+pub fn vrmc_spring_bone_scene(
+    joint_nodes: &[usize],
+    scene: &SpringBoneSceneParams,
+    collider_attach_nodes: &[usize],
+) -> Value {
+    assert_eq!(
+        scene.colliders.len(),
+        collider_attach_nodes.len(),
+        "collider_attach_nodes must parallel scene.colliders"
+    );
+
+    // Phase 1: single spring (scene.springs[0]) for now.
+    // Phase 6 will iterate scene.springs.
+    let params = &scene.springs[0];
     let joints: Vec<Value> = joint_nodes
         .iter()
         .map(|&node| {
@@ -145,14 +172,157 @@ pub fn vrmc_spring_bone(joint_nodes: &[usize], params: &SpringBoneParams) -> Val
         })
         .collect();
 
-    // The validator rejects empty arrays for `colliders`, `colliderGroups`
-    // (top-level) and per-spring `colliderGroups`. The spec allows omitting
-    // them entirely, so we do — v0.1 has no colliders.
-    json!({
+    let mut spring = json!({
+        "name": params.spring_name,
+        "joints": joints,
+    });
+
+    let spring_groups = scene
+        .spring_collider_groups
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    if !spring_groups.is_empty() {
+        spring["colliderGroups"] = json!(spring_groups);
+    }
+
+    let mut out = json!({
         "specVersion": "1.0",
-        "springs": [{
-            "name": params.spring_name,
-            "joints": joints,
-        }],
-    })
+        "springs": [spring],
+    });
+
+    if !scene.colliders.is_empty() {
+        let colliders: Vec<Value> = scene
+            .colliders
+            .iter()
+            .zip(collider_attach_nodes.iter())
+            .map(|(c, &node)| {
+                let shape = match &c.shape {
+                    ColliderShape::Sphere { radius } => json!({
+                        "sphere": {
+                            "offset": c.offset,
+                            "radius": radius,
+                        }
+                    }),
+                    ColliderShape::Capsule {
+                        radius,
+                        tail_offset,
+                    } => json!({
+                        "capsule": {
+                            "offset": c.offset,
+                            "radius": radius,
+                            "tail": tail_offset,
+                        }
+                    }),
+                };
+                json!({
+                    "node": node,
+                    "shape": shape,
+                })
+            })
+            .collect();
+        out["colliders"] = json!(colliders);
+    }
+
+    if !scene.collider_groups.is_empty() {
+        let groups: Vec<Value> = scene
+            .collider_groups
+            .iter()
+            .map(|g| {
+                json!({
+                    "name": g.name,
+                    "colliders": g.collider_indices,
+                })
+            })
+            .collect();
+        out["colliderGroups"] = json!(groups);
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod collider_emission_tests {
+    use super::*;
+    use crate::spring_bone::*;
+
+    #[test]
+    fn no_colliders_omitted_from_json() {
+        let scene = SpringBoneSceneParams::single_spring(SpringBoneParams::defaults("c"));
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[]);
+        assert!(v.get("colliders").is_none());
+        assert!(v.get("colliderGroups").is_none());
+        assert!(v.get("springs").unwrap().as_array().unwrap()[0]
+            .get("colliderGroups")
+            .is_none());
+    }
+
+    #[test]
+    fn sphere_collider_emits_correct_json_shape() {
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("c")],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Sphere { radius: 0.05 },
+                offset: [0.0, -0.04, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "g0".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        // attach_nodes parallels colliders by index — for Head attach we pass the head node idx.
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[10]); // 10 = head node idx
+        let colliders = v.get("colliders").unwrap().as_array().unwrap();
+        assert_eq!(colliders.len(), 1);
+        let c0 = &colliders[0];
+        assert_eq!(c0["node"].as_u64().unwrap(), 10);
+        let shape = c0["shape"].as_object().unwrap();
+        assert!(
+            shape.contains_key("sphere"),
+            "expected sphere shape, got {shape:?}"
+        );
+        let sphere = &shape["sphere"];
+        assert!((sphere["radius"].as_f64().unwrap() - 0.05).abs() < 1e-6);
+        let off = sphere["offset"].as_array().unwrap();
+        assert_eq!(off.len(), 3);
+        assert!((off[1].as_f64().unwrap() - (-0.04)).abs() < 1e-6);
+
+        let groups = v.get("colliderGroups").unwrap().as_array().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0]["name"], "g0");
+        assert_eq!(groups[0]["colliders"][0], 0);
+
+        let spring = &v["springs"].as_array().unwrap()[0];
+        let cg = spring["colliderGroups"].as_array().unwrap();
+        assert_eq!(cg.len(), 1);
+        assert_eq!(cg[0].as_u64().unwrap(), 0);
+    }
+
+    #[test]
+    fn capsule_collider_emits_tail_field() {
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("c")],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Capsule {
+                    radius: 0.03,
+                    tail_offset: [0.0, -0.08, 0.0],
+                },
+                offset: [0.0, 0.0, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "g0".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[10]);
+        let shape = v["colliders"][0]["shape"].as_object().unwrap();
+        assert!(shape.contains_key("capsule"));
+        let cap = &shape["capsule"];
+        let tail = cap["tail"].as_array().unwrap();
+        assert!((tail[1].as_f64().unwrap() - (-0.08)).abs() < 1e-6);
+    }
 }
