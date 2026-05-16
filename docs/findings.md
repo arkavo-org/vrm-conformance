@@ -893,3 +893,20 @@ cd vrm-conformance
 ```
 
 For different host configurations (different macOS version, GPU, three-vrm version, VRMMetalKit revision), the numbers will shift but the pattern is expected to hold until upstream fixes for #183 and #1838 land.
+
+## Phase 2 — VRMC_springBone collider sweep landed (synthetic only)
+
+**Trigger:** Phase 1 infrastructure (dump_bone_positions across four adapters, position-diff math, manifest + runner integration) merged. Phase 2 of the seven-phase springbone gap closure design adds collider emission to the asset generator and 48 test plans (24 Cartesian variants × settle/swing).
+
+**Shipped:**
+- Generator types: `ColliderShape::{Sphere, Capsule}`, `ColliderAttach`, `ColliderParams`, `ColliderGroupParams`, `SpringBoneSceneParams`.
+- `vrm_ext.rs::vrmc_spring_bone_scene()` emits `colliders[]`, `colliderGroups[]`, per-spring `colliderGroups`.
+- `emit-springbone-collider-sweep` subcommand → 48 `.vrm` + `.test.yaml` + `.meta.json` triplets.
+- Sweep axes: shape (sphere, capsule), offset_y (-0.08, -0.04, 0, +0.04), radius (0.03, 0.05, 0.10). Cartesian, not one-axis-at-a-time, because collision response isn't separable on a single axis at this scale.
+- VRM validator (v2.0.0-dev.3.10) reports 0 errors on sampled emitted files; 1 pre-existing warning (TEXCOORD_0 unused) and info-level empty-node messages matching the existing spring-bone corpus.
+
+**Deferred:**
+- `avatarA_bosom_collider` humanoid plan — requires authoring `avatarA_collider_1_0.vrm` in Blender (one head-mounted sphere collider intersecting the existing bust chain swing path). Estimated half-day of authoring; not code work. The 48-plan synthetic sweep is independent and ships now.
+- The collider sweep currently does not run through `bootstrap-goldens.sh` — that's a separate task once renderers have rendered the new corpus at least once.
+
+**Forward:** Phase 3 adds `VRMC_springBone_extended_collider` (planes, inverted sphere/capsule, joint angle limits).
