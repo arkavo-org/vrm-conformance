@@ -963,3 +963,29 @@ When `Some(v)`, `v.len() == joint_count` is required; the per-joint vector overr
 **Known limitation:** the sweep's "spacing" axis (0.02, 0.05 m encoded in IDs) currently maps to a fixed 0.05 m radial spacing at emit time. Both spacing values produce identical geometry. Resolving requires threading spacing through `SpringBoneSceneParams` → emit; deferred because the chain-count and sharing-mode axes are the load-bearing ones for VMK#162-class regressions and the spacing axis is a secondary concern.
 
 **Forward:** Phase 7 — VMK#162 regression matrix (execute-test-plan-matrix runner mode).
+
+## Phase 7 — VMK#162 coupling matrix runner landed
+
+**Trigger:** Phase 6 multi-chain merged. Final phase: the runner gains `execute-test-plan-matrix`, enabling self-comparison regressions of the form "changing one tuned parameter should not silently shift the equilibrium that other parameters establish" (VMK#162).
+
+**Architecture deviation from spec:** the spec proposed runtime parameter mutation. Phase 7 ships pre-emitted asset variants instead — the matrix YAML enumerates a baseline `.vrm` + N perturbation `.vrm` paths, runner orchestrates N+1 renders + position dumps + per-joint delta computation. This sidesteps the need for an adapter-side `override_spring_params` op.
+
+**Shipped:**
+- `crates/vrm-test-plan/src/lib.rs`: `CouplingMatrix` + `CouplingPerturbation` types.
+- `crates/vrm-runner/src/execute_matrix.rs`: orchestrator, `per_joint_drift`, `MatrixResult::passed()`/`outliers()`.
+- `crates/vrm-runner/src/execute.rs`: `execute_plan_capturing_positions` for matrix-mode position capture.
+- `vrm-runner execute-test-plan-matrix` subcommand with full describe catalog entry.
+- `test-plans/manual/coupling/springbone_default_coupling.matrix.yaml`: example matrix using existing emit-springbone-sweep variants.
+- Smoke-tested through mock renderer end-to-end: `ok: true`, all `max_drift_m: 0.0`, `overall_passed: true`.
+
+**Calibration deferred:** the example matrix uses `coupling_threshold_m: 0.015` as an opening guess. Real calibration requires running the matrix on three-vrm and godot-vrm (well-behaved baselines), observing their max coupling drift, and tuning the threshold above their max but below VMK's reported coupling magnitude. That measurement run is a separate manual step — not blocking infrastructure delivery.
+
+**Forward:** the seven-phase VRMC_springBone gap closure is complete. The corpus across phases 2–6 ships 142 new test plans:
+- Phase 2: 48 collider plans
+- Phase 3: 36 extended-collider plans
+- Phase 4: 8 gravityDir plans
+- Phase 5: 14 per-joint taper plans
+- Phase 6: 36 multi-chain plans
+- Phase 7: 1 example coupling matrix YAML (calibration matrix)
+
+Next: bootstrap-goldens on the new corpus and update `goldens/manifest.json`.
