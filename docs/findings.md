@@ -910,3 +910,17 @@ For different host configurations (different macOS version, GPU, three-vrm versi
 - The collider sweep currently does not run through `bootstrap-goldens.sh` — that's a separate task once renderers have rendered the new corpus at least once.
 
 **Forward:** Phase 3 adds `VRMC_springBone_extended_collider` (planes, inverted sphere/capsule, joint angle limits).
+
+## Phase 3 — VRMC_springBone_extended_collider sweep landed
+
+**Trigger:** Phase 2 base-collider sweep merged. Phase 3 adds the companion extension `VRMC_springBone_extended_collider-1.0`: planes, inverted (inside) sphere/capsule, and per-joint angleLimit.
+
+**Shipped:**
+- ColliderShape variants: `Plane { normal }`, `InsideSphere { radius }`, `InsideCapsule { radius, tail_offset }`.
+- `SpringBoneParams.joint_angle_limit_deg: Option<f32>` — emitted under `joints[].extensions.VRMC_springBone_extended_collider.angleLimit` (degrees, per-joint).
+- glTF `extensionsUsed` correctly declares `VRMC_springBone_extended_collider` only when extended shapes or angle limits are present.
+- `emit-springbone-extended-sweep` subcommand emits 36 plans (3 shapes × 3 placements + 3 shapes × 3 angle limits = 18 cartesian × settle/swing).
+
+**Adapter coverage:** the extension is conformance-tested via cross-renderer diff in subsequent corpus runs. Adapters that don't support it should diff loudly. Known status: three-vrm and VRMMetalKit may have partial support (VMK#67 is the open angle-limit verification ticket); godot-vrm coverage depends on V-Sekai/godot-vrm's spec_extended state.
+
+**Forward:** Phase 4 adds gravityDir variation.
