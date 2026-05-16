@@ -121,7 +121,9 @@ pub fn base_material(p: &MToonParams) -> Value {
     })
 }
 
-use crate::spring_bone::{ColliderShape, SpringBoneParams, SpringBoneSceneParams};
+use crate::spring_bone::{
+    ColliderGroupParams, ColliderShape, SpringBoneParams, SpringBoneSceneParams,
+};
 
 /// Return the per-joint value from `per_joint[joint_idx]` if the vector is
 /// `Some`, otherwise return `uniform`. Panics (programmer error) when the
@@ -161,190 +163,162 @@ pub fn vrmc_spring_bone(joint_nodes: &[usize], params: &SpringBoneParams) -> Val
     vrmc_spring_bone_scene(joint_nodes, &scene, &[])
 }
 
-/// Emit VRMC_springBone extension JSON for a scene with optional colliders.
+/// Emit VRMC_springBone extension JSON for N parallel spring chains with optional colliders.
 ///
-/// `joint_nodes` is in chain order, head-to-tail (phase 1 single-chain only;
-/// phase 6 multi-chain will accept Vec<Vec<usize>>).
+/// `joint_nodes_per_chain[c]` is the slice of joint glTF node indices for chain `c`,
+/// in head-to-tail order. `scene.springs[c]` carries the physics params for that chain.
+/// `collider_attach_nodes[i]` is the glTF node index that collider `i` is attached to.
 ///
-/// `collider_attach_nodes[i]` is the glTF node index that collider `i` is
-/// attached to. The caller resolves Head / NewIntermediateNode → node index
-/// during emit.
-pub fn vrmc_spring_bone_scene(
-    joint_nodes: &[usize],
+/// This is the Phase 6 multi-chain emitter. The single-chain wrapper `vrmc_spring_bone_scene`
+/// delegates here.
+pub fn vrmc_spring_bone_scene_multichain(
+    joint_nodes_per_chain: &[Vec<usize>],
     scene: &SpringBoneSceneParams,
     collider_attach_nodes: &[usize],
 ) -> Value {
+    assert_eq!(
+        joint_nodes_per_chain.len(),
+        scene.springs.len(),
+        "joint_nodes_per_chain must parallel scene.springs"
+    );
+    assert_eq!(
+        scene.spring_collider_groups.len(),
+        scene.springs.len(),
+        "spring_collider_groups must parallel scene.springs"
+    );
     assert_eq!(
         scene.colliders.len(),
         collider_attach_nodes.len(),
         "collider_attach_nodes must parallel scene.colliders"
     );
 
-    // Phase 1: single spring (scene.springs[0]) for now.
-    // Phase 6 will iterate scene.springs.
-    let params = &scene.springs[0];
-    let joint_count = joint_nodes.len();
-    let joints: Vec<Value> = joint_nodes
+    let springs_json: Vec<Value> = scene
+        .springs
         .iter()
         .enumerate()
-        .map(|(i, &node)| {
-            let stiffness = joint_value(
-                &params.stiffness_per_joint,
-                params.stiffness,
-                i,
-                joint_count,
-                "stiffness",
-            );
-            let drag_force = joint_value(
-                &params.drag_force_per_joint,
-                params.drag_force,
-                i,
-                joint_count,
-                "drag_force",
-            );
-            let gravity_power = joint_value(
-                &params.gravity_power_per_joint,
-                params.gravity_power,
-                i,
-                joint_count,
-                "gravity_power",
-            );
-            let hit_radius = joint_value(
-                &params.hit_radius_per_joint,
-                params.hit_radius,
-                i,
-                joint_count,
-                "hit_radius",
-            );
-            let mut joint = json!({
-                "node": node,
-                "hitRadius": hit_radius,
-                "stiffness": stiffness,
-                "gravityPower": gravity_power,
-                "gravityDir": params.gravity_dir,
-                "dragForce": drag_force,
-            });
-            if let Some(angle_limit) = params.joint_angle_limit_deg {
-                joint["extensions"] = json!({
-                    "VRMC_springBone_extended_collider": {
-                        "angleLimit": angle_limit
+        .map(|(c_idx, params)| {
+            let chain_joints = &joint_nodes_per_chain[c_idx];
+            let joint_count = chain_joints.len();
+            let joints_json: Vec<Value> = chain_joints
+                .iter()
+                .enumerate()
+                .map(|(j_idx, &node)| {
+                    let stiffness = joint_value(
+                        &params.stiffness_per_joint,
+                        params.stiffness,
+                        j_idx,
+                        joint_count,
+                        "stiffness",
+                    );
+                    let drag = joint_value(
+                        &params.drag_force_per_joint,
+                        params.drag_force,
+                        j_idx,
+                        joint_count,
+                        "drag_force",
+                    );
+                    let gravity_power = joint_value(
+                        &params.gravity_power_per_joint,
+                        params.gravity_power,
+                        j_idx,
+                        joint_count,
+                        "gravity_power",
+                    );
+                    let hit_radius = joint_value(
+                        &params.hit_radius_per_joint,
+                        params.hit_radius,
+                        j_idx,
+                        joint_count,
+                        "hit_radius",
+                    );
+                    let mut j = json!({
+                        "node": node,
+                        "hitRadius": hit_radius,
+                        "stiffness": stiffness,
+                        "gravityPower": gravity_power,
+                        "gravityDir": params.gravity_dir,
+                        "dragForce": drag,
+                    });
+                    if let Some(deg) = params.joint_angle_limit_deg {
+                        j["extensions"] = json!({
+                            "VRMC_springBone_extended_collider": { "angleLimit": deg }
+                        });
                     }
-                });
+                    j
+                })
+                .collect();
+
+            let mut spring = json!({
+                "name": params.spring_name,
+                "joints": joints_json,
+            });
+            let groups = &scene.spring_collider_groups[c_idx];
+            if !groups.is_empty() {
+                spring["colliderGroups"] = json!(groups);
             }
-            joint
+            spring
         })
         .collect();
 
-    let mut spring = json!({
-        "name": params.spring_name,
-        "joints": joints,
-    });
-
-    let spring_groups = scene
-        .spring_collider_groups
-        .first()
-        .cloned()
-        .unwrap_or_default();
-    if !spring_groups.is_empty() {
-        spring["colliderGroups"] = json!(spring_groups);
-    }
-
     let mut out = json!({
         "specVersion": "1.0",
-        "springs": [spring],
+        "springs": springs_json,
     });
 
+    // Colliders and colliderGroups are scene-level (shared across all chains).
     if !scene.colliders.is_empty() {
         let colliders: Vec<Value> = scene
             .colliders
             .iter()
             .zip(collider_attach_nodes.iter())
-            .map(|(c, &node)| {
-                match &c.shape {
-                    ColliderShape::Sphere { radius } => {
-                        let shape = json!({
-                            "sphere": {
-                                "offset": c.offset,
-                                "radius": radius,
+            .map(|(c, &node)| match &c.shape {
+                ColliderShape::Sphere { radius } => {
+                    json!({
+                        "node": node,
+                        "shape": { "sphere": { "offset": c.offset, "radius": radius } }
+                    })
+                }
+                ColliderShape::Capsule {
+                    radius,
+                    tail_offset,
+                } => {
+                    json!({
+                        "node": node,
+                        "shape": { "capsule": { "offset": c.offset, "radius": radius, "tail": tail_offset } }
+                    })
+                }
+                ColliderShape::Plane { normal } => {
+                    json!({
+                        "node": node,
+                        "extensions": {
+                            "VRMC_springBone_extended_collider": {
+                                "shape": { "plane": { "offset": c.offset, "normal": normal } }
                             }
-                        });
-                        json!({
-                            "node": node,
-                            "shape": shape,
-                        })
-                    }
-                    ColliderShape::Capsule {
-                        radius,
-                        tail_offset,
-                    } => {
-                        let shape = json!({
-                            "capsule": {
-                                "offset": c.offset,
-                                "radius": radius,
-                                "tail": tail_offset,
+                        }
+                    })
+                }
+                ColliderShape::InsideSphere { radius } => {
+                    json!({
+                        "node": node,
+                        "extensions": {
+                            "VRMC_springBone_extended_collider": {
+                                "shape": { "sphere": { "offset": c.offset, "radius": radius, "inside": true } }
                             }
-                        });
-                        json!({
-                            "node": node,
-                            "shape": shape,
-                        })
-                    }
-                    // Extended shapes: omit base `shape` field; emit under
-                    // extensions.VRMC_springBone_extended_collider.shape
-                    ColliderShape::Plane { normal } => {
-                        let ext_shape = json!({
-                            "plane": {
-                                "offset": c.offset,
-                                "normal": normal,
+                        }
+                    })
+                }
+                ColliderShape::InsideCapsule {
+                    radius,
+                    tail_offset,
+                } => {
+                    json!({
+                        "node": node,
+                        "extensions": {
+                            "VRMC_springBone_extended_collider": {
+                                "shape": { "capsule": { "offset": c.offset, "radius": radius, "tail": tail_offset, "inside": true } }
                             }
-                        });
-                        json!({
-                            "node": node,
-                            "extensions": {
-                                "VRMC_springBone_extended_collider": {
-                                    "shape": ext_shape
-                                }
-                            }
-                        })
-                    }
-                    ColliderShape::InsideSphere { radius } => {
-                        let ext_shape = json!({
-                            "sphere": {
-                                "offset": c.offset,
-                                "radius": radius,
-                                "inside": true,
-                            }
-                        });
-                        json!({
-                            "node": node,
-                            "extensions": {
-                                "VRMC_springBone_extended_collider": {
-                                    "shape": ext_shape
-                                }
-                            }
-                        })
-                    }
-                    ColliderShape::InsideCapsule {
-                        radius,
-                        tail_offset,
-                    } => {
-                        let ext_shape = json!({
-                            "capsule": {
-                                "offset": c.offset,
-                                "radius": radius,
-                                "tail": tail_offset,
-                                "inside": true,
-                            }
-                        });
-                        json!({
-                            "node": node,
-                            "extensions": {
-                                "VRMC_springBone_extended_collider": {
-                                    "shape": ext_shape
-                                }
-                            }
-                        })
-                    }
+                        }
+                    })
                 }
             })
             .collect();
@@ -355,7 +329,7 @@ pub fn vrmc_spring_bone_scene(
         let groups: Vec<Value> = scene
             .collider_groups
             .iter()
-            .map(|g| {
+            .map(|g: &ColliderGroupParams| {
                 json!({
                     "name": g.name,
                     "colliders": g.collider_indices,
@@ -366,6 +340,93 @@ pub fn vrmc_spring_bone_scene(
     }
 
     out
+}
+
+/// Emit VRMC_springBone extension JSON for a scene with optional colliders.
+///
+/// Single-chain wrapper over `vrmc_spring_bone_scene_multichain`. `joint_nodes` is
+/// in chain order, head-to-tail.
+///
+/// `collider_attach_nodes[i]` is the glTF node index that collider `i` is
+/// attached to. The caller resolves Head / NewIntermediateNode → node index
+/// during emit.
+pub fn vrmc_spring_bone_scene(
+    joint_nodes: &[usize],
+    scene: &SpringBoneSceneParams,
+    collider_attach_nodes: &[usize],
+) -> Value {
+    vrmc_spring_bone_scene_multichain(&[joint_nodes.to_vec()], scene, collider_attach_nodes)
+}
+
+#[cfg(test)]
+mod multichain_emit_tests {
+    use super::*;
+    use crate::spring_bone::*;
+
+    #[test]
+    fn two_chains_emit_two_springs_entries() {
+        let scene = SpringBoneSceneParams {
+            springs: vec![
+                SpringBoneParams::defaults("chain_a"),
+                SpringBoneParams::defaults("chain_b"),
+            ],
+            colliders: vec![],
+            collider_groups: vec![],
+            spring_collider_groups: vec![vec![], vec![]],
+        };
+        let joint_nodes_per_chain = vec![vec![10, 11, 12, 13], vec![20, 21, 22, 23]];
+        let v = vrmc_spring_bone_scene_multichain(&joint_nodes_per_chain, &scene, &[]);
+        let springs = v["springs"].as_array().unwrap();
+        assert_eq!(springs.len(), 2);
+        assert_eq!(springs[0]["name"], "chain_a_chain");
+        assert_eq!(springs[1]["name"], "chain_b_chain");
+        assert_eq!(springs[0]["joints"].as_array().unwrap().len(), 4);
+        assert_eq!(springs[1]["joints"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn three_chains_with_shared_collider_group_emit_per_spring_group_indices() {
+        let scene = SpringBoneSceneParams {
+            springs: vec![
+                SpringBoneParams::defaults("ca"),
+                SpringBoneParams::defaults("cb"),
+                SpringBoneParams::defaults("cc"),
+            ],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Sphere { radius: 0.05 },
+                offset: [0.0, -0.04, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "shared".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0], vec![0], vec![0]],
+        };
+        let joints = vec![
+            vec![10, 11, 12, 13],
+            vec![20, 21, 22, 23],
+            vec![30, 31, 32, 33],
+        ];
+        let v = vrmc_spring_bone_scene_multichain(&joints, &scene, &[40]);
+        let springs = v["springs"].as_array().unwrap();
+        assert_eq!(springs.len(), 3);
+        for s in springs {
+            let groups = s["colliderGroups"].as_array().unwrap();
+            assert_eq!(groups.len(), 1);
+            assert_eq!(groups[0].as_u64().unwrap(), 0);
+        }
+    }
+
+    #[test]
+    fn single_chain_wrapper_delegates_to_multichain() {
+        let mut p = SpringBoneParams::defaults("c");
+        p.joint_count = 4;
+        let scene = SpringBoneSceneParams::single_spring(p);
+        let v1 = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[]);
+        let v2 = vrmc_spring_bone_scene_multichain(&[vec![0, 1, 2, 3]], &scene, &[]);
+        assert_eq!(v1, v2);
+    }
 }
 
 #[cfg(test)]
