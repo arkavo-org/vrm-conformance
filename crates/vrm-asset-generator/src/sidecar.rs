@@ -202,6 +202,42 @@ pub fn build_spring_bone_collider_swing_test_plan(
     plan
 }
 
+/// Settle variant for extended collider tests.
+/// Uses the same 60-step settle as `build_spring_bone_collider_test_plan`
+/// but names both extensions in `spec_section` so the runner can display
+/// the correct spec reference.
+pub fn build_spring_bone_extended_test_plan(
+    params: &MToonParams,
+    _scene: &SpringBoneSceneParams,
+    asset_relpath: &str,
+) -> TestPlan {
+    let mut plan = build_default_test_plan(params, asset_relpath);
+    plan.physics = Some(PhysicsConfig { settle_steps: 60 });
+    plan.spec_section = "VRMC_springBone + VRMC_springBone_extended_collider".into();
+    plan
+}
+
+/// Swing variant for extended collider tests. Same animation block as
+/// `build_spring_bone_collider_swing_test_plan` with 60-step settle and the
+/// extended collider spec_section label.
+pub fn build_spring_bone_extended_swing_test_plan(
+    params: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    asset_relpath: &str,
+) -> TestPlan {
+    let mut plan = build_spring_bone_extended_test_plan(params, scene, asset_relpath);
+    plan.animation = Some(AnimationConfig {
+        root_transform: Some(RootTransformAnimation {
+            translation_start: [0.0, 0.0, 0.0],
+            translation_end: [0.15, 0.0, 0.0],
+            duration_seconds: 0.25,
+            fps: 60,
+        }),
+    });
+    plan.spec_section = "VRMC_springBone + VRMC_springBone_extended_collider (swing)".into();
+    plan
+}
+
 fn default_properties(_params: &MToonParams) -> Vec<PropertyAssertion> {
     // v0.1 default: one general-purpose lower-quad average-luminance check.
     // Test-specific assertions get added per parameter combination later.
@@ -217,6 +253,34 @@ pub fn write_test_yaml(plan: &TestPlan, out: &Utf8Path) -> Result<()> {
     let yaml = serde_yml::to_string(plan)?;
     std::fs::write(out, yaml)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod extended_plan_tests {
+    use super::*;
+    use crate::spring_bone::*;
+
+    #[test]
+    fn extended_plan_settle_has_60_settle_steps() {
+        let mtoon = MToonParams::defaults("test_ext");
+        let scene = SpringBoneSceneParams::single_spring(SpringBoneParams::defaults("t"));
+        let plan = build_spring_bone_extended_test_plan(&mtoon, &scene, "out.vrm");
+        assert_eq!(plan.physics.unwrap().settle_steps, 60);
+        assert!(plan.animation.is_none());
+    }
+
+    #[test]
+    fn extended_plan_spec_section_names_both_extensions() {
+        let mtoon = MToonParams::defaults("test_ext");
+        let scene = SpringBoneSceneParams::single_spring(SpringBoneParams::defaults("t"));
+        let plan = build_spring_bone_extended_test_plan(&mtoon, &scene, "out.vrm");
+        assert!(
+            plan.spec_section
+                .contains("VRMC_springBone_extended_collider"),
+            "spec_section should name the extension: {}",
+            plan.spec_section
+        );
+    }
 }
 
 #[cfg(test)]
