@@ -189,6 +189,125 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
     })
 }
 
+/// Run one plan through the adapter and always return the bone positions dump.
+/// Used by matrix mode which needs positions for every render regardless of
+/// whether a reference_positions file was provided.
+pub fn execute_plan_capturing_positions(
+    plan: &TestPlan,
+    opts: &ExecuteOptions,
+) -> Result<ops::DumpBonePositionsResult> {
+    let asset_path = opts.asset_dir.join(&plan.asset);
+    if !asset_path.exists() {
+        anyhow::bail!("asset not found: {asset_path}");
+    }
+
+    progress(opts, "spawn", &plan.id, json!({}));
+    let mut adapter = Adapter::spawn(&opts.adapter_bin, &opts.adapter_args)
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+    progress(opts, "load_vrm", &plan.id, json!({ "asset": asset_path }));
+    let load: ops::LoadVrmResult = adapter
+        .call(
+            "load_vrm",
+            ops::LoadVrmParams {
+                path: asset_path.to_string(),
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+    let session_id = load.session_id;
+
+    progress(opts, "set_camera", &plan.id, json!({}));
+    let _: ops::UnitResult = adapter
+        .call("set_camera", camera_params(&session_id, &plan.camera))
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+    progress(opts, "set_lighting", &plan.id, json!({}));
+    let _: ops::UnitResult = adapter
+        .call("set_lighting", lighting_params(&session_id, &plan.lighting))
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+    progress(opts, "set_post_processing", &plan.id, json!({}));
+    let _: ops::UnitResult = adapter
+        .call(
+            "set_post_processing",
+            post_processing_params(&session_id, &plan.post_processing),
+        )
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+    if let Some(physics) = &plan.physics {
+        progress(
+            opts,
+            "reset_physics",
+            &plan.id,
+            json!({ "settle_steps": physics.settle_steps }),
+        );
+        let _: ops::UnitResult = adapter
+            .call(
+                "reset_physics",
+                ops::ResetPhysicsParams {
+                    session_id: session_id.clone(),
+                    settle_steps: physics.settle_steps,
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+    }
+
+    if let Some(animation) = &plan.animation {
+        if let Some(root) = &animation.root_transform {
+            progress(
+                opts,
+                "animate_root_transform",
+                &plan.id,
+                json!({
+                    "duration_seconds": root.duration_seconds,
+                    "fps": root.fps,
+                }),
+            );
+            let _: ops::UnitResult = adapter
+                .call(
+                    "animate_root_transform",
+                    animate_root_transform_params(&session_id, root),
+                )
+                .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+        }
+    }
+
+    let png = opts
+        .output_dir
+        .join(format!("{}_{}.png", plan.id, opts.renderer_name));
+    if let Some(parent) = png.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    progress(opts, "render", &plan.id, json!({ "output": png }));
+    let _: ops::RenderResult = adapter
+        .call(
+            "render",
+            render_params(&session_id, &plan.output, png.to_string()),
+        )
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+    progress(opts, "dump_bone_positions", &plan.id, json!({}));
+    let dump: ops::DumpBonePositionsResult = adapter
+        .call(
+            "dump_bone_positions",
+            ops::DumpBonePositionsParams {
+                session_id: session_id.clone(),
+                spring_index: None,
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+    progress(opts, "dispose", &plan.id, json!({}));
+    let _: ops::UnitResult = adapter
+        .call("dispose", ops::DisposeParams { session_id })
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+    adapter
+        .shutdown()
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+    Ok(dump)
+}
+
 pub fn load_plan(path: &Utf8Path) -> Result<TestPlan> {
     let s = std::fs::read_to_string(path.as_std_path())?;
     Ok(serde_yml::from_str(&s)?)
