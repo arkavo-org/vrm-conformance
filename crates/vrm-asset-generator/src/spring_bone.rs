@@ -101,7 +101,121 @@ pub fn spring_bone_basic_sweep() -> Vec<SpringBoneParams> {
     out
 }
 
-fn fmt_num(v: f32) -> String {
+pub fn fmt_num(v: f32) -> String {
     let s = format!("{v:.3}").replace('.', "p").replace('-', "neg");
     s.trim_end_matches('0').trim_end_matches('p').to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ColliderShape {
+    Sphere { radius: f32 },
+    Capsule { radius: f32, tail_offset: [f32; 3] },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ColliderAttach {
+    Head,
+    NewIntermediateNode { y_offset: f32, z_offset: f32 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColliderParams {
+    pub shape: ColliderShape,
+    pub offset: [f32; 3],
+    pub attach: ColliderAttach,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColliderGroupParams {
+    pub name: String,
+    pub collider_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpringBoneSceneParams {
+    /// `Vec` so multi-chain (phase 6) plugs in here without API churn.
+    pub springs: Vec<SpringBoneParams>,
+    pub colliders: Vec<ColliderParams>,
+    pub collider_groups: Vec<ColliderGroupParams>,
+    /// Per-spring index list into `collider_groups`.
+    pub spring_collider_groups: Vec<Vec<usize>>,
+}
+
+impl SpringBoneSceneParams {
+    /// Single-chain, no-collider scene constructed from a SpringBoneParams.
+    /// Backward-compat for callers that don't need colliders.
+    pub fn single_spring(s: SpringBoneParams) -> Self {
+        Self {
+            springs: vec![s],
+            colliders: Vec::new(),
+            collider_groups: Vec::new(),
+            spring_collider_groups: vec![Vec::new()],
+        }
+    }
+}
+
+#[cfg(test)]
+mod collider_tests {
+    use super::*;
+
+    #[test]
+    fn sphere_collider_default_is_at_origin_with_unit_radius() {
+        let c = ColliderParams {
+            shape: ColliderShape::Sphere { radius: 0.05 },
+            offset: [0.0, 0.0, 0.0],
+            attach: ColliderAttach::Head,
+        };
+        match c.shape {
+            ColliderShape::Sphere { radius } => assert!((radius - 0.05).abs() < 1e-6),
+            _ => panic!("expected sphere"),
+        }
+    }
+
+    #[test]
+    fn capsule_collider_has_tail_offset() {
+        let c = ColliderParams {
+            shape: ColliderShape::Capsule {
+                radius: 0.03,
+                tail_offset: [0.0, -0.1, 0.0],
+            },
+            offset: [0.0, 0.0, 0.0],
+            attach: ColliderAttach::Head,
+        };
+        match c.shape {
+            ColliderShape::Capsule { tail_offset, .. } => {
+                assert_eq!(tail_offset, [0.0, -0.1, 0.0]);
+            }
+            _ => panic!("expected capsule"),
+        }
+    }
+
+    #[test]
+    fn collider_group_holds_indices() {
+        let g = ColliderGroupParams {
+            name: "head_colliders".into(),
+            collider_indices: vec![0, 2, 3],
+        };
+        assert_eq!(g.collider_indices.len(), 3);
+    }
+
+    #[test]
+    fn scene_params_aggregates_springs_and_colliders() {
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("test_chain")],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Sphere { radius: 0.05 },
+                offset: [0.0, -0.04, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "g0".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        assert_eq!(scene.springs.len(), 1);
+        assert_eq!(scene.colliders.len(), 1);
+        assert_eq!(scene.collider_groups.len(), 1);
+        assert_eq!(scene.spring_collider_groups[0], vec![0]);
+    }
 }
