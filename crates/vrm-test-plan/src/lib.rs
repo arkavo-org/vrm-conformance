@@ -184,3 +184,71 @@ pub enum DiffMode {
 // authors can use the canonical names without a direct diff-engine
 // dependency leaking through.
 pub use vrm_diff_engine::property::{BboxRegion, PropertyAssertion};
+
+/// One parameter-perturbed variant in a coupling matrix run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CouplingPerturbation {
+    pub name: String,
+    /// Asset filename (resolved relative to asset_dir at runtime).
+    pub asset: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Coupling matrix: baseline + N perturbation variants rendered through
+/// the same base plan. The runner computes per-joint position drift between
+/// the baseline and each perturbation to detect VMK#162-class coupling
+/// regressions ("changing one tuned parameter silently shifts the equilibrium
+/// that other parameters establish").
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CouplingMatrix {
+    /// Path to the base test plan (resolved relative to the matrix YAML's dir).
+    pub base_plan: String,
+    /// Baseline asset filename (resolved relative to asset_dir at runtime).
+    pub baseline_asset: String,
+    pub perturbations: Vec<CouplingPerturbation>,
+    /// Max allowed per-joint position delta between baseline and any perturbation.
+    /// Cross-perturbation drift exceeding this is flagged as coupling.
+    pub coupling_threshold_m: f32,
+}
+
+#[cfg(test)]
+mod coupling_matrix_tests {
+    use super::*;
+
+    #[test]
+    fn coupling_matrix_yaml_roundtrips() {
+        let raw = r#"
+base_plan: springbone_default.test.yaml
+baseline_asset: springbone_default.vrm
+perturbations:
+  - name: stiffness_high
+    asset: springbone_stiffness_0p55.vrm
+    description: stiffness +10%
+  - name: stiffness_low
+    asset: springbone_stiffness_0p45.vrm
+    description: stiffness -10%
+coupling_threshold_m: 0.015
+"#;
+        let m: CouplingMatrix = serde_yml::from_str(raw).unwrap();
+        assert_eq!(m.base_plan, "springbone_default.test.yaml");
+        assert_eq!(m.baseline_asset, "springbone_default.vrm");
+        assert_eq!(m.perturbations.len(), 2);
+        assert_eq!(m.perturbations[0].name, "stiffness_high");
+        assert_eq!(m.perturbations[0].asset, "springbone_stiffness_0p55.vrm");
+        assert!((m.coupling_threshold_m - 0.015).abs() < 1e-6);
+    }
+
+    #[test]
+    fn coupling_perturbation_description_is_optional() {
+        let raw = r#"
+base_plan: x.test.yaml
+baseline_asset: x.vrm
+perturbations:
+  - { name: bare, asset: y.vrm }
+coupling_threshold_m: 0.01
+"#;
+        let m: CouplingMatrix = serde_yml::from_str(raw).unwrap();
+        assert!(m.perturbations[0].description.is_none());
+    }
+}
