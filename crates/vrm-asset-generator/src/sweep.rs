@@ -315,6 +315,96 @@ pub fn spring_bone_extended_collider_sweep() -> Vec<(MToonParams, SpringBoneScen
     out
 }
 
+/// 18-variant multi-chain sweep: 3 chain counts × 2 spacings × 3 sharing modes.
+///
+/// - Chain counts: 2, 3, 5
+/// - Spacing: 0.02 m, 0.05 m (encoded in the ID; emit.rs uses a fixed 0.05 m radial
+///   spacing at emit time — see docs/findings.md phase-6 limitation note)
+/// - Sharing modes: share_all (single collider group referenced by all chains),
+///   share_none (per-chain group, each pointing at the same collider), share_alt
+///   (two groups, chains alternate between them)
+///
+/// Each variant carries one trivial sphere collider so the sharing semantics are
+/// non-vacuous (the groups reference a real collider even if it is minimal).
+pub fn spring_bone_multichain_sweep() -> Vec<(MToonParams, SpringBoneSceneParams)> {
+    let mut out = Vec::with_capacity(18);
+
+    let chain_counts: [u32; 3] = [2, 3, 5];
+    let spacings_m: [f32; 2] = [0.02, 0.05];
+    let sharing_modes = ["share_all", "share_none", "share_alt"];
+
+    for &cc in chain_counts.iter() {
+        for &sp in spacings_m.iter() {
+            for &mode in sharing_modes.iter() {
+                let sp_str = fmt_num(sp as f64);
+                let id = format!("springbone_multichain_n{cc}_sp{sp_str}_{mode}");
+                let scene = build_multichain_scene(&id, cc, mode);
+                out.push((MToonParams::defaults(&id), scene));
+            }
+        }
+    }
+    out
+}
+
+fn build_multichain_scene(id: &str, chain_count: u32, sharing_mode: &str) -> SpringBoneSceneParams {
+    let springs: Vec<SpringBoneParams> = (0..chain_count)
+        .map(|i| SpringBoneParams::defaults(format!("{id}_chain_{i}")))
+        .collect();
+
+    // One trivial sphere collider so the group-sharing axis is non-vacuous.
+    let trivial_collider = ColliderParams {
+        shape: ColliderShape::Sphere { radius: 0.01 },
+        offset: [0.0, 0.0, 0.0],
+        attach: ColliderAttach::Head,
+    };
+
+    let (collider_groups, spring_collider_groups) = match sharing_mode {
+        "share_all" => {
+            // Single group; every chain references it.
+            let groups = vec![ColliderGroupParams {
+                name: "shared".into(),
+                collider_indices: vec![0],
+            }];
+            let sgs = (0..chain_count).map(|_| vec![0_usize]).collect();
+            (groups, sgs)
+        }
+        "share_none" => {
+            // N groups, each pointed at the same single collider; one group per chain.
+            let groups = (0..chain_count)
+                .map(|i| ColliderGroupParams {
+                    name: format!("g{i}"),
+                    collider_indices: vec![0],
+                })
+                .collect();
+            let sgs = (0..chain_count).map(|i| vec![i as usize]).collect();
+            (groups, sgs)
+        }
+        "share_alt" => {
+            // 2 groups; chains alternate which group they reference.
+            let groups = vec![
+                ColliderGroupParams {
+                    name: "even".into(),
+                    collider_indices: vec![0],
+                },
+                ColliderGroupParams {
+                    name: "odd".into(),
+                    collider_indices: vec![0],
+                },
+            ];
+            let sgs = (0..chain_count).map(|i| vec![(i as usize) % 2]).collect();
+            (groups, sgs)
+        }
+        _ => unreachable!("unknown sharing mode {sharing_mode}"),
+    };
+
+    SpringBoneSceneParams {
+        springs,
+        colliders: vec![trivial_collider],
+        collider_groups,
+        spring_collider_groups,
+    }
+}
+
 #[cfg(test)]
 mod taper_sweep_tests {
     use super::*;
@@ -512,6 +602,54 @@ mod collider_sweep_tests {
                 vec![0],
                 "{id}: spring must reference group 0"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod multichain_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn multichain_sweep_produces_18_variants() {
+        // 3 chain_count × 2 spacing × 3 sharing = 18.
+        let variants = spring_bone_multichain_sweep();
+        assert_eq!(variants.len(), 18);
+    }
+
+    #[test]
+    fn multichain_sweep_each_variant_has_multiple_chains() {
+        let variants = spring_bone_multichain_sweep();
+        for (_, scene) in &variants {
+            assert!(scene.springs.len() >= 2);
+            assert!(scene.springs.len() <= 5);
+        }
+    }
+
+    #[test]
+    fn multichain_sweep_unique_ids() {
+        let variants = spring_bone_multichain_sweep();
+        let ids: std::collections::HashSet<_> =
+            variants.iter().map(|(m, _)| m.id.clone()).collect();
+        assert_eq!(ids.len(), 18);
+    }
+
+    #[test]
+    fn multichain_sweep_sharing_modes_actually_share() {
+        let variants = spring_bone_multichain_sweep();
+        // For sharing="all", every chain references the same collider_group index.
+        let all_share: Vec<_> = variants
+            .iter()
+            .filter(|(m, _)| m.id.contains("share_all"))
+            .collect();
+        for (_, scene) in all_share {
+            let first = &scene.spring_collider_groups[0];
+            for sg in &scene.spring_collider_groups {
+                assert_eq!(
+                    sg, first,
+                    "share_all variants must point all chains at the same group"
+                );
+            }
         }
     }
 }
