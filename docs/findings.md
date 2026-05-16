@@ -948,3 +948,18 @@ When `Some(v)`, `v.len() == joint_count` is required; the per-joint vector overr
 **Forward:** Phase 6 — multi-chain emission.
 
 **Forward:** Phase 5 — per-joint parameter taper (JointVec refactor).
+
+## Phase 6 — multi-chain sweep landed (36 plans)
+
+**Trigger:** Phase 5 per-joint taper merged. Phase 6 closes the multi-chain axis: prior sweeps emitted a single chain attached to the head; multi-chain assets exercise collider-group sharing semantics (`share_all`, `share_none`, `share_alt`) plus chain-count effects.
+
+**Shipped:**
+- `vrmc_spring_bone_scene_multichain` iterates N springs into a JSON array of springs; the single-chain `vrmc_spring_bone_scene` is now a thin wrapper.
+- `emit_vrm_with_spring_bone_multichain` emits N parallel chain hierarchies (each chain attaches to its own intermediate node radial-spaced at 0.05 m around head in the XZ plane). N skins, N chain cylinder meshes, one sphere mesh.
+- `pack_sphere_and_multichains` in `buffer.rs` packs a sphere + N skinned chains into a single GLB buffer with a 7-accessor-per-chain layout (pos/nrm/uv/idx/joints/weights/ibm).
+- `emit-springbone-multichain-sweep` produces 36 plans (3 chain counts × 2 spacings × 3 sharing modes × settle/swing).
+- Validator (v2.0.0-dev.3.10): 0 errors on sampled emitted files; warnings are pre-existing across the corpus (TEXCOORD_0 unused, NODE_EMPTY at chain tips, NODE_SKINNED_MESH_NON_ROOT — all identical in kind to single-chain assets).
+
+**Known limitation:** the sweep's "spacing" axis (0.02, 0.05 m encoded in IDs) currently maps to a fixed 0.05 m radial spacing at emit time. Both spacing values produce identical geometry. Resolving requires threading spacing through `SpringBoneSceneParams` → emit; deferred because the chain-count and sharing-mode axes are the load-bearing ones for VMK#162-class regressions and the spacing axis is a secondary concern.
+
+**Forward:** Phase 7 — VMK#162 regression matrix (execute-test-plan-matrix runner mode).
