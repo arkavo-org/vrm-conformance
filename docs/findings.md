@@ -960,6 +960,28 @@ Swing variants of the same plans (with `animate_root_transform` driving the chai
 
 **Forward:** run three-vrm bootstrap to add the second renderer's data, then run `scripts/consensus-report.sh` for cross-renderer SSIM analysis. The 80 signal-producing new plans will reveal whether VMK and three-vrm diverge on collider response, multi-chain physics, or gravity direction handling. The 62 null-on-VMK plans will surface as "three-vrm diverges from VMK at settle" if three-vrm applies settle collisions where VMK doesn't.
 
+## Phase 3 — three-vrm 3.5.0 rejects assets that declare VRMC_springBone_extended_collider
+
+**Trigger:** Three-vrm-only bootstrap of the 222-plan corpus. 266/302 succeeded, 36/302 failed. All 36 failures are extended_collider variants (settle + swing).
+
+**Symptom:** `load_vrm` returns `-32001 LoadFailed` for every asset that declares `VRMC_springBone_extended_collider` in `extensionsUsed`. The asset's `extensionsRequired` field correctly lists only `VRMC_vrm` (matching every other plan in the corpus), so this is not a "required extension not supported" rejection. The @pixiv/three-vrm 3.5.0 loader fails the asset.
+
+**Hypothesis:** three-vrm's `VRMSpringBoneLoaderPlugin` likely treats every collider entry as requiring a `shape` field (per VRMC_springBone-1.0 base schema), but the extended_collider spec says omit `shape` when an extended shape is set under `extensions.VRMC_springBone_extended_collider.shape`. Strict loaders that don't implement the extension's relaxation will reject the asset. Confirmed by inspection of the emitted JSON: collider entries have NO `shape` field, only `extensions.VRMC_springBone_extended_collider.shape`.
+
+**Coverage impact:** 36 plans not renderable on three-vrm 3.5.0; cross-renderer diff on extended_collider axes uses VMK + godot-vrm only (godot-vrm coverage TBD).
+
+**Upstream:** worth filing against @pixiv/three-vrm — "VRMSpringBoneLoaderPlugin rejects colliders that omit `shape` in favor of `VRMC_springBone_extended_collider.shape` (extension's recommended omission causes loader failure)".
+
+## Cross-renderer divergence: settle collisions (VMK vs three-vrm)
+
+**Trigger:** Sampling SHA256 of `springbone_default` and `springbone_collider_*` renders between VMK and three-vrm.
+
+**Finding:** VMK produces byte-identical PNGs for `springbone_default` (no colliders) and `springbone_collider_sphere_x0p05_r0p05` (a sphere collider in the chain's lateral path) at settle — confirming the VMK settle-no-collision issue. **three-vrm produces DIFFERENT SHAs for the same two assets** — confirming three-vrm DOES apply collisions during settle.
+
+This is a direct cross-renderer divergence on a load-bearing physics axis. The cross-pair SSIM on these plans will quantify the magnitude. Practical implication: any avatar with author-placed colliders is silently inconsistent between VMK and three-vrm at static rest — chains rest in different positions depending on which renderer is showing the avatar.
+
+**Forward:** quantify with `scripts/consensus-report.sh` once godot-vrm bootstrap completes. The three-renderer pair-wise SSIM matrix on the new corpus will reveal whether the divergence is two-way (VMK vs three-vrm) or three-way (and whether godot-vrm aligns with VMK on settle-no-collision or with three-vrm).
+
 ## Phase 2 — VRMC_springBone collider sweep landed (synthetic only)
 
 **Trigger:** Phase 1 infrastructure (dump_bone_positions across four adapters, position-diff math, manifest + runner integration) merged. Phase 2 of the seven-phase springbone gap closure design adds collider emission to the asset generator and 48 test plans (24 Cartesian variants × settle/swing).
