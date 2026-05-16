@@ -78,6 +78,17 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the VRMC_springBone collider sweep (48 assets = 24 Cartesian
+    /// variants × settle + swing). Each asset has one collider (sphere or
+    /// capsule) attached to the head node in the chain's path. The settle
+    /// plan uses 60-step settle; the swing plan adds animate_root_transform.
+    EmitSpringboneColliderSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -351,6 +362,96 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitSpringboneColliderSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::{
+                emit_with_sidecars_spring_bone_colliders,
+                emit_with_sidecars_spring_bone_colliders_swing,
+            };
+            use crate::sweep::spring_bone_collider_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = spring_bone_collider_sweep();
+            // Each variant emits BOTH a settle and a swing plan — 24 × 2 = 48 plans.
+            let total = variants.len() * 2;
+            let mut emitted = Vec::new();
+            let mut idx = 0;
+
+            for (mtoon, scene) in &variants {
+                // Settle variant: ID unchanged (matches the `springbone_collider_*` prefix)
+                let settle_id = mtoon.id.clone();
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-springbone-collider-sweep",
+                        "index": idx,
+                        "total": total,
+                        "id": settle_id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", idx + 1, total, settle_id);
+                }
+                let stem = output_dir.join(&settle_id);
+                // Clone mtoon with settle ID (already correct), but ensure scene's spring ID matches.
+                emit_with_sidecars_spring_bone_colliders(mtoon, scene, &stem)?;
+                emitted.push(stem);
+                idx += 1;
+
+                // Swing variant: prefix `swing_` to avoid manifest collisions.
+                let swing_id = format!("swing_{}", mtoon.id);
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-springbone-collider-sweep",
+                        "index": idx,
+                        "total": total,
+                        "id": swing_id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", idx + 1, total, swing_id);
+                }
+
+                // Build a swing-specific MToonParams with the swing_* id so the
+                // test plan's `id` field matches the filename.
+                let swing_mtoon = {
+                    let mut m = mtoon.clone();
+                    m.id = swing_id.clone();
+                    m
+                };
+                // Build a swing-specific scene so the spring name reflects the swing id.
+                let swing_scene = {
+                    let mut s = scene.clone();
+                    s.springs[0].id = swing_id.clone();
+                    s.springs[0].spring_name = format!("{swing_id}_chain");
+                    s
+                };
+                let stem = output_dir.join(&swing_id);
+                emit_with_sidecars_spring_bone_colliders_swing(&swing_mtoon, &swing_scene, &stem)?;
+                emitted.push(stem);
+                idx += 1;
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} collider spring-bone assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -479,6 +580,29 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-springbone-swing-sweep": {
                         "summary": "Swing-variant spring-bone sweep (~20 assets). Same axes as emit-springbone-sweep; every test.yaml carries an animation.root_transform block. Use a different --output-dir than emit-springbone-sweep to avoid overwriting the settle-only test.yaml files.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-springbone-collider-sweep": {
+                        "summary": "VRMC_springBone collider sweep (48 assets = 24 Cartesian variants × settle + swing). Axes: shape (sphere, capsule), offset_y (-0.08, -0.04, 0, +0.04), radius (0.03, 0.05, 0.10). Each settle plan uses 60-step settle; swing plans add animate_root_transform.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],
