@@ -162,6 +162,132 @@ pub fn spring_bone_collider_sweep() -> Vec<(MToonParams, SpringBoneSceneParams)>
     out
 }
 
+/// Build a (ColliderShape, offset) pair for the extended collider at the
+/// given shape name and placement index (0=tight, 1=medium, 2=loose).
+fn make_extended_shape_with_placement(shape_name: &str, p_idx: usize) -> (ColliderShape, [f32; 3]) {
+    match shape_name {
+        "plane" => {
+            // Plane normal stays +Y; vary the Y offset to place at different depths.
+            let offsets = [-0.04_f32, -0.08, -0.15];
+            (
+                ColliderShape::Plane {
+                    normal: [0.0, 1.0, 0.0],
+                },
+                [0.0, offsets[p_idx], 0.0],
+            )
+        }
+        "isphere" => {
+            // Inside sphere: vary radius (tight=small, loose=large).
+            let radii = [0.10_f32, 0.20, 0.40];
+            (
+                ColliderShape::InsideSphere {
+                    radius: radii[p_idx],
+                },
+                [0.0, -0.10, 0.0],
+            )
+        }
+        "icaps" => {
+            // Inside capsule: vary radius.
+            let radii = [0.10_f32, 0.20, 0.40];
+            (
+                ColliderShape::InsideCapsule {
+                    radius: radii[p_idx],
+                    tail_offset: [0.0, 0.30, 0.0],
+                },
+                [0.0, -0.10, 0.0],
+            )
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn build_extended_scene(
+    id: &str,
+    shape: ColliderShape,
+    offset: [f32; 3],
+    angle_limit: Option<f32>,
+) -> SpringBoneSceneParams {
+    let mut spring = SpringBoneParams::defaults(id);
+    spring.joint_angle_limit_deg = angle_limit;
+    let collider = ColliderParams {
+        shape,
+        offset,
+        attach: ColliderAttach::Head,
+    };
+    SpringBoneSceneParams {
+        springs: vec![spring],
+        colliders: vec![collider],
+        collider_groups: vec![ColliderGroupParams {
+            name: "ext_g".into(),
+            collider_indices: vec![0],
+        }],
+        spring_collider_groups: vec![vec![0]],
+    }
+}
+
+/// 18-variant extended collider sweep:
+/// - First 9: 3 shapes (plane, isphere, icaps) × 3 placements (tight, med, loose), no angle limit.
+/// - Second 9: 3 shapes × 3 angle limits (30°, 60°, 90°) at medium placement.
+pub fn spring_bone_extended_collider_sweep() -> Vec<(MToonParams, SpringBoneSceneParams)> {
+    let mut out = Vec::with_capacity(18);
+    let shape_names = ["plane", "isphere", "icaps"];
+    let placement_keys = ["tight", "med", "loose"];
+
+    // First 9: shape × placement, no angle limit.
+    for shape_name in shape_names.iter() {
+        for (p_idx, p_key) in placement_keys.iter().enumerate() {
+            let id = format!("springbone_extended_{shape_name}_p{p_key}");
+            let (shape, offset) = make_extended_shape_with_placement(shape_name, p_idx);
+            let scene = build_extended_scene(&id, shape, offset, None);
+            out.push((MToonParams::defaults(&id), scene));
+        }
+    }
+
+    // Second 9: shape × angle limit (30, 60, 90), medium placement.
+    for shape_name in shape_names.iter() {
+        for &deg in [30.0_f32, 60.0, 90.0].iter() {
+            let id = format!("springbone_extended_{shape_name}_anglelimit_{}", deg as i32);
+            let (shape, offset) = make_extended_shape_with_placement(shape_name, 1);
+            let scene = build_extended_scene(&id, shape, offset, Some(deg));
+            out.push((MToonParams::defaults(&id), scene));
+        }
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod extended_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn extended_sweep_produces_18_variants() {
+        // 3 shapes × 3 placements = 9 (default angle, no limit)
+        // 3 shapes × 3 angle_limits (30, 60, 90) at default placement = 9
+        // Total: 18 base variants.
+        let variants = spring_bone_extended_collider_sweep();
+        assert_eq!(variants.len(), 18);
+    }
+
+    #[test]
+    fn extended_sweep_unique_names() {
+        let variants = spring_bone_extended_collider_sweep();
+        let names: std::collections::HashSet<_> =
+            variants.iter().map(|(m, _)| m.id.clone()).collect();
+        assert_eq!(names.len(), 18);
+    }
+
+    #[test]
+    fn extended_sweep_angle_limit_variants_actually_set_the_limit() {
+        let variants = spring_bone_extended_collider_sweep();
+        let limited: Vec<_> = variants
+            .iter()
+            .filter(|(_, s)| s.springs[0].joint_angle_limit_deg.is_some())
+            .collect();
+        assert_eq!(limited.len(), 9, "9 variants should carry angle limits");
+    }
+}
+
 #[cfg(test)]
 mod collider_sweep_tests {
     use super::*;
