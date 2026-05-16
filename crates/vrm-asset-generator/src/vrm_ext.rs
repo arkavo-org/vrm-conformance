@@ -123,6 +123,31 @@ pub fn base_material(p: &MToonParams) -> Value {
 
 use crate::spring_bone::{ColliderShape, SpringBoneParams, SpringBoneSceneParams};
 
+/// Return the per-joint value from `per_joint[joint_idx]` if the vector is
+/// `Some`, otherwise return `uniform`. Panics (programmer error) when the
+/// vector length does not match `joint_count`.
+fn joint_value(
+    per_joint: &Option<Vec<f32>>,
+    uniform: f32,
+    joint_idx: usize,
+    joint_count: usize,
+    field_name: &str,
+) -> f32 {
+    if let Some(v) = per_joint {
+        assert_eq!(
+            v.len(),
+            joint_count,
+            "{}_per_joint length {} must match joint_count {}",
+            field_name,
+            v.len(),
+            joint_count
+        );
+        v[joint_idx]
+    } else {
+        uniform
+    }
+}
+
 /// Build a VRMC_springBone extension JSON object given the joint node
 /// indices (in chain order, head-to-tail) and the per-spring params.
 ///
@@ -158,16 +183,46 @@ pub fn vrmc_spring_bone_scene(
     // Phase 1: single spring (scene.springs[0]) for now.
     // Phase 6 will iterate scene.springs.
     let params = &scene.springs[0];
+    let joint_count = joint_nodes.len();
     let joints: Vec<Value> = joint_nodes
         .iter()
-        .map(|&node| {
+        .enumerate()
+        .map(|(i, &node)| {
+            let stiffness = joint_value(
+                &params.stiffness_per_joint,
+                params.stiffness,
+                i,
+                joint_count,
+                "stiffness",
+            );
+            let drag_force = joint_value(
+                &params.drag_force_per_joint,
+                params.drag_force,
+                i,
+                joint_count,
+                "drag_force",
+            );
+            let gravity_power = joint_value(
+                &params.gravity_power_per_joint,
+                params.gravity_power,
+                i,
+                joint_count,
+                "gravity_power",
+            );
+            let hit_radius = joint_value(
+                &params.hit_radius_per_joint,
+                params.hit_radius,
+                i,
+                joint_count,
+                "hit_radius",
+            );
             let mut joint = json!({
                 "node": node,
-                "hitRadius": params.hit_radius,
-                "stiffness": params.stiffness,
-                "gravityPower": params.gravity_power,
+                "hitRadius": hit_radius,
+                "stiffness": stiffness,
+                "gravityPower": gravity_power,
                 "gravityDir": params.gravity_dir,
-                "dragForce": params.drag_force,
+                "dragForce": drag_force,
             });
             if let Some(angle_limit) = params.joint_angle_limit_deg {
                 joint["extensions"] = json!({
@@ -311,6 +366,72 @@ pub fn vrmc_spring_bone_scene(
     }
 
     out
+}
+
+#[cfg(test)]
+mod taper_emit_tests {
+    use super::*;
+    use crate::spring_bone::*;
+
+    #[test]
+    fn uniform_stiffness_emits_same_value_on_all_joints() {
+        let mut p = SpringBoneParams::defaults("c");
+        p.joint_count = 4;
+        p.stiffness = 0.5;
+        let scene = SpringBoneSceneParams::single_spring(p);
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[]);
+        let joints = v["springs"][0]["joints"].as_array().unwrap();
+        for j in joints {
+            assert!((j["stiffness"].as_f64().unwrap() - 0.5).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn per_joint_stiffness_emits_taper() {
+        let mut p = SpringBoneParams::defaults("c");
+        p.joint_count = 4;
+        p.stiffness = 0.5; // ignored when per-joint set
+        p.stiffness_per_joint = Some(vec![1.0, 0.7, 0.4, 0.1]);
+        let scene = SpringBoneSceneParams::single_spring(p);
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[]);
+        let joints = v["springs"][0]["joints"].as_array().unwrap();
+        let stiffnesses: Vec<f64> = joints
+            .iter()
+            .map(|j| j["stiffness"].as_f64().unwrap())
+            .collect();
+        assert!((stiffnesses[0] - 1.0).abs() < 1e-6);
+        assert!((stiffnesses[1] - 0.7).abs() < 1e-6);
+        assert!((stiffnesses[2] - 0.4).abs() < 1e-6);
+        assert!((stiffnesses[3] - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    #[should_panic(expected = "stiffness_per_joint length")]
+    fn per_joint_length_mismatch_panics() {
+        let mut p = SpringBoneParams::defaults("c");
+        p.joint_count = 4;
+        p.stiffness_per_joint = Some(vec![1.0, 0.5]); // only 2, not 4
+        let scene = SpringBoneSceneParams::single_spring(p);
+        // This should panic at emission time — length mismatch is a programmer error.
+        vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[]);
+    }
+
+    #[test]
+    fn per_joint_drag_force_emits_taper() {
+        let mut p = SpringBoneParams::defaults("c");
+        p.joint_count = 3;
+        p.drag_force_per_joint = Some(vec![0.9, 0.5, 0.1]);
+        let scene = SpringBoneSceneParams::single_spring(p);
+        let v = vrmc_spring_bone_scene(&[0, 1, 2], &scene, &[]);
+        let drags: Vec<f64> = v["springs"][0]["joints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|j| j["dragForce"].as_f64().unwrap())
+            .collect();
+        assert!((drags[0] - 0.9).abs() < 1e-6);
+        assert!((drags[2] - 0.1).abs() < 1e-6);
+    }
 }
 
 #[cfg(test)]
