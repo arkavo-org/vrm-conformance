@@ -894,6 +894,31 @@ cd vrm-conformance
 
 For different host configurations (different macOS version, GPU, three-vrm version, VRMMetalKit revision), the numbers will shift but the pattern is expected to hold until upstream fixes for #183 and #1838 land.
 
+## Phase 2 collider corpus — VMK 0.14.0 doesn't apply collisions during settle
+
+**Trigger:** Smoke-rendering the phase 2 collider corpus through vrm-metal-kit 0.14.0 before committing to a full bootstrap.
+
+**Finding:** A `springbone_default` asset (no colliders) and a `springbone_collider_sphere_*` asset (WITH a collider sphere whose volume the chain center line penetrates) produce **byte-identical PNGs** at static settle in VMK 0.14.0. Same SHA256 across:
+- Default no-collider asset
+- 5 different on-axis collider configurations (radius 0.03/0.05/0.10, Y offsets -0.08/-0.04/0/+0.04)
+- 4 different lateral collider configurations (X offsets ±0.02/±0.05)
+
+Swing variants of the same plans (with `animate_root_transform` driving the chain through the collider's volume) DO produce different SHAs — confirming VMK's collision pipeline works during animated frames but not during the `warmupPhysics`/settle path that the runner uses for static physics tests.
+
+**Interpretation:** VMK's spring-bone settle (called via `warmupPhysics(steps:)` in our adapter's `reset_physics` handler) advances joint positions under gravity + stiffness + drag but does NOT run collision resolution against `VRMC_springBone.colliders`. Collisions are only resolved during `SpringBoneComputeSystem.update` inside the render frame, which our settle-only physics path doesn't invoke.
+
+**Sweep design adjustment:** lateral X offsets (-0.05, -0.02, +0.02, +0.05) replace the original on-axis Y offsets in `spring_bone_collider_sweep()`. Lateral offsets produce a non-zero collision-force direction, so the sweep will produce signal **once VMK applies settle collisions** (today's swing variants already produce signal because animation provides off-axis seed). The settle plans currently document static-equilibrium pose; if VMK starts running collisions during settle, the SHAs will diverge and the regression will be visible.
+
+**Phase 6 multi-chain colliders:** same fix applied. The trivial sphere collider used for `share_*` group testing was at `offset=[0,0,0]` (on-axis, degenerate). Changed to `offset=[0.03, -0.10, 0]` with radius 0.04 — lateral, in chain's vertical range, so the sharing-mode axis has actual signal as soon as VMK applies settle collisions.
+
+**Corpus interpretation as of VMK 0.14.0:**
+- **24 swing collider plans → real cross-renderer signal**
+- **24 settle collider plans → null signal on VMK (until upstream fix), but assets + methodology are correct and become useful when VMK changes**
+
+**Upstream:** worth filing as a VMK enhancement issue — "apply VRMC_springBone collisions during warmupPhysics" — once verified the same behavior exists in current main. Suggested issue title: "warmupPhysics doesn't resolve VRMC_springBone collisions; deflection only happens during animated render frames".
+
+**Forward:** continue with bootstrap; the swing portion of the corpus will produce cross-renderer divergence as designed. The settle portion stands as documentation of expected static behavior across renderers.
+
 ## Phase 2 — VRMC_springBone collider sweep landed (synthetic only)
 
 **Trigger:** Phase 1 infrastructure (dump_bone_positions across four adapters, position-diff math, manifest + runner integration) merged. Phase 2 of the seven-phase springbone gap closure design adds collider emission to the asset generator and 48 test plans (24 Cartesian variants × settle/swing).

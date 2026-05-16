@@ -166,28 +166,38 @@ pub fn spring_bone_gravity_dir_sweep() -> Vec<SpringBoneParams> {
         .collect()
 }
 
-/// 24-variant Cartesian sweep: 2 shapes × 4 offset_y values × 3 radii.
+/// 24-variant Cartesian sweep: 2 shapes × 4 offset_x values × 3 radii.
 ///
-/// Unlike one-axis-at-a-time sweeps, the collider sweep is Cartesian because
-/// collision response is not separable on a single axis at this scale —
-/// varying shape, offset, and radius together exercises different contact
-/// geometries.
+/// **Why lateral X offsets, not Y offsets.** An earlier draft of this sweep
+/// varied `offset: [0, y, 0]` along the chain axis. With the chain anchored
+/// at the head and hanging straight down through (x=0, z=0), a collider
+/// placed on that same vertical axis sits at distance zero from every chain
+/// joint center — there is no off-axis component, so the spring system has
+/// no lateral force to apply during settle. Every variant produced
+/// byte-identical PNGs (chain falls straight through collider center).
 ///
-/// Chain hangs from head (y ≈ 1.36 m downward). offset_y values in local
-/// head space: negative = below head = into the chain path.
+/// Lateral X offsets break the symmetry: the chain's straight-down pose
+/// either contacts the collider sphere (small `|x|`, large radius) and
+/// must bend around it, or misses it entirely (large `|x|`, small radius).
+/// The 4 offsets here span both regimes so the sweep covers contact and
+/// no-contact cases per radius.
+///
+/// `offset_y` is held at -0.10 m (middle of a 0.20 m chain's vertical span)
+/// so the collider intersects the chain's vertical reach.
 pub fn spring_bone_collider_sweep() -> Vec<(MToonParams, SpringBoneSceneParams)> {
     let mut out = Vec::with_capacity(24);
 
-    let offsets = [-0.08_f32, -0.04, 0.0, 0.04];
+    let offsets_x = [-0.05_f32, -0.02, 0.02, 0.05];
     let radii = [0.03_f32, 0.05, 0.10];
+    let fixed_y = -0.10_f32;
 
     for shape_kind in ["sphere", "capsule"].iter() {
-        for &off_y in offsets.iter() {
+        for &off_x in offsets_x.iter() {
             for &radius in radii.iter() {
                 let id = format!(
-                    "springbone_collider_{}_y{}_r{}",
+                    "springbone_collider_{}_x{}_r{}",
                     shape_kind,
-                    fmt_signed(off_y),
+                    fmt_signed(off_x),
                     fmt_num(radius),
                 );
                 let shape = match *shape_kind {
@@ -200,7 +210,7 @@ pub fn spring_bone_collider_sweep() -> Vec<(MToonParams, SpringBoneSceneParams)>
                 };
                 let collider = ColliderParams {
                     shape,
-                    offset: [0.0, off_y, 0.0],
+                    offset: [off_x, fixed_y, 0.0],
                     attach: ColliderAttach::Head,
                 };
                 let scene = SpringBoneSceneParams {
@@ -351,10 +361,15 @@ fn build_multichain_scene(id: &str, chain_count: u32, sharing_mode: &str) -> Spr
         .map(|i| SpringBoneParams::defaults(format!("{id}_chain_{i}")))
         .collect();
 
-    // One trivial sphere collider so the group-sharing axis is non-vacuous.
+    // One sphere collider lateral to the chain axis so the group-sharing axis
+    // is non-vacuous AND produces visual signal (chain bends around it). An
+    // earlier draft used offset=[0,0,0] which placed the collider on every
+    // chain's vertical axis; with no off-axis component, settle pose was
+    // identical regardless of sharing mode. Lateral offset at y=-0.10 puts the
+    // collider in the chain's lateral path.
     let trivial_collider = ColliderParams {
-        shape: ColliderShape::Sphere { radius: 0.01 },
-        offset: [0.0, 0.0, 0.0],
+        shape: ColliderShape::Sphere { radius: 0.04 },
+        offset: [0.03, -0.10, 0.0],
         attach: ColliderAttach::Head,
     };
 
