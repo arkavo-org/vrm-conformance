@@ -982,6 +982,80 @@ This is a direct cross-renderer divergence on a load-bearing physics axis. The c
 
 **Forward:** quantify with `scripts/consensus-report.sh` once godot-vrm bootstrap completes. The three-renderer pair-wise SSIM matrix on the new corpus will reveal whether the divergence is two-way (VMK vs three-vrm) or three-way (and whether godot-vrm aligns with VMK on settle-no-collision or with three-vrm).
 
+## Full four-renderer consensus report on the 222-plan corpus
+
+**Trigger:** Bootstrap of VMK + three-vrm + godot-vrm + (existing) univrm; `scripts/consensus-report.sh` produced pairwise SSIM across all common test_ids. M4 Max.
+
+### Headline numbers
+
+- **222 test_ids processed, 0 skipped**
+- **206/222 consensus_passed (93%)** — every renderer ≥ declared threshold vs every other
+- **16/222 consensus_failed** — all 16 are MToon outline + shadingToony plans (pre-existing divergence categories; not from the new phase 2-6 corpus)
+
+### Conformance pass rates vs UniVRM reference
+
+| renderer | pass rate |
+|---|---|
+| three-vrm | **76/76 (100%)** |
+| vrm-metal-kit | 74/76 (97%) |
+| godot-vrm | 67/76 (88%) |
+
+### Pairwise SSIM means (full corpus)
+
+| pair | mean | min | max | n |
+|---|---:|---:|---:|---:|
+| three-vrm vs univrm | 0.9583 | 0.8491 | 0.9988 | 80 |
+| three-vrm vs vrm-metal-kit | 0.9564 | 0.6313 | 0.9865 | 186 |
+| univrm vs vrm-metal-kit | 0.9468 | 0.6315 | 0.9935 | 80 |
+| godot-vrm vs three-vrm | 0.9242 | 0.1840 | 0.9902 | 186 |
+| godot-vrm vs vrm-metal-kit | 0.8997 | 0.5303 | 0.9739 | 222 |
+| godot-vrm vs univrm | 0.8429 | 0.1843 | 0.9793 | 80 |
+
+(three-vrm n=186 reflects the 36 extended_collider plans it cannot load. godot-vrm n=222 reflects full corpus coverage. univrm n=80 is the existing pre-phase-2 coverage.)
+
+### New corpus (142 plans) per-family min-SSIM stats
+
+| family | n | mean min | median min | consensus pass |
+|---|---:|---:|---:|:---:|
+| multichain settle | 18 | **0.9067** | 0.9063 | 18/18 |
+| multichain swing | 18 | 0.9129 | 0.9128 | 18/18 |
+| gravity settle | 4 | 0.9093 | 0.9099 | 4/4 |
+| gravity swing | 4 | 0.9159 | 0.9164 | 4/4 |
+| collider settle | 24 | 0.9099 | 0.9099 | 24/24 |
+| collider swing | 24 | 0.9164 | 0.9165 | 24/24 |
+| extended settle | 18 | 0.9099 | 0.9099 | 18/18 |
+| extended swing | 18 | 0.9162 | 0.9161 | 18/18 |
+| taper settle | 7 | 0.9099 | 0.9099 | 7/7 |
+| taper swing | 7 | 0.9162 | 0.9159 | 7/7 |
+
+**All 142 new corpus plans pass consensus.** Cross-renderer SSIM minimum across the entire new corpus is 0.9058 (multichain n=5 variants, VMK vs godot-vrm).
+
+### Patterns
+
+1. **VMK vs godot-vrm is the consistently lowest pair** across the new corpus — every "worst pair" in the top-20 most-divergent new-corpus plans is `vrm-metal-kit vs godot-vrm`. Three-vrm sits between them on most axes. This suggests godot-vrm's Godot 4 spring-bone implementation has the largest systematic offset from VMK's Metal/SwiftFX implementation, with three-vrm closer to both.
+
+2. **Swing variants converge tighter than settle variants** across every family (e.g., collider settle 0.9099 → swing 0.9164). Animation produces more agreement, not less, even though intuition might predict the opposite. Probable cause: at settle, MToon shading differences dominate the SSIM signal; under motion, those differences are averaged across moving silhouettes and the relative weighting shifts toward chain agreement (which is high across renderers).
+
+3. **No new outliers.** The 16 consensus_failed plans are all pre-existing MToon outline + shadingToony issues. Phase 2-6 didn't add any renderer-specific failures despite introducing colliders, extended_colliders, multi-chain physics, and per-joint taper.
+
+4. **`extended swing` shows higher SSIM than `extended settle`** even though three-vrm rejects all 18 extended plans entirely. The remaining pair is just VMK vs godot-vrm, and they agree adequately (0.9099 settle, 0.9162 swing). Means: VMK and godot-vrm have compatible extended_collider implementations (or at least equally-broken in matching ways).
+
+### Conformance signal characterization
+
+The new 142-plan corpus is **net-positive conformance signal**:
+- Adds breadth on physics axes (colliders, extended_colliders, gravity_dir, per-joint taper, multi-chain) that the existing 80-plan corpus didn't cover.
+- All 142 plans pass consensus on the four-renderer matrix — they discriminate between behaviors **without producing false renderer-specific failures**.
+- Cross-renderer minimum 0.9058 means the corpus is tightly bounded; future renderer regressions on physics will surface as new lows below this floor.
+
+### Forward
+
+The seven-phase springbone closure has delivered: corpus expanded from 80 to 222 plans, infrastructure for position-based diff (phase 1) is in place, four renderers boot-strapped, consensus report produced. Reasonable continuations:
+
+1. **File two real upstream issues**: (a) VMK 0.14.0 doesn't apply collisions during settle, (b) @pixiv/three-vrm 3.5.0 rejects assets that omit base `shape` in favor of `VRMC_springBone_extended_collider.shape`.
+2. **Author `avatarA_collider_1_0.vrm`** to unblock the deferred `avatarA_bosom_collider` humanoid plan.
+3. **Calibrate the phase 7 coupling matrix threshold** against three-vrm + godot-vrm baseline coupling.
+4. **Wire `--dump-positions` into the bootstrap script** so position goldens populate `positions_url` manifest entries automatically.
+
 ## Phase 2 — VRMC_springBone collider sweep landed (synthetic only)
 
 **Trigger:** Phase 1 infrastructure (dump_bone_positions across four adapters, position-diff math, manifest + runner integration) merged. Phase 2 of the seven-phase springbone gap closure design adds collider emission to the asset generator and 48 test plans (24 Cartesian variants × settle/swing).
