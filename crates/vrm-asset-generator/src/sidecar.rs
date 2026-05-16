@@ -2,6 +2,7 @@
 //! same `MToonParams` that produced the `.vrm`.
 
 use crate::params::MToonParams;
+use crate::spring_bone::SpringBoneSceneParams;
 use anyhow::Result;
 use camino::Utf8Path;
 use serde_json::json;
@@ -163,6 +164,44 @@ pub fn build_spring_bone_swing_test_plan(params: &MToonParams, asset_relpath: &s
     plan
 }
 
+/// Settle variant for collider tests: same framing as `build_spring_bone_test_plan`
+/// but uses `settle_steps: 60` — collider tests converge slower under contact.
+///
+/// The `_scene` parameter is accepted for API consistency (future multi-chain
+/// collider variants may need to customize the plan based on scene shape);
+/// currently unused.
+pub fn build_spring_bone_collider_test_plan(
+    params: &MToonParams,
+    _scene: &SpringBoneSceneParams,
+    asset_relpath: &str,
+) -> TestPlan {
+    let mut plan = build_default_test_plan(params, asset_relpath);
+    plan.physics = Some(PhysicsConfig { settle_steps: 60 });
+    plan.spec_section = "VRMC_springBone + colliders".into();
+    plan
+}
+
+/// Swing variant for collider tests. Same animation block as the existing
+/// `build_spring_bone_swing_test_plan` but with 60-step settle (matching the
+/// settle variant) and the collider spec_section label.
+pub fn build_spring_bone_collider_swing_test_plan(
+    params: &MToonParams,
+    _scene: &SpringBoneSceneParams,
+    asset_relpath: &str,
+) -> TestPlan {
+    let mut plan = build_spring_bone_collider_test_plan(params, _scene, asset_relpath);
+    plan.animation = Some(AnimationConfig {
+        root_transform: Some(RootTransformAnimation {
+            translation_start: [0.0, 0.0, 0.0],
+            translation_end: [0.15, 0.0, 0.0],
+            duration_seconds: 0.25,
+            fps: 60,
+        }),
+    });
+    plan.spec_section = "VRMC_springBone + colliders (swing)".into();
+    plan
+}
+
 fn default_properties(_params: &MToonParams) -> Vec<PropertyAssertion> {
     // v0.1 default: one general-purpose lower-quad average-luminance check.
     // Test-specific assertions get added per parameter combination later.
@@ -178,4 +217,48 @@ pub fn write_test_yaml(plan: &TestPlan, out: &Utf8Path) -> Result<()> {
     let yaml = serde_yml::to_string(plan)?;
     std::fs::write(out, yaml)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod collider_plan_tests {
+    use super::*;
+    use crate::spring_bone::*;
+
+    #[test]
+    fn collider_plan_settle_has_60_settle_steps() {
+        let mtoon = MToonParams::defaults("test_collider_settle");
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("test")],
+            colliders: vec![],
+            collider_groups: vec![],
+            spring_collider_groups: vec![vec![]],
+        };
+        let plan = build_spring_bone_collider_test_plan(&mtoon, &scene, "out.vrm");
+        let physics = plan.physics.expect("plan must carry physics config");
+        assert_eq!(
+            physics.settle_steps, 60,
+            "collider tests use 60-step settle (slower convergence under contact)"
+        );
+        assert!(
+            plan.animation.is_none(),
+            "settle plan has no animation block"
+        );
+    }
+
+    #[test]
+    fn collider_plan_swing_carries_animation_block() {
+        let mtoon = MToonParams::defaults("test_collider_swing");
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("test")],
+            colliders: vec![],
+            collider_groups: vec![],
+            spring_collider_groups: vec![vec![]],
+        };
+        let plan = build_spring_bone_collider_swing_test_plan(&mtoon, &scene, "out.vrm");
+        assert!(plan.animation.is_some());
+        let anim = plan.animation.unwrap();
+        let root = anim.root_transform.unwrap();
+        assert!((root.duration_seconds - 0.25).abs() < 1e-6);
+        assert_eq!(root.fps, 60);
+    }
 }
