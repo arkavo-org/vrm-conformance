@@ -44,6 +44,24 @@ pub struct SpringBoneParams {
     /// for our sweep, the value is held constant across the chain).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joint_angle_limit_deg: Option<f32>,
+
+    /// Per-joint stiffness taper (optional). When `Some(v)`, `v.len()` must
+    /// equal `joint_count` and each joint emits `v[i]`; otherwise all joints
+    /// emit the scalar `stiffness`. `None` serializes as absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stiffness_per_joint: Option<Vec<f32>>,
+
+    /// Per-joint drag-force taper (optional). Same semantics as `stiffness_per_joint`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drag_force_per_joint: Option<Vec<f32>>,
+
+    /// Per-joint gravity_power taper (optional). Same semantics as `stiffness_per_joint`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gravity_power_per_joint: Option<Vec<f32>>,
+
+    /// Per-joint hit_radius taper (optional). Same semantics as `stiffness_per_joint`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_radius_per_joint: Option<Vec<f32>>,
 }
 
 impl SpringBoneParams {
@@ -63,6 +81,10 @@ impl SpringBoneParams {
             gravity_dir: [0.0, -1.0, 0.0],
             hit_radius: 0.02,
             joint_angle_limit_deg: None,
+            stiffness_per_joint: None,
+            drag_force_per_joint: None,
+            gravity_power_per_joint: None,
+            hit_radius_per_joint: None,
         }
     }
 }
@@ -163,6 +185,40 @@ impl SpringBoneSceneParams {
             collider_groups: Vec::new(),
             spring_collider_groups: vec![Vec::new()],
         }
+    }
+}
+
+#[cfg(test)]
+mod per_joint_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_leave_per_joint_vectors_none() {
+        let p = SpringBoneParams::defaults("t");
+        assert!(p.stiffness_per_joint.is_none());
+        assert!(p.drag_force_per_joint.is_none());
+        assert!(p.gravity_power_per_joint.is_none());
+        assert!(p.hit_radius_per_joint.is_none());
+    }
+
+    #[test]
+    fn serialized_json_omits_none_per_joint_fields() {
+        let p = SpringBoneParams::defaults("t");
+        let v = serde_json::to_value(&p).unwrap();
+        assert!(v.get("stiffness_per_joint").is_none());
+        assert!(v.get("drag_force_per_joint").is_none());
+        assert!(v.get("gravity_power_per_joint").is_none());
+        assert!(v.get("hit_radius_per_joint").is_none());
+    }
+
+    #[test]
+    fn per_joint_taper_roundtrips() {
+        let mut p = SpringBoneParams::defaults("t");
+        p.joint_count = 4;
+        p.stiffness_per_joint = Some(vec![1.0, 0.8, 0.4, 0.1]);
+        let s = serde_json::to_string(&p).unwrap();
+        let back: SpringBoneParams = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.stiffness_per_joint, Some(vec![1.0, 0.8, 0.4, 0.1]));
     }
 }
 
