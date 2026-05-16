@@ -161,14 +161,22 @@ pub fn vrmc_spring_bone_scene(
     let joints: Vec<Value> = joint_nodes
         .iter()
         .map(|&node| {
-            json!({
+            let mut joint = json!({
                 "node": node,
                 "hitRadius": params.hit_radius,
                 "stiffness": params.stiffness,
                 "gravityPower": params.gravity_power,
                 "gravityDir": params.gravity_dir,
                 "dragForce": params.drag_force,
-            })
+            });
+            if let Some(angle_limit) = params.joint_angle_limit_deg {
+                joint["extensions"] = json!({
+                    "VRMC_springBone_extended_collider": {
+                        "angleLimit": angle_limit
+                    }
+                });
+            }
+            joint
         })
         .collect();
 
@@ -197,28 +205,92 @@ pub fn vrmc_spring_bone_scene(
             .iter()
             .zip(collider_attach_nodes.iter())
             .map(|(c, &node)| {
-                let shape = match &c.shape {
-                    ColliderShape::Sphere { radius } => json!({
-                        "sphere": {
-                            "offset": c.offset,
-                            "radius": radius,
-                        }
-                    }),
+                match &c.shape {
+                    ColliderShape::Sphere { radius } => {
+                        let shape = json!({
+                            "sphere": {
+                                "offset": c.offset,
+                                "radius": radius,
+                            }
+                        });
+                        json!({
+                            "node": node,
+                            "shape": shape,
+                        })
+                    }
                     ColliderShape::Capsule {
                         radius,
                         tail_offset,
-                    } => json!({
-                        "capsule": {
-                            "offset": c.offset,
-                            "radius": radius,
-                            "tail": tail_offset,
-                        }
-                    }),
-                };
-                json!({
-                    "node": node,
-                    "shape": shape,
-                })
+                    } => {
+                        let shape = json!({
+                            "capsule": {
+                                "offset": c.offset,
+                                "radius": radius,
+                                "tail": tail_offset,
+                            }
+                        });
+                        json!({
+                            "node": node,
+                            "shape": shape,
+                        })
+                    }
+                    // Extended shapes: omit base `shape` field; emit under
+                    // extensions.VRMC_springBone_extended_collider.shape
+                    ColliderShape::Plane { normal } => {
+                        let ext_shape = json!({
+                            "plane": {
+                                "offset": c.offset,
+                                "normal": normal,
+                            }
+                        });
+                        json!({
+                            "node": node,
+                            "extensions": {
+                                "VRMC_springBone_extended_collider": {
+                                    "shape": ext_shape
+                                }
+                            }
+                        })
+                    }
+                    ColliderShape::InsideSphere { radius } => {
+                        let ext_shape = json!({
+                            "sphere": {
+                                "offset": c.offset,
+                                "radius": radius,
+                                "inside": true,
+                            }
+                        });
+                        json!({
+                            "node": node,
+                            "extensions": {
+                                "VRMC_springBone_extended_collider": {
+                                    "shape": ext_shape
+                                }
+                            }
+                        })
+                    }
+                    ColliderShape::InsideCapsule {
+                        radius,
+                        tail_offset,
+                    } => {
+                        let ext_shape = json!({
+                            "capsule": {
+                                "offset": c.offset,
+                                "radius": radius,
+                                "tail": tail_offset,
+                                "inside": true,
+                            }
+                        });
+                        json!({
+                            "node": node,
+                            "extensions": {
+                                "VRMC_springBone_extended_collider": {
+                                    "shape": ext_shape
+                                }
+                            }
+                        })
+                    }
+                }
             })
             .collect();
         out["colliders"] = json!(colliders);
@@ -324,5 +396,121 @@ mod collider_emission_tests {
         let cap = &shape["capsule"];
         let tail = cap["tail"].as_array().unwrap();
         assert!((tail[1].as_f64().unwrap() - (-0.08)).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod extended_emit_tests {
+    use super::*;
+    use crate::spring_bone::*;
+
+    #[test]
+    fn plane_collider_emits_extension_shape() {
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("c")],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Plane {
+                    normal: [0.0, 1.0, 0.0],
+                },
+                offset: [0.0, -0.10, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "g".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[10]);
+        let c0 = &v["colliders"][0];
+        // Base shape MUST be omitted when extended is used:
+        assert!(
+            c0.get("shape").is_none()
+                || c0["shape"]
+                    .as_object()
+                    .map(|o| o.is_empty())
+                    .unwrap_or(false),
+            "base shape must be omitted when using extended shape, got {c0}"
+        );
+        let ext = &c0["extensions"]["VRMC_springBone_extended_collider"]["shape"];
+        assert!(
+            ext["plane"].is_object(),
+            "expected plane extended shape: {c0}"
+        );
+        let normal = ext["plane"]["normal"].as_array().unwrap();
+        assert!((normal[1].as_f64().unwrap() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn inside_sphere_emits_extension_shape() {
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("c")],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::InsideSphere { radius: 0.20 },
+                offset: [0.0, 0.0, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "g".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[10]);
+        let ext = &v["colliders"][0]["extensions"]["VRMC_springBone_extended_collider"]["shape"];
+        assert!(ext["sphere"].is_object());
+        assert_eq!(ext["sphere"]["inside"], true);
+        assert!((ext["sphere"]["radius"].as_f64().unwrap() - 0.20).abs() < 1e-6);
+    }
+
+    #[test]
+    fn inside_capsule_emits_inside_true() {
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("c")],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::InsideCapsule {
+                    radius: 0.10,
+                    tail_offset: [0.0, 0.30, 0.0],
+                },
+                offset: [0.0, 0.0, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "g".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[10]);
+        let ext = &v["colliders"][0]["extensions"]["VRMC_springBone_extended_collider"]["shape"];
+        assert!(ext["capsule"].is_object());
+        assert_eq!(ext["capsule"]["inside"], true);
+    }
+
+    #[test]
+    fn joint_angle_limit_emits_under_extension() {
+        let mut spring = SpringBoneParams::defaults("c");
+        spring.joint_angle_limit_deg = Some(60.0);
+        let scene = SpringBoneSceneParams::single_spring(spring);
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[]);
+        let joints = v["springs"][0]["joints"].as_array().unwrap();
+        for j in joints {
+            let limit = &j["extensions"]["VRMC_springBone_extended_collider"]["angleLimit"];
+            assert!(
+                (limit.as_f64().unwrap() - 60.0).abs() < 1e-6,
+                "expected angleLimit=60 on every joint, got {j}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_angle_limit_does_not_emit_extension_on_joints() {
+        let scene = SpringBoneSceneParams::single_spring(SpringBoneParams::defaults("c"));
+        let v = vrmc_spring_bone_scene(&[0, 1, 2, 3], &scene, &[]);
+        let j0 = &v["springs"][0]["joints"][0];
+        assert!(
+            j0.get("extensions").is_none() || j0["extensions"].as_object().unwrap().is_empty(),
+            "joint with no angle limit must not carry extensions block, got {j0}"
+        );
     }
 }
