@@ -107,6 +107,43 @@ fn fmt_signed(v: f32) -> String {
     }
 }
 
+/// 7-variant per-joint taper sweep: 4 stiffness shapes + 3 drag shapes.
+/// All variants use joint_count=4 and set exactly one per-joint vector so
+/// regression regressions are unconfounded on the taper axis.
+pub fn spring_bone_taper_sweep() -> Vec<SpringBoneParams> {
+    let mut out = Vec::with_capacity(7);
+    let n: u32 = 4; // joint_count used throughout this sweep
+
+    // Stiffness tapers (4 shapes):
+    let stiffness_shapes: [(&str, Vec<f32>); 4] = [
+        ("stiffness_flat", vec![0.5, 0.5, 0.5, 0.5]),
+        ("stiffness_high_to_low", vec![1.0, 0.7, 0.4, 0.1]),
+        ("stiffness_low_to_high", vec![0.1, 0.4, 0.7, 1.0]),
+        ("stiffness_expdecay", vec![1.0, 0.5, 0.25, 0.125]),
+    ];
+    for (suffix, vec) in stiffness_shapes {
+        let mut p = SpringBoneParams::defaults(format!("springbone_taper_{suffix}"));
+        p.joint_count = n;
+        p.stiffness_per_joint = Some(vec);
+        out.push(p);
+    }
+
+    // Drag tapers (3 shapes — flat omitted since it would duplicate the stiffness_flat baseline):
+    let drag_shapes: [(&str, Vec<f32>); 3] = [
+        ("drag_flat", vec![0.5, 0.5, 0.5, 0.5]),
+        ("drag_high_to_low", vec![1.0, 0.7, 0.4, 0.1]),
+        ("drag_expdecay", vec![1.0, 0.5, 0.25, 0.125]),
+    ];
+    for (suffix, vec) in drag_shapes {
+        let mut p = SpringBoneParams::defaults(format!("springbone_taper_{suffix}"));
+        p.joint_count = n;
+        p.drag_force_per_joint = Some(vec);
+        out.push(p);
+    }
+
+    out
+}
+
 /// 4-variant one-axis sweep over `gravity_dir`, holding all other
 /// `SpringBoneParams` at defaults. Directions: -Y (default), +Y (anti-gravity),
 /// +X (sideways), and a 45° oblique (+0.7, -0.7, 0). Each variant changes only
@@ -276,6 +313,64 @@ pub fn spring_bone_extended_collider_sweep() -> Vec<(MToonParams, SpringBoneScen
     }
 
     out
+}
+
+#[cfg(test)]
+mod taper_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn taper_sweep_produces_7_variants() {
+        // 4 stiffness shapes + 3 drag shapes = 7.
+        let variants = spring_bone_taper_sweep();
+        assert_eq!(variants.len(), 7);
+    }
+
+    #[test]
+    fn taper_sweep_each_variant_has_a_per_joint_vector_set() {
+        let variants = spring_bone_taper_sweep();
+        for p in &variants {
+            let has_per_joint = p.stiffness_per_joint.is_some()
+                || p.drag_force_per_joint.is_some()
+                || p.gravity_power_per_joint.is_some()
+                || p.hit_radius_per_joint.is_some();
+            assert!(
+                has_per_joint,
+                "{}: must have at least one per-joint vector",
+                p.id
+            );
+        }
+    }
+
+    #[test]
+    fn taper_sweep_vector_lengths_match_joint_count() {
+        let variants = spring_bone_taper_sweep();
+        for p in &variants {
+            if let Some(v) = &p.stiffness_per_joint {
+                assert_eq!(
+                    v.len() as u32,
+                    p.joint_count,
+                    "{}: stiffness vector len mismatch",
+                    p.id
+                );
+            }
+            if let Some(v) = &p.drag_force_per_joint {
+                assert_eq!(
+                    v.len() as u32,
+                    p.joint_count,
+                    "{}: drag vector len mismatch",
+                    p.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn taper_sweep_unique_ids() {
+        let variants = spring_bone_taper_sweep();
+        let ids: std::collections::HashSet<_> = variants.iter().map(|p| p.id.clone()).collect();
+        assert_eq!(ids.len(), 7);
+    }
 }
 
 #[cfg(test)]
