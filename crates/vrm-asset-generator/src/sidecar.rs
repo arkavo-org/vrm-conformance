@@ -238,6 +238,40 @@ pub fn build_spring_bone_extended_swing_test_plan(
     plan
 }
 
+/// Settle variant for multi-chain tests. Uses 60-step settle (same as collider
+/// tests — multi-chain scenes may include colliders). Spec section names both
+/// spring-bone and the multi-chain axis.
+pub fn build_spring_bone_multichain_test_plan(
+    params: &MToonParams,
+    _scene: &SpringBoneSceneParams,
+    asset_relpath: &str,
+) -> vrm_test_plan::TestPlan {
+    let mut plan = build_default_test_plan(params, asset_relpath);
+    plan.physics = Some(vrm_test_plan::PhysicsConfig { settle_steps: 60 });
+    plan.spec_section = "VRMC_springBone multi-chain".into();
+    plan
+}
+
+/// Swing variant for multi-chain tests. Adds animate_root_transform so chains
+/// are captured mid-swing rather than at gravity equilibrium.
+pub fn build_spring_bone_multichain_swing_test_plan(
+    params: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    asset_relpath: &str,
+) -> vrm_test_plan::TestPlan {
+    let mut plan = build_spring_bone_multichain_test_plan(params, scene, asset_relpath);
+    plan.animation = Some(vrm_test_plan::AnimationConfig {
+        root_transform: Some(vrm_test_plan::RootTransformAnimation {
+            translation_start: [0.0, 0.0, 0.0],
+            translation_end: [0.15, 0.0, 0.0],
+            duration_seconds: 0.25,
+            fps: 60,
+        }),
+    });
+    plan.spec_section = "VRMC_springBone multi-chain (swing)".into();
+    plan
+}
+
 fn default_properties(_params: &MToonParams) -> Vec<PropertyAssertion> {
     // v0.1 default: one general-purpose lower-quad average-luminance check.
     // Test-specific assertions get added per parameter combination later.

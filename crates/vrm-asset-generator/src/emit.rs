@@ -1,7 +1,7 @@
 //! Top-level VRM 1.0 asset emission. Combines mesh, buffer, humanoid stub,
 //! and VRM extensions into a single `.vrm` GLB on disk.
 
-use crate::buffer::pack_mesh;
+use crate::buffer::{pack_mesh, pack_sphere_and_multichains};
 use crate::glb::{write_glb, GlbDocument};
 use crate::humanoid::minimal_skeleton;
 use crate::mesh::sphere;
@@ -668,6 +668,370 @@ pub fn emit_with_sidecars_spring_bone_extended_swing(
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
+}
+
+/// Emit a `.vrm` GLB with N parallel spring-bone chains.
+///
+/// Each chain gets its own intermediate node radially spaced around the head bone
+/// (angles 0°, 360°/N, 2·360°/N, …, in the XZ plane at a fixed radial distance of
+/// 0.05 m from the head axis). Each chain hangs straight down from its intermediate
+/// node and is skinned by its own cylinder mesh.
+///
+/// Structure:
+/// - 1 sphere mesh (head-mounted, parented to head — the MToon reference shape)
+/// - N chain cylinder meshes (each skinned to its chain's joints)
+/// - N skins (one per chain)
+/// - VRMC_springBone extension with N springs entries
+pub fn emit_vrm_with_spring_bone_multichain(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    output: &Utf8Path,
+) -> Result<()> {
+    let n_chains = scene.springs.len();
+    assert!(n_chains >= 1, "multichain emit needs at least 1 chain");
+
+    let mesh = sphere(0.3, 24, 48);
+
+    let mut skeleton = crate::humanoid::minimal_skeleton();
+    let head_node = skeleton.bone_to_node["head"];
+    let head_world = crate::humanoid::rest_pose_world_position("head");
+    let head_world_y = head_world[1];
+
+    // Radial spacing: chains are placed at radius CHAIN_RADIAL_M from the head axis.
+    // For n_chains=1 this puts the single chain at angle 0 (same as the single-chain emit).
+    const CHAIN_RADIAL_M: f32 = 0.05;
+
+    let mut chain_joint_nodes: Vec<Vec<usize>> = Vec::with_capacity(n_chains);
+    let mut chain_meshes: Vec<crate::chain_mesh::SkinnedMeshData> = Vec::with_capacity(n_chains);
+    let mut inv_binds: Vec<Vec<[f32; 16]>> = Vec::with_capacity(n_chains);
+
+    for (c_idx, spring_params) in scene.springs.iter().enumerate() {
+        // Radial angle for this chain.
+        let angle = (c_idx as f32) * 2.0 * std::f32::consts::PI / (n_chains as f32);
+        let (sin_a, cos_a) = angle.sin_cos();
+        let rx = CHAIN_RADIAL_M * sin_a;
+        let rz = CHAIN_RADIAL_M * cos_a;
+
+        // Intermediate node: child of head, offset radially so each chain hangs
+        // from a distinct XZ position.
+        let nodes = skeleton.nodes_json.as_array_mut().unwrap();
+        let inter_idx = nodes.len();
+        nodes.push(json!({
+            "name": format!("{}_chain{}_inter", mtoon.id, c_idx),
+            "translation": [rx, 0.0, rz],
+        }));
+        // Wire intermediate under head.
+        let head_ref = nodes.get_mut(head_node).unwrap();
+        let mut hc = head_ref["children"].as_array().cloned().unwrap_or_default();
+        hc.push(json!(inter_idx));
+        head_ref["children"] = Value::Array(hc);
+
+        // Append chain joints as children of the intermediate node.
+        let chain_nodes = crate::humanoid::append_spring_chain(
+            &mut skeleton,
+            inter_idx,
+            spring_params.joint_count,
+            spring_params.segment_length_m,
+        );
+
+        // Chain cylinder: top_world_y is the intermediate node's world Y (same as head)
+        // since the intermediate node has translation (rx, 0, rz) relative to head.
+        let chain_top_y = head_world_y - spring_params.segment_length_m;
+        let chain_mesh = crate::chain_mesh::build_chain_cylinder(
+            spring_params.joint_count,
+            spring_params.segment_length_m,
+            0.025,
+            chain_top_y,
+            12,
+        );
+
+        // Inverse-bind matrices for this chain's joints.
+        let ibm: Vec<[f32; 16]> = (0..spring_params.joint_count)
+            .map(|i| {
+                let jy = head_world_y - ((i + 1) as f32) * spring_params.segment_length_m;
+                #[rustfmt::skip]
+                let m = [
+                    1.0, 0.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0, 0.0,
+                    0.0, 0.0, 1.0, 0.0,
+                    0.0, -jy, 0.0, 1.0,
+                ];
+                m
+            })
+            .collect();
+
+        chain_joint_nodes.push(chain_nodes);
+        chain_meshes.push(chain_mesh);
+        inv_binds.push(ibm);
+    }
+
+    // Pack all geometry into a single buffer.
+    let chains_for_pack: Vec<(&crate::chain_mesh::SkinnedMeshData, &[[f32; 16]])> = chain_meshes
+        .iter()
+        .zip(inv_binds.iter())
+        .map(|(cm, ibm)| (cm, ibm.as_slice()))
+        .collect();
+    let packed = pack_sphere_and_multichains(&mesh, &chains_for_pack);
+
+    let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
+
+    // Sphere mesh node: child of head.
+    let sphere_mesh_node = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_mesh", mtoon.id),
+        "mesh": 0
+    }));
+    let head_ref = &mut nodes[head_node];
+    let mut hc = head_ref["children"].as_array().cloned().unwrap_or_default();
+    hc.push(json!(sphere_mesh_node));
+    head_ref["children"] = Value::Array(hc);
+
+    // Chain mesh nodes: child of hips (so scene stays single-rooted).
+    // Mesh index 1..=N, skin index 0..N-1.
+    let mut chain_mesh_nodes: Vec<usize> = Vec::with_capacity(n_chains);
+    for c_idx in 0..n_chains {
+        let chain_mesh_node = nodes.len();
+        nodes.push(json!({
+            "name": format!("{}_chain{}_mesh", mtoon.id, c_idx),
+            "mesh": 1 + c_idx,
+            "skin": c_idx
+        }));
+        let hips_ref = &mut nodes[skeleton.root_node];
+        let mut hips_children = hips_ref["children"].as_array().cloned().unwrap_or_default();
+        hips_children.push(json!(chain_mesh_node));
+        hips_ref["children"] = Value::Array(hips_children);
+        chain_mesh_nodes.push(chain_mesh_node);
+    }
+
+    // Resolve collider attach nodes.
+    let mut collider_attach_nodes: Vec<usize> = Vec::with_capacity(scene.colliders.len());
+    for collider in &scene.colliders {
+        match &collider.attach {
+            ColliderAttach::Head => {
+                collider_attach_nodes.push(head_node);
+            }
+            ColliderAttach::NewIntermediateNode { y_offset, z_offset } => {
+                let new_node_idx = nodes.len();
+                nodes.push(json!({
+                    "name": format!("{}_collider_node_{}", mtoon.id, new_node_idx),
+                    "translation": [0.0, y_offset, z_offset],
+                }));
+                let head_ref = &mut nodes[head_node];
+                let mut hc = head_ref["children"].as_array().cloned().unwrap_or_default();
+                hc.push(json!(new_node_idx));
+                head_ref["children"] = Value::Array(hc);
+                collider_attach_nodes.push(new_node_idx);
+            }
+        }
+    }
+
+    // extensionsUsed.
+    let mut extensions_used = vec![
+        "KHR_materials_unlit",
+        "VRMC_vrm",
+        "VRMC_materials_mtoon",
+        "VRMC_springBone",
+    ];
+    if scene_uses_extended_collider(scene) {
+        extensions_used.push("VRMC_springBone_extended_collider");
+    }
+
+    // Meshes: sphere (index 0) + N chain cylinders (index 1..N).
+    // Accessor base for chain i: 4 + i*7.
+    let mut meshes: Vec<Value> = vec![json!({
+        "name": format!("{}_geom", mtoon.id),
+        "primitives": [{
+            "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 },
+            "indices": 3,
+            "material": 0,
+            "mode": 4
+        }]
+    })];
+    for c_idx in 0..n_chains {
+        let base = 4 + c_idx * 7;
+        meshes.push(json!({
+            "name": format!("{}_chain{}_geom", mtoon.id, c_idx),
+            "primitives": [{
+                "attributes": {
+                    "POSITION": base,
+                    "NORMAL": base + 1,
+                    "TEXCOORD_0": base + 2,
+                    "JOINTS_0": base + 4,
+                    "WEIGHTS_0": base + 5
+                },
+                "indices": base + 3,
+                "material": 0,
+                "mode": 4
+            }]
+        }));
+    }
+
+    // Skins: one per chain.  inverseBindMatrices accessor index = 4 + i*7 + 6.
+    let skins: Vec<Value> = (0..n_chains)
+        .map(|c_idx| {
+            let ibm_acc = 4 + c_idx * 7 + 6;
+            json!({
+                "joints": chain_joint_nodes[c_idx],
+                "inverseBindMatrices": ibm_acc,
+                "skeleton": chain_joint_nodes[c_idx][0]
+            })
+        })
+        .collect();
+
+    // VRMC_vrm firstPerson: annotate sphere + all chain mesh nodes.
+    let mut all_mesh_nodes: Vec<Value> = vec![json!({ "node": sphere_mesh_node, "type": "both" })];
+    for &cmn in &chain_mesh_nodes {
+        all_mesh_nodes.push(json!({ "node": cmn, "type": "both" }));
+    }
+    let mut vrm_ext = vrmc_vrm(&mtoon.id, &skeleton.bone_to_node, sphere_mesh_node);
+    vrm_ext["firstPerson"]["meshAnnotations"] = Value::Array(all_mesh_nodes);
+
+    let mut doc = json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
+        },
+        "extensionsUsed": extensions_used,
+        "extensionsRequired": ["VRMC_vrm"],
+        "scene": 0,
+        "scenes": [{ "nodes": [skeleton.root_node] }],
+        "nodes": nodes,
+        "meshes": meshes,
+        "skins": skins,
+        "materials": [base_material(mtoon)],
+        "extensions": {
+            "VRMC_vrm": vrm_ext,
+            "VRMC_springBone": crate::vrm_ext::vrmc_spring_bone_scene_multichain(
+                &chain_joint_nodes,
+                scene,
+                &collider_attach_nodes,
+            ),
+        }
+    });
+
+    for key in ["buffers", "bufferViews", "accessors"] {
+        doc[key] = packed.json[key].clone();
+    }
+
+    let json_bytes = serde_json::to_vec(&doc)?;
+    let glb = write_glb(&GlbDocument {
+        json: json_bytes,
+        binary: packed.binary,
+    })?;
+
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(output, glb)?;
+    Ok(())
+}
+
+/// Emits `<stem>.vrm` (MToon + multi-chain spring-bone), `<stem>.meta.json`,
+/// and `<stem>.test.yaml` (settle variant).
+pub fn emit_with_sidecars_spring_bone_multichain(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_multichain(mtoon, scene, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    let spring_bone = &scene.springs[0];
+    write_meta_json(mtoon, Some(spring_bone), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan = crate::sidecar::build_spring_bone_multichain_test_plan(mtoon, scene, &asset_relpath);
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// Same as `emit_with_sidecars_spring_bone_multichain` but the test plan
+/// carries an `animation.root_transform` block (swing variant).
+pub fn emit_with_sidecars_spring_bone_multichain_swing(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_multichain(mtoon, scene, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    let spring_bone = &scene.springs[0];
+    write_meta_json(mtoon, Some(spring_bone), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan =
+        crate::sidecar::build_spring_bone_multichain_swing_test_plan(mtoon, scene, &asset_relpath);
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod multichain_emit_integration_tests {
+    use super::*;
+    use crate::params::MToonParams;
+    use crate::spring_bone::*;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    #[test]
+    fn emit_three_chain_scene_produces_three_springs_in_glb_json() {
+        let mtoon = MToonParams::defaults("multichain_test");
+        let scene = SpringBoneSceneParams {
+            springs: vec![
+                SpringBoneParams::defaults("chain_a"),
+                SpringBoneParams::defaults("chain_b"),
+                SpringBoneParams::defaults("chain_c"),
+            ],
+            colliders: vec![],
+            collider_groups: vec![],
+            spring_collider_groups: vec![vec![], vec![], vec![]],
+        };
+        let tmp = tempdir().unwrap();
+        let vrm_path = Utf8Path::from_path(tmp.path()).unwrap().join("out.vrm");
+        emit_vrm_with_spring_bone_multichain(&mtoon, &scene, &vrm_path).unwrap();
+        let bytes = std::fs::read(&vrm_path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        let springs = &doc["extensions"]["VRMC_springBone"]["springs"];
+        assert_eq!(springs.as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn emit_two_chain_scene_produces_two_skins() {
+        let mtoon = MToonParams::defaults("mc2_test");
+        let scene = SpringBoneSceneParams {
+            springs: vec![
+                SpringBoneParams::defaults("ca"),
+                SpringBoneParams::defaults("cb"),
+            ],
+            colliders: vec![],
+            collider_groups: vec![],
+            spring_collider_groups: vec![vec![], vec![]],
+        };
+        let tmp = tempdir().unwrap();
+        let vrm_path = Utf8Path::from_path(tmp.path()).unwrap().join("out.vrm");
+        emit_vrm_with_spring_bone_multichain(&mtoon, &scene, &vrm_path).unwrap();
+        let bytes = std::fs::read(&vrm_path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        let skins = doc["skins"].as_array().unwrap();
+        assert_eq!(skins.len(), 2, "one skin per chain");
+        // Sphere mesh + N chain meshes = N+1 meshes.
+        let meshes = doc["meshes"].as_array().unwrap();
+        assert_eq!(meshes.len(), 3, "sphere + 2 chain meshes");
+    }
 }
 
 #[cfg(test)]

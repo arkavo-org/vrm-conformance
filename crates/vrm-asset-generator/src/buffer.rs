@@ -255,6 +255,125 @@ pub fn pack_sphere_and_chain(
     PackedMesh { binary: bin, json }
 }
 
+/// Pack a sphere mesh plus N chain cylinders (each with its own inverse-bind matrices)
+/// into a single binary buffer + JSON fragment.
+///
+/// Accessor layout:
+/// - 0..3: sphere (pos/nrm/uv/idx)
+/// - For each chain i: accessors `4 + i*7` through `4 + i*7 + 5` are chain i data
+///   (pos/nrm/uv/idx/joints/weights), accessor `4 + i*7 + 6` is the inverse-bind matrices.
+///
+/// This generalisation of `pack_sphere_and_chain` supports N>1 chains for
+/// the multi-chain emit path (phase 6).
+pub fn pack_sphere_and_multichains(
+    sphere: &MeshData,
+    chains: &[(&SkinnedMeshData, &[[f32; 16]])],
+) -> PackedMesh {
+    let mut bin: Vec<u8> = Vec::new();
+
+    // ----- sphere -----
+    let (s_pos_off, s_pos_len) = write_vec3_array(&mut bin, &sphere.positions);
+    align_to(&mut bin, 4);
+    let (s_nrm_off, s_nrm_len) = write_vec3_array(&mut bin, &sphere.normals);
+    align_to(&mut bin, 4);
+    let (s_uv_off, s_uv_len) = write_vec2_array(&mut bin, &sphere.uvs);
+    align_to(&mut bin, 4);
+    let (s_idx_off, s_idx_len) = write_u32_array(&mut bin, &sphere.indices);
+    align_to(&mut bin, 4);
+
+    // Per-chain data: (pos, nrm, uv, idx, joints, weights, ibm)
+    struct ChainOffsets {
+        pos: (usize, usize),
+        nrm: (usize, usize),
+        uv: (usize, usize),
+        idx: (usize, usize),
+        jnt: (usize, usize),
+        wgt: (usize, usize),
+        ibm: (usize, usize),
+    }
+
+    let mut chain_offsets: Vec<ChainOffsets> = Vec::with_capacity(chains.len());
+    for (chain, ibm) in chains {
+        let pos = write_vec3_array(&mut bin, &chain.positions);
+        align_to(&mut bin, 4);
+        let nrm = write_vec3_array(&mut bin, &chain.normals);
+        align_to(&mut bin, 4);
+        let uv = write_vec2_array(&mut bin, &chain.uvs);
+        align_to(&mut bin, 4);
+        let idx = write_u32_array(&mut bin, &chain.indices);
+        align_to(&mut bin, 4);
+        let jnt = write_u16_vec4_array(&mut bin, &chain.joints);
+        align_to(&mut bin, 4);
+        let wgt = write_f32_vec4_array(&mut bin, &chain.weights);
+        align_to(&mut bin, 4);
+        let ibm_data = write_mat4_array(&mut bin, ibm);
+        align_to(&mut bin, 4);
+        chain_offsets.push(ChainOffsets {
+            pos,
+            nrm,
+            uv,
+            idx,
+            jnt,
+            wgt,
+            ibm: ibm_data,
+        });
+    }
+
+    let (s_pos_min, s_pos_max) = min_max_vec3(&sphere.positions);
+
+    // Build buffer views: sphere (4) + per-chain 7 each.
+    let mut buffer_views: Vec<Value> = vec![
+        json!({ "buffer": 0, "byteOffset": s_pos_off, "byteLength": s_pos_len, "target": TARGET_ARRAY_BUFFER }),
+        json!({ "buffer": 0, "byteOffset": s_nrm_off, "byteLength": s_nrm_len, "target": TARGET_ARRAY_BUFFER }),
+        json!({ "buffer": 0, "byteOffset": s_uv_off,  "byteLength": s_uv_len,  "target": TARGET_ARRAY_BUFFER }),
+        json!({ "buffer": 0, "byteOffset": s_idx_off, "byteLength": s_idx_len, "target": TARGET_ELEMENT_ARRAY_BUFFER }),
+    ];
+
+    let mut accessors: Vec<Value> = vec![
+        json!({
+            "bufferView": 0, "componentType": GL_FLOAT,
+            "count": sphere.positions.len(), "type": "VEC3",
+            "min": s_pos_min, "max": s_pos_max
+        }),
+        json!({ "bufferView": 1, "componentType": GL_FLOAT, "count": sphere.normals.len(), "type": "VEC3" }),
+        json!({ "bufferView": 2, "componentType": GL_FLOAT, "count": sphere.uvs.len(), "type": "VEC2" }),
+        json!({ "bufferView": 3, "componentType": GL_UNSIGNED_INT, "count": sphere.indices.len(), "type": "SCALAR" }),
+    ];
+
+    for (ci, (co, (chain, _ibm))) in chain_offsets.iter().zip(chains.iter()).enumerate() {
+        let bv_base = buffer_views.len();
+        let (c_pos_min, c_pos_max) = min_max_vec3(&chain.positions);
+        buffer_views.push(json!({ "buffer": 0, "byteOffset": co.pos.0, "byteLength": co.pos.1, "target": TARGET_ARRAY_BUFFER }));
+        buffer_views.push(json!({ "buffer": 0, "byteOffset": co.nrm.0, "byteLength": co.nrm.1, "target": TARGET_ARRAY_BUFFER }));
+        buffer_views.push(json!({ "buffer": 0, "byteOffset": co.uv.0,  "byteLength": co.uv.1,  "target": TARGET_ARRAY_BUFFER }));
+        buffer_views.push(json!({ "buffer": 0, "byteOffset": co.idx.0, "byteLength": co.idx.1, "target": TARGET_ELEMENT_ARRAY_BUFFER }));
+        buffer_views.push(json!({ "buffer": 0, "byteOffset": co.jnt.0, "byteLength": co.jnt.1, "target": TARGET_ARRAY_BUFFER }));
+        buffer_views.push(json!({ "buffer": 0, "byteOffset": co.wgt.0, "byteLength": co.wgt.1, "target": TARGET_ARRAY_BUFFER }));
+        buffer_views.push(json!({ "buffer": 0, "byteOffset": co.ibm.0, "byteLength": co.ibm.1 }));
+
+        let _ = ci; // Used only for debug labelling if needed.
+        accessors.push(json!({
+            "bufferView": bv_base, "componentType": GL_FLOAT,
+            "count": chain.positions.len(), "type": "VEC3",
+            "min": c_pos_min, "max": c_pos_max
+        }));
+        accessors.push(json!({ "bufferView": bv_base + 1, "componentType": GL_FLOAT, "count": chain.normals.len(), "type": "VEC3" }));
+        accessors.push(json!({ "bufferView": bv_base + 2, "componentType": GL_FLOAT, "count": chain.uvs.len(), "type": "VEC2" }));
+        accessors.push(json!({ "bufferView": bv_base + 3, "componentType": GL_UNSIGNED_INT, "count": chain.indices.len(), "type": "SCALAR" }));
+        accessors.push(json!({ "bufferView": bv_base + 4, "componentType": GL_UNSIGNED_SHORT, "count": chain.joints.len(), "type": "VEC4" }));
+        accessors.push(json!({ "bufferView": bv_base + 5, "componentType": GL_FLOAT, "count": chain.weights.len(), "type": "VEC4" }));
+        accessors.push(json!({ "bufferView": bv_base + 6, "componentType": GL_FLOAT, "count": _ibm.len(), "type": "MAT4" }));
+    }
+
+    let json = json!({
+        "buffers": [{ "byteLength": bin.len() }],
+        "bufferViews": buffer_views,
+        "accessors": accessors,
+    });
+
+    PackedMesh { binary: bin, json }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
