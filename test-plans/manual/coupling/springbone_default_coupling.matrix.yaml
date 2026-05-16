@@ -1,0 +1,43 @@
+# Phase 7 VMK#162 coupling regression matrix.
+#
+# Prerequisite: populate the perturbation assets first:
+#   cargo run -p vrm-asset-generator --release -- emit-springbone-sweep \
+#       --output-dir assets/generated/sweep
+#
+# Run the matrix against the mock renderer:
+#   cargo run -p vrm-runner --release -- execute-test-plan-matrix \
+#       --matrix test-plans/manual/coupling/springbone_default_coupling.matrix.yaml \
+#       --adapter-bin target/release/vrm-mock-renderer \
+#       --asset-dir assets/generated/sweep \
+#       --output-dir /tmp/phase7-matrix-out \
+#       --renderer-name mock \
+#       --json
+#
+# The perturbations use the full sweep range (not ±10%) because that is what
+# emit-springbone-sweep emits.  The coupling_threshold_m of 0.015 is an opening
+# guess; calibrate it by running the matrix on well-behaved renderers (three-vrm,
+# godot-vrm) and tuning the threshold above their max coupling drift but below
+# VMK's reported coupling magnitude.
+
+base_plan: ../../../assets/generated/sweep/springbone_default.test.yaml
+baseline_asset: springbone_default.vrm
+perturbations:
+  - name: stiffness_high
+    asset: springbone_stiffness_0p8.vrm
+    description: stiffness baseline 0.5 → 0.8 (+60% relative)
+  - name: stiffness_low
+    asset: springbone_stiffness_0p2.vrm
+    description: stiffness baseline 0.5 → 0.2 (-60% relative)
+  - name: drag_high
+    asset: springbone_drag_0p8.vrm
+    description: drag baseline 0.5 → 0.8
+  - name: drag_low
+    asset: springbone_drag_0p2.vrm
+    description: drag baseline 0.5 → 0.2
+  - name: gravity_high
+    asset: springbone_gravity_2.vrm
+    description: gravity_power baseline 0.5 → 2.0
+  - name: gravity_low
+    asset: springbone_gravity_0.vrm
+    description: gravity_power baseline 0.5 → 0.0
+coupling_threshold_m: 0.015
