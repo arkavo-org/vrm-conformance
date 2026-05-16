@@ -1,7 +1,8 @@
 use crate::execute::{execute_plan, load_plan, ExecuteOptions};
+use crate::execute_matrix::{execute_matrix, load_matrix, ExecuteMatrixOptions};
 use anyhow::Result;
 use camino::Utf8PathBuf;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use serde_json::json;
 
 #[derive(Debug, Parser)]
@@ -113,6 +114,26 @@ pub enum Cmd {
         #[arg(long, default_value = "univrm")]
         renderer_name: String,
         /// Emit JSON summary to stdout.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Execute a coupling matrix: render a baseline + N parameter-perturbed
+    /// variants of the same plan, capture bone positions for each, and compute
+    /// per-joint position-delta vectors to detect VMK#162-style coupling
+    /// regressions.
+    ExecuteTestPlanMatrix {
+        #[arg(long, value_name = "PATH")]
+        matrix: Utf8PathBuf,
+        #[arg(long, value_name = "PATH")]
+        adapter_bin: Utf8PathBuf,
+        #[arg(long, value_name = "ARG", action = ArgAction::Append, default_value = None)]
+        adapter_args: Vec<String>,
+        #[arg(long, value_name = "DIR")]
+        asset_dir: Utf8PathBuf,
+        #[arg(long, value_name = "DIR")]
+        output_dir: Utf8PathBuf,
+        #[arg(long, value_name = "NAME")]
+        renderer_name: String,
         #[arg(long)]
         json: bool,
     },
@@ -423,6 +444,64 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::ExecuteTestPlanMatrix {
+            matrix: matrix_path,
+            adapter_bin,
+            adapter_args,
+            asset_dir,
+            output_dir,
+            renderer_name,
+            json: emit_json,
+        } => {
+            let matrix = load_matrix(&matrix_path)?;
+            let opts = ExecuteMatrixOptions {
+                adapter_bin,
+                adapter_args,
+                asset_dir,
+                output_dir,
+                renderer_name,
+                emit_progress_ndjson: emit_json,
+            };
+            let result = execute_matrix(&matrix, &matrix_path, &opts)?;
+            let passed = result.passed();
+            let outliers = result.outliers();
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "matrix_path": matrix_path.as_str(),
+                    "baseline_plan": result.baseline_plan,
+                    "coupling_threshold_m": result.coupling_threshold_m,
+                    "outcomes": result.outcomes,
+                    "outliers": outliers,
+                    "overall_passed": passed,
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "matrix {matrix_path}: {} perturbation(s), threshold={:.4}m",
+                    result.outcomes.len(),
+                    result.coupling_threshold_m,
+                );
+                for o in &result.outcomes {
+                    println!(
+                        "  {}: max_drift={:.4}m ({})",
+                        o.name,
+                        o.max_drift_m,
+                        if o.max_drift_m <= result.coupling_threshold_m {
+                            "PASS"
+                        } else {
+                            "FAIL"
+                        }
+                    );
+                }
+                println!("  overall: {}", if passed { "PASS" } else { "FAIL" });
+                if !outliers.is_empty() {
+                    println!("  coupling outliers: {outliers:?}");
+                }
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-runner",
@@ -588,6 +667,71 @@ pub fn run(cli: Cli) -> Result<()> {
                                     "type": "string",
                                     "description": "path to local-manifest.json"
                                 }
+                            }
+                        }
+                    },
+                    "execute-test-plan-matrix": {
+                        "summary": "Render a baseline + N parameter-perturbed VRM variants through the same test plan, capturing bone positions for each, then compute per-joint position-delta vectors to detect VMK#162-style parameter-coupling regressions.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["matrix", "adapter_bin", "asset_dir", "output_dir", "renderer_name"],
+                            "properties": {
+                                "matrix": {
+                                    "type": "string",
+                                    "description": "path to a CouplingMatrix YAML file (base_plan + baseline_asset + perturbations + coupling_threshold_m)"
+                                },
+                                "adapter_bin": { "type": "string" },
+                                "adapter_args": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "extra arguments forwarded to the adapter binary"
+                                },
+                                "asset_dir": {
+                                    "type": "string",
+                                    "description": "directory containing the baseline and perturbation VRM files"
+                                },
+                                "output_dir": {
+                                    "type": "string",
+                                    "description": "directory for rendered PNGs (one per variant)"
+                                },
+                                "renderer_name": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "emit structured JSON to stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "matrix_path": { "type": "string" },
+                                "baseline_plan": { "type": "string" },
+                                "coupling_threshold_m": { "type": "number" },
+                                "outcomes": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": { "type": "string" },
+                                            "per_joint_drifts_m": {
+                                                "type": "array",
+                                                "items": { "type": "number" },
+                                                "description": "per-joint Euclidean distance (metres) between baseline and perturbation positions"
+                                            },
+                                            "max_drift_m": {
+                                                "type": "number",
+                                                "description": "max of per_joint_drifts_m; compared against coupling_threshold_m to pass/fail"
+                                            }
+                                        }
+                                    }
+                                },
+                                "outliers": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "names of perturbations whose max_drift_m exceeded coupling_threshold_m"
+                                },
+                                "overall_passed": { "type": "boolean" }
                             }
                         }
                     }
