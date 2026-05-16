@@ -919,6 +919,47 @@ Swing variants of the same plans (with `animate_root_transform` driving the chai
 
 **Forward:** continue with bootstrap; the swing portion of the corpus will produce cross-renderer divergence as designed. The settle portion stands as documentation of expected static behavior across renderers.
 
+## Phase 2-6 corpus signal characterization (VMK-only bootstrap, M4 Max)
+
+**Trigger:** VMK-only bootstrap of the full 222-plan corpus (80 existing + 142 new phase 2-6 plans). 302 renders, 0 failures. Comparing SHA256 of rendered PNGs within each sweep family answers "does this sweep actually exercise the axis it claims to?"
+
+**Per-family signal table (distinct SHA256s / total plans):**
+
+| sweep | mode | plans | distinct | signal |
+|---|---|---:|---:|---:|
+| collider | settle | 24 | 1 | **4%** — null (VMK settle-no-collision; see prior finding) |
+| collider | swing | 24 | 15 | **62%** ✓ |
+| extended_collider | settle | 18 | 1 | **6%** — null (same root cause) |
+| extended_collider | swing | 18 | 7 | **39%** — partial (inverted shapes may be degenerate; investigate) |
+| gravity_dir | settle | 4 | 3 | **75%** ✓ |
+| gravity_dir | swing | 4 | 4 | **100%** ✓ |
+| per-joint taper | settle | 7 | 1 | **14%** — null by design (steady-state pose invariant to transient response params) |
+| per-joint taper | swing | 7 | 5 | **71%** ✓ |
+| multi-chain | settle | 18 | 3 | **17%** — only `chain_count` axis (2/3/5) produces distinct settled layout; `spacing` and `sharing_mode` axes are vacuous on VMK static settle |
+| multi-chain | swing | 18 | 14 | **78%** ✓ |
+
+**What this tells us:**
+
+1. **Animation-driven plans (swing) produce signal across nearly every axis.** Adapter divergence on chain-vs-collider deflection, per-joint taper response under inertia, and multi-chain interaction will all surface during the swing portion of any cross-renderer bootstrap.
+
+2. **Static settle plans only produce signal on axes that affect equilibrium pose**, NOT axes that affect transient response. So:
+   - `gravity_dir` (changes equilibrium pose direction) → signal at settle ✓
+   - `multi-chain chain_count` (changes layout geometry) → signal at settle ✓
+   - `stiffness` / `drag` / `per-joint taper` (transient response only) → null at settle (correct physics)
+   - `collider` / `extended_collider` (would change equilibrium pose if applied) → null at settle (VMK bug; documented separately)
+
+3. **`extended_collider` swing at 39% is below expectations.** Sphere-and-capsule swing was 62%; the extended shapes (planes, inverted spheres, inverted capsules) cluster more tightly. Either:
+   - The chain doesn't actually contact the extended shapes during the swing arc (geometry mismatch — sweep placements may be off),
+   - VMK's extended_collider implementation has gaps,
+   - The angle-limit variants (3/9) cluster because the limit isn't being applied.
+   Worth follow-up. Track as a phase-3 corpus-tightening item.
+
+4. **The settle/swing pairing always differs** (sample of 6 pairs, all distinct). So every settle plan has a swing variant that produces different pixels — the swing version is a useful additional data point even when the settle version is null.
+
+**Corpus health summary:** ~80 of the 142 new plans currently produce real cross-renderer signal on VMK 0.14.0 (essentially: all swing plans + the gravity_dir and multi-chain settle plans). The remaining ~62 plans document expected static behavior and become useful when VMK starts applying settle collisions (or when other renderers diverge from VMK on static behavior).
+
+**Forward:** run three-vrm bootstrap to add the second renderer's data, then run `scripts/consensus-report.sh` for cross-renderer SSIM analysis. The 80 signal-producing new plans will reveal whether VMK and three-vrm diverge on collider response, multi-chain physics, or gravity direction handling. The 62 null-on-VMK plans will surface as "three-vrm diverges from VMK at settle" if three-vrm applies settle collisions where VMK doesn't.
+
 ## Phase 2 — VRMC_springBone collider sweep landed (synthetic only)
 
 **Trigger:** Phase 1 infrastructure (dump_bone_positions across four adapters, position-diff math, manifest + runner integration) merged. Phase 2 of the seven-phase springbone gap closure design adds collider emission to the asset generator and 48 test plans (24 Cartesian variants × settle/swing).
