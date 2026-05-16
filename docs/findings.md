@@ -931,4 +931,20 @@ For different host configurations (different macOS version, GPU, three-vrm versi
 
 **Shipped:** `emit-springbone-gravity-dir-sweep` subcommand emitting 8 plans (4 directions × settle/swing): default (-Y), anti (+Y), sideways (+X), oblique (+0.7, -0.7, 0). All other SpringBoneParams (joint_count, stiffness, drag, gravity_power) held at defaults so the gravity-direction axis is unconfounded.
 
+## Phase 5 — per-joint taper sweep landed (14 plans)
+
+**Trigger:** Phase 4 gravityDir sweep merged. Phase 5 closes the per-joint variation axis: real hair tapers stiffness toward the tip; uniform scalars hide adapter-level discretization bugs that only manifest on non-uniform chains.
+
+**Shipped:** Four optional per-joint vectors on `SpringBoneParams`:
+- `stiffness_per_joint: Option<Vec<f32>>`
+- `drag_force_per_joint: Option<Vec<f32>>`
+- `gravity_power_per_joint: Option<Vec<f32>>`
+- `hit_radius_per_joint: Option<Vec<f32>>`
+
+When `Some(v)`, `v.len() == joint_count` is required; the per-joint vector overrides the scalar. `emit-springbone-taper-sweep` produces 14 plans (4 stiffness shapes + 3 drag shapes × settle/swing).
+
+**Deliberate architecture deviation:** the spec proposed a `JointVec<T>` enum (`Uniform | PerJoint`). The optional-parallel-field shape is additively cheaper and avoids churn through existing callers — equivalent expressiveness for this phase's needs. Revisit if phase 6 multi-chain forces a bigger API refactor.
+
+**Forward:** Phase 6 — multi-chain emission.
+
 **Forward:** Phase 5 — per-joint parameter taper (JointVec refactor).
