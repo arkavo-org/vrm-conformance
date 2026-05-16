@@ -101,6 +101,17 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the gravity_dir sweep (8 assets = 4 directions × settle + swing).
+    /// Directions: default (-Y), anti (+Y), sideways (+X), oblique (+0.7, -0.7, 0).
+    /// All other SpringBoneParams held at defaults so the gravity-direction axis
+    /// is unconfounded. Flushes adapters that hard-code gravity_dir = [0,-1,0].
+    EmitSpringboneGravityDirSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -550,6 +561,84 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitSpringboneGravityDirSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::{
+                emit_with_sidecars_spring_bone, emit_with_sidecars_spring_bone_swing,
+            };
+            use crate::sweep::spring_bone_gravity_dir_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = spring_bone_gravity_dir_sweep();
+            // Each variant emits BOTH a settle and a swing plan — 4 × 2 = 8 plans.
+            let total = variants.len() * 2;
+            let mut emitted = Vec::new();
+            let mut idx = 0;
+
+            for spring in &variants {
+                // Settle variant: ID unchanged (matches the `springbone_gravity_dir_*` prefix)
+                let settle_id = spring.id.clone();
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-springbone-gravity-dir-sweep",
+                        "index": idx,
+                        "total": total,
+                        "id": settle_id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", idx + 1, total, settle_id);
+                }
+                let stem = output_dir.join(&settle_id);
+                let mtoon = MToonParams::defaults(&settle_id);
+                emit_with_sidecars_spring_bone(&mtoon, spring, &stem)?;
+                emitted.push(stem);
+                idx += 1;
+
+                // Swing variant: prefix `swing_` to avoid manifest collisions.
+                let swing_id = format!("swing_{}", spring.id);
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-springbone-gravity-dir-sweep",
+                        "index": idx,
+                        "total": total,
+                        "id": swing_id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", idx + 1, total, swing_id);
+                }
+                let mut prefixed = spring.clone();
+                prefixed.id = swing_id.clone();
+                prefixed.spring_name = format!("{swing_id}_chain");
+                let stem = output_dir.join(&swing_id);
+                let swing_mtoon = MToonParams::defaults(&swing_id);
+                emit_with_sidecars_spring_bone_swing(&swing_mtoon, &prefixed, &stem)?;
+                emitted.push(stem);
+                idx += 1;
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} gravity-dir spring-bone assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -724,6 +813,29 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-springbone-extended-sweep": {
                         "summary": "VRMC_springBone_extended_collider sweep (36 assets = 18 variants × settle + swing). Variants: 3 shapes (plane, inside-sphere, inside-capsule) × 3 placements + 3 shapes × 3 angle-limits (30°, 60°, 90°) = 18 base. Each plan uses 60-step settle; swing plans add animate_root_transform.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-springbone-gravity-dir-sweep": {
+                        "summary": "gravity_dir 4-direction sweep (8 assets = 4 directions × settle + swing). Directions: default (-Y), anti (+Y), sideways (+X), oblique (+0.7, -0.7, 0). All other SpringBoneParams held at defaults. Flushes adapters that hard-code gravity_dir = [0,-1,0].",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],

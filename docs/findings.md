@@ -924,3 +924,11 @@ For different host configurations (different macOS version, GPU, three-vrm versi
 **Adapter coverage:** the extension is conformance-tested via cross-renderer diff in subsequent corpus runs. Adapters that don't support it should diff loudly. Known status: three-vrm and VRMMetalKit may have partial support (VMK#67 is the open angle-limit verification ticket); godot-vrm coverage depends on V-Sekai/godot-vrm's spec_extended state.
 
 **Forward:** Phase 4 adds gravityDir variation.
+
+## Phase 4 — gravityDir sweep landed (8 plans)
+
+**Trigger:** Phase 3 extended-collider sweep merged. Phase 4 closes the gravity-direction axis: prior sweeps held `gravity_dir = [0,-1,0]` constant, so any adapter hard-coding -Y would pass cross-renderer diff silently.
+
+**Shipped:** `emit-springbone-gravity-dir-sweep` subcommand emitting 8 plans (4 directions × settle/swing): default (-Y), anti (+Y), sideways (+X), oblique (+0.7, -0.7, 0). All other SpringBoneParams (joint_count, stiffness, drag, gravity_power) held at defaults so the gravity-direction axis is unconfounded.
+
+**Forward:** Phase 5 — per-joint parameter taper (JointVec refactor).

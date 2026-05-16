@@ -107,6 +107,28 @@ fn fmt_signed(v: f32) -> String {
     }
 }
 
+/// 4-variant one-axis sweep over `gravity_dir`, holding all other
+/// `SpringBoneParams` at defaults. Directions: -Y (default), +Y (anti-gravity),
+/// +X (sideways), and a 45° oblique (+0.7, -0.7, 0). Each variant changes only
+/// the gravity direction so adapter regressions on this axis are unconfounded.
+pub fn spring_bone_gravity_dir_sweep() -> Vec<SpringBoneParams> {
+    let directions = [
+        ("default", [0.0_f32, -1.0, 0.0]),
+        ("anti", [0.0, 1.0, 0.0]),
+        ("sideways", [1.0, 0.0, 0.0]),
+        ("oblique", [0.7, -0.7, 0.0]),
+    ];
+
+    directions
+        .iter()
+        .map(|(name, dir)| {
+            let mut p = SpringBoneParams::defaults(format!("springbone_gravity_dir_{name}"));
+            p.gravity_dir = *dir;
+            p
+        })
+        .collect()
+}
+
 /// 24-variant Cartesian sweep: 2 shapes × 4 offset_y values × 3 radii.
 ///
 /// Unlike one-axis-at-a-time sweeps, the collider sweep is Cartesian because
@@ -285,6 +307,66 @@ mod extended_sweep_tests {
             .filter(|(_, s)| s.springs[0].joint_angle_limit_deg.is_some())
             .collect();
         assert_eq!(limited.len(), 9, "9 variants should carry angle limits");
+    }
+}
+
+#[cfg(test)]
+mod gravity_dir_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn gravity_dir_sweep_produces_4_variants() {
+        let variants = spring_bone_gravity_dir_sweep();
+        assert_eq!(variants.len(), 4);
+    }
+
+    #[test]
+    fn gravity_dir_sweep_covers_4_distinct_directions() {
+        let variants = spring_bone_gravity_dir_sweep();
+        let dirs: std::collections::HashSet<[i32; 3]> = variants
+            .iter()
+            .map(|p| {
+                let g = p.gravity_dir;
+                // Multiply by 10 to compare with tolerance via integer hashing.
+                [
+                    (g[0] * 10.0) as i32,
+                    (g[1] * 10.0) as i32,
+                    (g[2] * 10.0) as i32,
+                ]
+            })
+            .collect();
+        assert_eq!(dirs.len(), 4, "all four directions must be distinct");
+    }
+
+    #[test]
+    fn gravity_dir_sweep_baseline_first() {
+        let variants = spring_bone_gravity_dir_sweep();
+        assert_eq!(
+            variants[0].gravity_dir,
+            [0.0, -1.0, 0.0],
+            "first variant should be the baseline -Y direction"
+        );
+    }
+
+    #[test]
+    fn gravity_dir_sweep_includes_anti_sideways_oblique() {
+        let variants = spring_bone_gravity_dir_sweep();
+        let has_antigravity = variants.iter().any(|p| p.gravity_dir == [0.0, 1.0, 0.0]);
+        let has_sideways_x = variants.iter().any(|p| p.gravity_dir == [1.0, 0.0, 0.0]);
+        let has_oblique = variants.iter().any(|p| {
+            (p.gravity_dir[0] - 0.7).abs() < 1e-6 && (p.gravity_dir[1] - (-0.7)).abs() < 1e-6
+        });
+        assert!(
+            has_antigravity && has_sideways_x && has_oblique,
+            "must include anti, sideways, and oblique"
+        );
+    }
+
+    #[test]
+    fn gravity_dir_sweep_uses_unique_ids() {
+        let variants = spring_bone_gravity_dir_sweep();
+        let ids: std::collections::HashSet<_> = variants.iter().map(|p| p.id.clone()).collect();
+        assert_eq!(ids.len(), 4);
     }
 }
 
