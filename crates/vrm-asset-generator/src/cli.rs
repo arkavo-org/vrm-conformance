@@ -124,6 +124,18 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the multi-chain spring-bone sweep (36 assets = 18 variants × settle + swing).
+    /// Variants: 3 chain counts (2, 3, 5) × 2 spacings (0.02, 0.05 m) × 3 sharing modes
+    /// (share_all, share_none, share_alt). Each variant emits both a settle plan (60-step
+    /// settle) and a swing plan (animate_root_transform). Exercises per-chain collider-group
+    /// assignment semantics (VMK#162-class coupling bugs).
+    EmitSpringboneMultichainSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -729,6 +741,93 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitSpringboneMultichainSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::{
+                emit_with_sidecars_spring_bone_multichain,
+                emit_with_sidecars_spring_bone_multichain_swing,
+            };
+            use crate::sweep::spring_bone_multichain_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = spring_bone_multichain_sweep();
+            // Each variant emits BOTH a settle and a swing plan — 18 × 2 = 36 plans.
+            let total = variants.len() * 2;
+            let mut emitted = Vec::new();
+            let mut idx = 0;
+
+            for (mtoon, scene) in &variants {
+                // Settle variant: ID unchanged.
+                let settle_id = mtoon.id.clone();
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-springbone-multichain-sweep",
+                        "index": idx,
+                        "total": total,
+                        "id": settle_id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", idx + 1, total, settle_id);
+                }
+                let stem = output_dir.join(&settle_id);
+                emit_with_sidecars_spring_bone_multichain(mtoon, scene, &stem)?;
+                emitted.push(stem);
+                idx += 1;
+
+                // Swing variant: prefix `swing_` to avoid manifest collisions.
+                let swing_id = format!("swing_{}", mtoon.id);
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-springbone-multichain-sweep",
+                        "index": idx,
+                        "total": total,
+                        "id": swing_id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", idx + 1, total, swing_id);
+                }
+                let swing_mtoon = {
+                    let mut m = mtoon.clone();
+                    m.id = swing_id.clone();
+                    m
+                };
+                let swing_scene = {
+                    let mut s = scene.clone();
+                    for (i, sp) in s.springs.iter_mut().enumerate() {
+                        sp.id = format!("{swing_id}_chain_{i}");
+                        sp.spring_name = format!("{swing_id}_chain_{i}_chain");
+                    }
+                    s
+                };
+                let stem = output_dir.join(&swing_id);
+                emit_with_sidecars_spring_bone_multichain_swing(&swing_mtoon, &swing_scene, &stem)?;
+                emitted.push(stem);
+                idx += 1;
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} multichain spring-bone assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -949,6 +1048,29 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-springbone-taper-sweep": {
                         "summary": "Per-joint taper sweep (14 assets = 7 variants x settle + swing). 4 stiffness shapes (flat, high-to-low, low-to-high, exp-decay) + 3 drag shapes (flat, high-to-low, exp-decay). All use joint_count=4; per-joint vector overrides scalar for each swept axis.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-springbone-multichain-sweep": {
+                        "summary": "Multi-chain spring-bone sweep (36 assets = 18 variants × settle + swing). Axes: chain count (2, 3, 5), spacing (0.02, 0.05 m encoded in ID; emit uses 0.05 m), sharing mode (share_all, share_none, share_alt). Exercises per-chain collider-group assignment semantics (VMK#162-class regressions).",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],
