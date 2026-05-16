@@ -618,6 +618,58 @@ pub fn emit_with_sidecars_spring_bone_colliders_swing(
     Ok(())
 }
 
+/// Emits `<stem>.vrm` (MToon + spring-bone with extended colliders),
+/// `<stem>.meta.json`, and `<stem>.test.yaml` (settle variant, 60-step settle).
+/// Uses `VRMC_springBone_extended_collider` extension shapes/angle limits.
+pub fn emit_with_sidecars_spring_bone_extended(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_colliders(mtoon, scene, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    let spring_bone = &scene.springs[0];
+    write_meta_json(mtoon, Some(spring_bone), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan = crate::sidecar::build_spring_bone_extended_test_plan(mtoon, scene, &asset_relpath);
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// Same as `emit_with_sidecars_spring_bone_extended` but the test plan
+/// carries an `animation.root_transform` block (swing variant).
+pub fn emit_with_sidecars_spring_bone_extended_swing(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_colliders(mtoon, scene, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    let spring_bone = &scene.springs[0];
+    write_meta_json(mtoon, Some(spring_bone), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan =
+        crate::sidecar::build_spring_bone_extended_swing_test_plan(mtoon, scene, &asset_relpath);
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod collider_emit_tests {
     use super::*;
