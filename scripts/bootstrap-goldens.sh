@@ -89,6 +89,44 @@ else
     rm -rf "$SWING_DIR"; mkdir -p "$SWING_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-swing-sweep \
         --output-dir "$SWING_DIR" --json >/dev/null
+
+    # Phase 2-6 sweeps (VRMC_springBone gap closure design):
+    #   - colliders: 24 cartesian × settle/swing = 48 plans
+    #   - extended_colliders: 18 cartesian × settle/swing = 36 plans
+    #   - gravity_dir: 4 × settle/swing = 8 plans
+    #   - per-joint taper: 7 × settle/swing = 14 plans
+    #   - multi-chain: 18 × settle/swing = 36 plans
+    # Total new: 142 plans. Each sweep gets its own subdirectory so the runner's
+    # `find ... -name '*.test.yaml'` picks them all up.
+    echo "==> Emitting collider sweep (phase 2: 48 plans)"
+    COLLIDER_DIR="$GOLDENS_DIR/_assets_collider"
+    rm -rf "$COLLIDER_DIR"; mkdir -p "$COLLIDER_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-springbone-collider-sweep \
+        --output-dir "$COLLIDER_DIR" --json >/dev/null
+
+    echo "==> Emitting extended-collider sweep (phase 3: 36 plans)"
+    EXTENDED_DIR="$GOLDENS_DIR/_assets_extended"
+    rm -rf "$EXTENDED_DIR"; mkdir -p "$EXTENDED_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-springbone-extended-sweep \
+        --output-dir "$EXTENDED_DIR" --json >/dev/null
+
+    echo "==> Emitting gravity-dir sweep (phase 4: 8 plans)"
+    GRAVITY_DIR="$GOLDENS_DIR/_assets_gravity"
+    rm -rf "$GRAVITY_DIR"; mkdir -p "$GRAVITY_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-springbone-gravity-dir-sweep \
+        --output-dir "$GRAVITY_DIR" --json >/dev/null
+
+    echo "==> Emitting per-joint taper sweep (phase 5: 14 plans)"
+    TAPER_DIR="$GOLDENS_DIR/_assets_taper"
+    rm -rf "$TAPER_DIR"; mkdir -p "$TAPER_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-springbone-taper-sweep \
+        --output-dir "$TAPER_DIR" --json >/dev/null
+
+    echo "==> Emitting multi-chain sweep (phase 6: 36 plans)"
+    MULTICHAIN_DIR="$GOLDENS_DIR/_assets_multichain"
+    rm -rf "$MULTICHAIN_DIR"; mkdir -p "$MULTICHAIN_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-springbone-multichain-sweep \
+        --output-dir "$MULTICHAIN_DIR" --json >/dev/null
 fi
 
 # mapfile -t TEST_PLANS isn't available on macOS's bundled bash 3.2.
