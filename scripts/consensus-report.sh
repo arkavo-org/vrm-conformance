@@ -62,11 +62,16 @@ by_id = collections.defaultdict(list)
 for entry in m["entries"]:
     by_id[entry["test_id"]].append(entry)
 
-# Locate each test_id's test.yaml plan. swing variants live in
-# goldens-cache/_assets_swing/; everything else in _assets/.
+# Locate each test_id's test.yaml plan. Each sweep emits to its own
+# `_assets*` subdirectory under goldens-cache (see bootstrap-goldens.sh).
+# Walk any subdirectory under goldens-cache/ whose name starts with
+# "_assets" so new sweeps don't need a script update per phase.
 def find_plan(test_id):
-    for sub in ["_assets", "_assets_swing"]:
-        p = os.path.join(root, "goldens-cache", sub, f"{test_id}.test.yaml")
+    base = os.path.join(root, "goldens-cache")
+    for sub in sorted(os.listdir(base)):
+        if not sub.startswith("_assets"):
+            continue
+        p = os.path.join(base, sub, f"{test_id}.test.yaml")
         if os.path.exists(p):
             return p
     return None
