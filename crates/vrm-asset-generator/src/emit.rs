@@ -90,8 +90,28 @@ pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
 }
 
 use crate::sidecar::{build_default_test_plan, write_meta_json, write_test_yaml};
-use crate::spring_bone::{ColliderAttach, SpringBoneParams, SpringBoneSceneParams};
+use crate::spring_bone::{ColliderAttach, ColliderShape, SpringBoneParams, SpringBoneSceneParams};
 use crate::vrm_ext::{vrmc_spring_bone, vrmc_spring_bone_scene};
+
+/// Returns `true` when the scene contains any extended-shape collider
+/// (Plane, InsideSphere, InsideCapsule) or any spring with a joint angle
+/// limit. When true, the glTF `extensionsUsed` must declare
+/// `"VRMC_springBone_extended_collider"`.
+fn scene_uses_extended_collider(scene: &SpringBoneSceneParams) -> bool {
+    let has_extended_shape = scene.colliders.iter().any(|c| {
+        matches!(
+            &c.shape,
+            ColliderShape::Plane { .. }
+                | ColliderShape::InsideSphere { .. }
+                | ColliderShape::InsideCapsule { .. }
+        )
+    });
+    let has_angle_limit = scene
+        .springs
+        .iter()
+        .any(|s| s.joint_angle_limit_deg.is_some());
+    has_extended_shape || has_angle_limit
+}
 
 /// Emits `<stem>.vrm`, `<stem>.meta.json`, and `<stem>.test.yaml` from a
 /// single MToonParams value.
@@ -464,17 +484,24 @@ pub fn emit_vrm_with_spring_bone_colliders(
         }
     }
 
+    // Build extensionsUsed: always declare springBone; add extended collider
+    // extension only when the scene actually uses it.
+    let mut extensions_used = vec![
+        "KHR_materials_unlit",
+        "VRMC_vrm",
+        "VRMC_materials_mtoon",
+        "VRMC_springBone",
+    ];
+    if scene_uses_extended_collider(scene) {
+        extensions_used.push("VRMC_springBone_extended_collider");
+    }
+
     let mut doc = json!({
         "asset": {
             "version": "2.0",
             "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
         },
-        "extensionsUsed": [
-            "KHR_materials_unlit",
-            "VRMC_vrm",
-            "VRMC_materials_mtoon",
-            "VRMC_springBone"
-        ],
+        "extensionsUsed": extensions_used,
         "extensionsRequired": ["VRMC_vrm"],
         "scene": 0,
         "scenes": [{ "nodes": [skeleton.root_node] }],
@@ -638,6 +665,81 @@ mod collider_emit_tests {
                 .unwrap()
                 .len(),
             1
+        );
+    }
+}
+
+#[cfg(test)]
+mod extended_emit_integration_tests {
+    use super::*;
+    use crate::params::MToonParams;
+    use crate::spring_bone::*;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    #[test]
+    fn emitted_glb_with_plane_collider_declares_extended_collider_in_extensions_used() {
+        let mtoon = MToonParams::defaults("test_plane");
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("test")],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Plane {
+                    normal: [0.0, 1.0, 0.0],
+                },
+                offset: [0.0, -0.10, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "g".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        let tmp = tempdir().unwrap();
+        let vrm_path = Utf8Path::from_path(tmp.path()).unwrap().join("out.vrm");
+        emit_vrm_with_spring_bone_colliders(&mtoon, &scene, &vrm_path).unwrap();
+        let bytes = std::fs::read(&vrm_path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        let used = doc["extensionsUsed"].as_array().unwrap();
+        let names: Vec<&str> = used.iter().filter_map(|v| v.as_str()).collect();
+        assert!(
+            names.contains(&"VRMC_springBone"),
+            "extensionsUsed must declare VRMC_springBone: {names:?}"
+        );
+        assert!(
+            names.contains(&"VRMC_springBone_extended_collider"),
+            "extensionsUsed must declare VRMC_springBone_extended_collider when plane shape used: {names:?}"
+        );
+    }
+
+    #[test]
+    fn emitted_glb_with_base_sphere_collider_does_not_declare_extended_collider() {
+        let mtoon = MToonParams::defaults("test_sphere_no_ext");
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("test")],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Sphere { radius: 0.05 },
+                offset: [0.0, -0.04, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "g".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        let tmp = tempdir().unwrap();
+        let vrm_path = Utf8Path::from_path(tmp.path()).unwrap().join("out.vrm");
+        emit_vrm_with_spring_bone_colliders(&mtoon, &scene, &vrm_path).unwrap();
+        let bytes = std::fs::read(&vrm_path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        let used = doc["extensionsUsed"].as_array().unwrap();
+        let names: Vec<&str> = used.iter().filter_map(|v| v.as_str()).collect();
+        assert!(
+            !names.contains(&"VRMC_springBone_extended_collider"),
+            "base sphere collider must NOT declare VRMC_springBone_extended_collider: {names:?}"
         );
     }
 }
