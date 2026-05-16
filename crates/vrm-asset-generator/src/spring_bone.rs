@@ -37,6 +37,13 @@ pub struct SpringBoneParams {
     /// this is metadata only; it still travels into the emitted JSON because
     /// renderers may use it for self-collision in the future.
     pub hit_radius: f32,
+
+    /// Per-joint angle limit in degrees (optional). When set, emitted under
+    /// `joints[].extensions.VRMC_springBone_extended_collider.angleLimit`.
+    /// Uniform across all joints in the chain (spec allows per-joint values;
+    /// for our sweep, the value is held constant across the chain).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joint_angle_limit_deg: Option<f32>,
 }
 
 impl SpringBoneParams {
@@ -55,6 +62,7 @@ impl SpringBoneParams {
             gravity_power: 0.5,
             gravity_dir: [0.0, -1.0, 0.0],
             hit_radius: 0.02,
+            joint_angle_limit_deg: None,
         }
     }
 }
@@ -110,6 +118,10 @@ pub fn fmt_num(v: f32) -> String {
 pub enum ColliderShape {
     Sphere { radius: f32 },
     Capsule { radius: f32, tail_offset: [f32; 3] },
+    // Extended (VRMC_springBone_extended_collider-1.0):
+    Plane { normal: [f32; 3] },
+    InsideSphere { radius: f32 },
+    InsideCapsule { radius: f32, tail_offset: [f32; 3] },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +163,59 @@ impl SpringBoneSceneParams {
             collider_groups: Vec::new(),
             spring_collider_groups: vec![Vec::new()],
         }
+    }
+}
+
+#[cfg(test)]
+mod extended_collider_tests {
+    use super::*;
+
+    #[test]
+    fn plane_collider_has_normal_vector() {
+        let s = ColliderShape::Plane {
+            normal: [0.0, 1.0, 0.0],
+        };
+        if let ColliderShape::Plane { normal } = s {
+            assert_eq!(normal, [0.0, 1.0, 0.0]);
+        } else {
+            panic!("expected plane");
+        }
+    }
+
+    #[test]
+    fn inside_sphere_collider() {
+        let s = ColliderShape::InsideSphere { radius: 0.25 };
+        if let ColliderShape::InsideSphere { radius } = s {
+            assert!((radius - 0.25).abs() < 1e-6);
+        } else {
+            panic!("expected inside sphere");
+        }
+    }
+
+    #[test]
+    fn inside_capsule_collider() {
+        let s = ColliderShape::InsideCapsule {
+            radius: 0.10,
+            tail_offset: [0.0, 0.20, 0.0],
+        };
+        if let ColliderShape::InsideCapsule {
+            radius,
+            tail_offset,
+        } = s
+        {
+            assert!((radius - 0.10).abs() < 1e-6);
+            assert_eq!(tail_offset, [0.0, 0.20, 0.0]);
+        } else {
+            panic!("expected inside capsule");
+        }
+    }
+
+    #[test]
+    fn spring_bone_params_carries_optional_joint_angle_limit() {
+        let mut p = SpringBoneParams::defaults("t");
+        assert!(p.joint_angle_limit_deg.is_none());
+        p.joint_angle_limit_deg = Some(45.0);
+        assert_eq!(p.joint_angle_limit_deg, Some(45.0));
     }
 }
 
