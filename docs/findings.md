@@ -1056,6 +1056,40 @@ The seven-phase springbone closure has delivered: corpus expanded from 80 to 222
 3. **Calibrate the phase 7 coupling matrix threshold** against three-vrm + godot-vrm baseline coupling.
 4. **Wire `--dump-positions` into the bootstrap script** so position goldens populate `positions_url` manifest entries automatically.
 
+## VMK issue hunt — five VMK bugs filed from one bootstrap
+
+**Trigger:** With the four-renderer consensus matrix in hand, mined `goldens-cache/consensus-report.json` for VMK-specific SHA-level collapse patterns: "VMK renders multiple sweep variants byte-identically while three-vrm + UniVRM distinguish them" is a clean signature for "VMK silently ignores or mis-applies the swept parameter".
+
+### Filed issues
+
+| # | scope | shape |
+|---|---|---|
+| [VMK#236](https://github.com/arkavo-org/VRMMetalKit/issues/236) | spring-bone settle collisions | `warmupPhysics` doesn't resolve `VRMC_springBone.colliders`. 25 collider configurations + no-collider baseline all produce SHA `f02fb44e3d2a…` at static settle on VMK. Three-vrm renders these distinctly. |
+| [VMK#237](https://github.com/arkavo-org/VRMMetalKit/issues/237) | `VRMC_springBone_extended_collider` chaotic | 18 swing variants → 7 SHA buckets that don't track swept axes (shape × placement × angle_limit). VMK reads SOMETHING from the extension but applies it inconsistently. |
+| [VMK#238](https://github.com/arkavo-org/VRMMetalKit/issues/238) | MToon `rimLightingMix` boundary | Exact boundary values `0` and `1` produce identical render (SHA `ccbaa146…`); intermediate values `(0, 1)` produce distinct renders. Three-vrm + UniVRM distinguish all values. |
+| [VMK#239](https://github.com/arkavo-org/VRMMetalKit/issues/239) | MToon `shadingShift` + `shadingToony` boundary | `shadingShift=±1` and `shadingToony=0`/`=1` collapse to default-bucket render; intermediate values work correctly. Three-vrm + UniVRM correct. (Issue body initially over-stated the scope; corrected with a follow-up comment.) |
+| [VMK#240](https://github.com/arkavo-org/VRMMetalKit/issues/240) | spring-bone `stiffness` under animation | `stiffness=0`/`=0.8`/`=1` collapse to shared swing trajectory (SHA `0c9ecdad…`); only `=0.2` distinct. The shared SHA appears across 10 unrelated swing test_ids spanning collider, extended_collider, and stiffness families. |
+
+### Cross-cutting hypothesis
+
+VMK#238, #239, and #240 all collapse parameter values at exact integer-valued or spec-boundary inputs (`0`, `1`, `-1`, `0.8`). VMK 0.14.0's published release fix for the collider parse bug specifically addressed `JSONSerialization` returning `[Double]` while the parser cast to `[Float]`. The same pattern likely affects scalar `Float` properties when their JSON value is a whole number: `JSONSerialization` returns `NSNumber.int(0)` or `NSNumber.int(1)`, and the parser's `Float` cast silently fails, falling back to the property's default value. The collapse-to-default fingerprint matches this hypothesis.
+
+This is a tractable upstream fix — accept `Double`, `Float`, AND `Int` in the scalar parse paths, the same way the 0.14.0 collider fix accepts `[Double]` and `[Float]`.
+
+### Pattern that surfaced these
+
+A small Python tool that, for each parameter sweep family, counts:
+
+```
+(VMK distinct SHAs) vs (three-vrm distinct SHAs)
+```
+
+Any family where `VMK distinct < three-vrm distinct` is a VMK collapse candidate. Combined with "are the asset's swept parameter values actually distinct in the emitted JSON" (sanity check that asset emission isn't the bug), this reliably identifies VMK silently-ignored parameters. The same tool will surface any new collapses in future bootstrap runs.
+
+### Coverage
+
+Five issues filed in one analysis session against a corpus of 222 plans × 4 renderers. The hunt was systematic: every MToon scalar parameter and every spring-bone scalar parameter was checked for the collapse signature. Three new VMK bugs (#238, #239, #240) came from the new phase 2-6 corpus AND from the pre-existing MToon corpus — the hunt method works equally well on existing test plans, suggesting more bugs could be found by extending similar analysis to other adapters or to less-swept parameter axes.
+
 ## Phase 2 — VRMC_springBone collider sweep landed (synthetic only)
 
 **Trigger:** Phase 1 infrastructure (dump_bone_positions across four adapters, position-diff math, manifest + runner integration) merged. Phase 2 of the seven-phase springbone gap closure design adds collider emission to the asset generator and 48 test plans (24 Cartesian variants × settle/swing).
