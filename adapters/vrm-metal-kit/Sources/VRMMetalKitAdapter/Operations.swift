@@ -45,11 +45,17 @@ final class Operations: @unchecked Sendable {
     /// Phase labels match `docs/operation-contract.md`. L3-e promoted the
     /// three Phase 2 physics ops out of the deferral block; they now have
     /// real handlers backed by VRMMetalKit's spring-bone GPU system.
+    /// VRMA ops are deferred to a future phase pending VMK#165 closure.
     static let reservedPhases: [String: String] = [
         "set_environment":         "v1.x",
         "set_expression":          "Phase 3",
         "set_humanoid_pose":       "Phase 2",
         "set_root_transform":      "Phase 2",
+        "load_vrma":               "vrma-v1",
+        "apply_vrma_at_time":      "vrma-v1",
+        "dump_humanoid_pose":      "vrma-v1",
+        "dump_expression_weights": "vrma-v1",
+        "dump_look_at_state":      "vrma-v1",
     ]
 
     /// Phase label for the still-deferred Phase 2 ops.
