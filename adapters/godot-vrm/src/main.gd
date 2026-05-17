@@ -8,6 +8,15 @@ const TcpSession := preload("res://src/tcp_session.gd")
 const Session := preload("res://src/session.gd")
 
 func _init() -> void:
+    # Stop Godot from grabbing keyboard focus and the screen front when
+    # the conformance harness spawns it 220+ times in a row. The window
+    # still has to exist for the Metal rendering driver (--headless
+    # returns null SubViewport textures, per L3 Spike 1), but it can be
+    # marked NO_FOCUS and minimised so it never surfaces above the user's
+    # current app.
+    DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_NO_FOCUS, true)
+    DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MINIMIZED)
+
     var args := OS.get_cmdline_user_args()
     if args.is_empty():
         push_error("godot-vrm adapter: expected positional port arg after `--`"); quit(2); return
