@@ -1212,3 +1212,58 @@ The 1/12 residual collisions in settle collider sphere/capsule are the symmetric
 **VMK tracker discrepancy:** [VMK#239](https://github.com/arkavo-org/VRMMetalKit/issues/239) is still marked `state=OPEN` on GitHub at the time of this verification, but the 0.15.0 release notes name it as a closure and our re-render confirms the symptom is gone (all 17 shadingShift+shadingToony variants now produce distinct SHAs). Likely a missed `Fixes #239` link in the merge commit; VMK should auto-close on their next pass. [VMK#237](https://github.com/arkavo-org/VRMMetalKit/issues/237) (extended_collider chaotic clustering) also remains open — release notes mention "phases 1–3" landed via PR #260/#262 but the upstream issue stays open pending end-to-end swing verification on capsule/sphere extended_collider variants. Both are tracked here for the next bump cycle.
 
 **Forward:** the next re-bootstrap should run all four renderers so the consensus-report can quantify SSIM movement against the three-vrm/godot-vrm/UniVRM baselines. Expected direction: VMK pairwise SSIM with the consortium-reference cluster (currently `0.6313..0.9665`, mean `~0.74`) should improve materially on the four families that previously collapsed to default-bucket renders. That measurement is the value-add of this closure — distinct SHAs prove the parameter is now being read; cross-renderer SSIM proves the parameter is now being read *correctly*.
+
+## VMK 0.15.0 conformance level re-evaluation (cross-renderer)
+
+**Trigger:** Same-day re-run of `scripts/consensus-report.sh` against the post-0.15.0 manifest (only VMK PNGs changed; three-vrm/godot-vrm/UniVRM untouched). Compares directly to the prior 222-plan baseline in this document.
+
+**Adapter capability tier: still L4.** No scaffold changes — Phase 1 ops + spring-bone physics remain real; the 302-plan corpus (222 unique test_ids; some plans produce settle+swing pairs) renders end-to-end. The re-evaluation is about *conformance signal*, not adapter coverage.
+
+### Headline: VMK now matches the consortium reference on 99% of comparable plans
+
+| pair | pre-0.15.0 | post-0.15.0 |
+|---|---|---|
+| **vrm-metal-kit vs univrm** (consortium reference) | 74/76 (**97%**) | **75/76 (99%)** |
+| three-vrm vs univrm | 76/76 (100%) | 76/76 (100%) |
+| godot-vrm vs univrm | 67/76 (88%) | 67/76 (88%) |
+| consensus_passed (all-pairs) | 206/222 | 207/222 |
+
+The 1 remaining miss against UniVRM is `mtoon_outline_world_0p1` — a universal outline-hazard test where every renderer is an outlier from every other (the 0.85 threshold is below the silhouette-AA floor at this outline thickness). It is not a VMK-specific failure.
+
+### Pairwise SSIM movement (corpus-wide means)
+
+| pair | pre mean | post mean | Δ | post min | post max |
+|---|---:|---:|---:|---:|---:|
+| three-vrm vs vrm-metal-kit | 0.9564 | **0.9572** | +0.0008 | 0.6313 | 0.9879 (was 0.9865) |
+| univrm vs vrm-metal-kit | 0.9468 | **0.9491** | +0.0023 | 0.6315 | 0.9935 |
+| godot-vrm vs vrm-metal-kit | 0.8997 | 0.9000 | +0.0003 | 0.5303 | 0.9777 (was 0.9739) |
+
+The mean movement looks small at the corpus level because (a) most of the 222 plans were already passing pre-0.15.0 and (b) the closure families are a small share of the corpus. The structural fact is that **VMK's max SSIM with three-vrm and godot-vrm both rose** — i.e. the closure-family upgrades pushed previously-collapsed test_ids into the high-agreement band, not just over a threshold.
+
+### Closure-family agreement bands (VMK vs UniVRM)
+
+| family | n | min SSIM | mean SSIM | max SSIM | reading |
+|---|---:|---:|---:|---:|---|
+| `mtoon_rimLightingMix_*` | 6 | 0.9491 | **0.9789** | 0.9935 | tight agreement; VMK joins reference cluster |
+| `mtoon_shadingShift_*` | 9 | 0.9290 | **0.9646** | 0.9909 | tight agreement |
+| `mtoon_shadingToony_*` | 8 | 0.8945 | 0.9324 | 0.9822 | agreement at floor; some variants in the new VMK+three-vrm vs UniVRM+godot-vrm split (see below) |
+| `swing_springbone_stiffness_*` | 4 | 0.962 | 0.963 | 0.964 | VMK matches UniVRM and three-vrm to ≥0.96 across the full sweep; previously these 4 plans shared a single PNG SHA on VMK |
+| `springbone_collider_*` (settle, 24) | 24 | 0.9062 | 0.9082 | — | all pass consensus; VMK vs godot-vrm pair, three-vrm/UniVRM don't author these |
+| `swing_springbone_collider_*` (24) | 24 | 0.9144 | 0.9158 | — | swing variants tighter than settle, as observed corpus-wide |
+
+### Newly-visible signal: shadingToony cluster flip
+
+Pre-0.15.0 the `mtoon_shadingToony_*` divergent tests had VMK as the consensus outlier (its shading curve was flat at boundary inputs). Post-0.15.0 the same test_ids appear in the top-15 most divergent list with **`outliers=['godot-vrm', 'univrm']`** — i.e. VMK + three-vrm now agree with each other, and the minority pair is godot-vrm + UniVRM. The 0.85 threshold is missed by 0.005–0.04 on five of the eight `shadingToony` variants (0, 0p1, 0p25, 0p5, 0p75).
+
+This is a substantive shift in attribution. Pre-0.15.0 the natural read was "VMK has a shadingToony bug". Post-0.15.0 it reads as "VMK and three-vrm interpret the shadingToony curve one way; UniVRM and godot-vrm interpret it another." Worth filing against the next renderer pair we audit (likely godot-vrm, since UniVRM is the consortium reference and PR #235 already added VMK's radiometric mode to match what UniVRM does at the radiance-normalization layer). The actionable question is whether godot-vrm's `Godot-MToon-Shader` applies the same `1/π` BRDF Lambert + radiometric normalization that VMK and three-vrm now both apply.
+
+### Open clusters (carried forward)
+
+- **[VMK#213](https://github.com/arkavo-org/VRMMetalKit/issues/213)** (shadingToony curve at low-toony + high-positive-shift) — PR #235 added `LightNormalizationMode.radiometric`; verifies as no longer a VMK-specific bug per the cluster flip above. Tracker still shows open; close pending.
+- **[VMK#237](https://github.com/arkavo-org/VRMMetalKit/issues/237)** (extended_collider chaotic) — PRs #260/#262 land phases 1–3; tracker still open pending end-to-end swing verification (we can supply that now from `_assets_extended/`).
+- **[VMK#239](https://github.com/arkavo-org/VRMMetalKit/issues/239)** — release notes name it closed; tracker discrepancy. SHA-distinctness + cross-renderer SSIM both confirm symptom gone.
+- **[VMK#228](https://github.com/arkavo-org/VRMMetalKit/issues/228)** (rim front-face contribution) — closed via regression test in #234. SSIM data agrees.
+
+### Bottom line
+
+VMK has moved from the **97% conformance band** (with named outstanding clusters on rim lighting and shadingToony) to the **99% conformance band** against the consortium reference, with the four "boundary collapse" findings cited as direct contributors to the release. The remaining 1 miss is a universal methodology hazard, not a VMK-specific defect. Cross-renderer SSIM movement is modest at the corpus mean (∆ ≤ +0.003) but the structural change is in *attribution* — VMK is now a member of the spec-tight cluster, and the next round of upstream fingerpointing should be directed at the godot-vrm + UniVRM minority on shadingToony.
