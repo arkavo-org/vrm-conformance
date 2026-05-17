@@ -320,6 +320,59 @@ namespace Conformance
             sb.Append('}');
         }
 
+        /// <summary>
+        /// Emit the look_at section.
+        ///
+        /// Yaw/pitch are read from target.Runtime.LookAt.Yaw / .Pitch, which
+        /// reflect the EyeDirection produced by the most-recent Runtime.Process()
+        /// call. Values are zero when no LookAt input was set (e.g. the .vrma has
+        /// no lookAt track), which is the expected state for pose-only test assets.
+        ///
+        /// applied_via maps target.Vrm.LookAt.LookAtType (bone | expression) from
+        /// UniGLTF.Extensions.VRMC_vrm.LookAtType. The enum has no "off" variant;
+        /// "off" is reserved for future use when LookAt is explicitly disabled.
+        ///
+        /// offsetFromHeadBone is the VRM-extension-defined eye-level offset stored
+        /// in target.Vrm.LookAt.OffsetFromHead (VRM10ObjectLookAt field).
+        ///
+        /// gaze_direction_quat: VRMA spec Extrinsic ZXY — rotation around Y is yaw,
+        /// around X is pitch. Unity Quaternion.Euler(x, y, z) uses intrinsic XYZ;
+        /// for a pure yaw+pitch (no roll) the two conventions produce the same
+        /// quaternion, so Quaternion.Euler(pitch, yaw, 0) is correct here.
+        /// </summary>
+        private static void AppendLookAt(StringBuilder sb, Vrm10Instance target)
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+
+            // Yaw/pitch from the lookAt runtime. These are the clamped/mapped
+            // output degrees that were applied to the avatar by Runtime.Process().
+            float yaw   = target.Runtime.LookAt.Yaw;
+            float pitch = target.Runtime.LookAt.Pitch;
+
+            // Spec-defined Extrinsic ZXY: rotation around Y is yaw, around X is
+            // pitch. For a pure yaw+pitch (no roll) Quaternion.Euler(pitch, yaw, 0)
+            // is equivalent.
+            var gaze = Quaternion.Euler(pitch, yaw, 0f);
+
+            // applied_via from the avatar's VRMC_vrm.lookAt.type configuration.
+            // LookAtType enum (UniGLTF.Extensions.VRMC_vrm) has bone | expression.
+            string appliedVia = target.Vrm.LookAt.LookAtType switch
+            {
+                UniGLTF.Extensions.VRMC_vrm.LookAtType.bone       => "bone",
+                UniGLTF.Extensions.VRMC_vrm.LookAtType.expression => "expression",
+                _                                                  => "off",
+            };
+
+            // offsetFromHeadBone from the avatar's VRM extension (VRM10ObjectLookAt.OffsetFromHead).
+            var offset = target.Vrm.LookAt.OffsetFromHead;
+
+            sb.AppendFormat(inv,
+                "\"look_at\":{{\"gaze_direction_quat\":[{0},{1},{2},{3}],\"yaw_deg\":{4},\"pitch_deg\":{5},\"applied_via\":\"{6}\",\"offset_from_head_bone\":[{7},{8},{9}]}}",
+                gaze.x, gaze.y, gaze.z, gaze.w,
+                yaw, pitch, appliedVia,
+                offset.x, offset.y, offset.z);
+        }
+
         public static string BuildPoseJson(Vrm10Instance target)
         {
             var sb = new StringBuilder(2048);
@@ -327,7 +380,9 @@ namespace Conformance
             AppendHumanoidPose(sb, target);
             sb.Append(',');
             AppendExpressions(sb, target);
-            sb.Append(",\"look_at\":null}");
+            sb.Append(',');
+            AppendLookAt(sb, target);
+            sb.Append('}');
             return sb.ToString();
         }
 
