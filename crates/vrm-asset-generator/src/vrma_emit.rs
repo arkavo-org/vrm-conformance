@@ -15,9 +15,17 @@ use serde_json::{json, Value};
 /// and a placeholder empty animation. Subsequent helpers in this module
 /// (humanoid / expression / lookAt) mutate the returned `Value` to add
 /// channels.
+///
+/// `scene` + `scenes` are included so that UniVRM 0.131.0's
+/// `VrmAnimationImporter.LoadAsync` does not crash on the unconditional
+/// `Data.GLTF.scenes[0].nodes = ...` at line 245. The scenes array is
+/// populated lazily by `finalize_vrma_scenes` after all nodes have been
+/// added; call that function before `write_vrma_glb`.
 pub fn build_empty_vrma() -> Value {
     json!({
         "asset": { "version": "2.0", "generator": "vrm-asset-generator (vrma-v1)" },
+        "scene": 0,
+        "scenes": [{ "nodes": [] }],
         "nodes": [],
         "animations": [
             { "channels": [], "samplers": [] }
@@ -27,6 +35,58 @@ pub fn build_empty_vrma() -> Value {
             "VRMC_vrm_animation": { "specVersion": "1.0" }
         }
     })
+}
+
+/// Populate `scenes[0].nodes` with the root-level glTF node indices
+/// (nodes that are not referenced as children of any other node).
+/// Must be called after all nodes have been appended to `doc["nodes"]`
+/// and before `write_vrma_glb`. Safe to call multiple times (idempotent).
+pub fn finalize_vrma_scenes(doc: &mut Value) {
+    use std::collections::HashSet;
+    let nodes = match doc["nodes"].as_array() {
+        Some(n) => n,
+        None => return,
+    };
+    let mut referenced: HashSet<usize> = HashSet::new();
+    for node in nodes {
+        if let Some(children) = node["children"].as_array() {
+            for c in children {
+                if let Some(idx) = c.as_u64() {
+                    referenced.insert(idx as usize);
+                }
+            }
+        }
+    }
+    let root_indices: Vec<serde_json::Value> = (0..nodes.len())
+        .filter(|i| !referenced.contains(i))
+        .map(serde_json::Value::from)
+        .collect();
+    // scenes[0] is guaranteed to exist — build_empty_vrma initialises it.
+    doc["scenes"][0]["nodes"] = serde_json::Value::Array(root_indices);
+}
+
+/// Register all bones in `bone_to_node` into the VRMA `humanBones` map
+/// without emitting any animation channels. This is required so that
+/// UniVRM 0.131.0's VrmAnimationImporter can build a valid Unity
+/// `HumanAvatar` (which requires at minimum hips, spine, head, and the
+/// four limb bones). Call this after all nodes have been set on `doc`
+/// and before emitting any rotation channels.
+pub fn register_all_humanoid_bones(
+    doc: &mut Value,
+    bone_to_node: &std::collections::BTreeMap<String, usize>,
+) {
+    let ext = doc["extensions"]["VRMC_vrm_animation"]
+        .as_object_mut()
+        .unwrap();
+    let humanoid = ext
+        .entry("humanoid")
+        .or_insert_with(|| json!({ "humanBones": {} }));
+    let human_bones = humanoid["humanBones"].as_object_mut().unwrap();
+    for (bone_name, &node_idx) in bone_to_node {
+        human_bones
+            .entry(bone_name.clone())
+            .or_insert_with(|| json!({ "node": node_idx }));
+    }
 }
 
 /// Add a humanoid bone rotation animation channel to the document.

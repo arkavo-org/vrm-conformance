@@ -1070,7 +1070,10 @@ pub fn emit_vrma_humanoid_triplet(
     output_dir: &Utf8Path,
     params: &crate::vrma_params::VrmaHumanoidParams,
 ) -> Result<()> {
-    use crate::vrma_emit::{add_humanoid_bone_rotation_channel, build_empty_vrma, write_vrma_glb};
+    use crate::vrma_emit::{
+        add_humanoid_bone_rotation_channel, build_empty_vrma, finalize_vrma_scenes,
+        register_all_humanoid_bones, write_vrma_glb,
+    };
     use crate::vrma_params::RotationAxis;
 
     std::fs::create_dir_all(output_dir)?;
@@ -1093,6 +1096,12 @@ pub fn emit_vrma_humanoid_triplet(
     // indices in humanBones resolve).
     doc["nodes"] = skel.nodes_json.clone();
 
+    // Declare all bones in humanBones so UniVRM 0.131.0 can build a valid
+    // Unity HumanAvatar (requires at minimum hips + limb bones). Without
+    // this the Avatar is invalid, AssignBonesFromAnimator returns false,
+    // BoxMan is null, and TransferOwnership panics.
+    register_all_humanoid_bones(&mut doc, &skel.bone_to_node);
+
     let mut buffer = Vec::<u8>::new();
     let half_rad = params.angle_deg.to_radians() / 2.0;
     let sin_h = half_rad.sin();
@@ -1112,6 +1121,11 @@ pub fn emit_vrma_humanoid_triplet(
         &params.bone_name,
         &keyframes,
     );
+
+    // Populate scenes[0].nodes with root-level nodes before serialising.
+    // Required by UniVRM 0.131.0 VrmAnimationImporter which unconditionally
+    // accesses scenes[0] at LoadAsync line 245.
+    finalize_vrma_scenes(&mut doc);
 
     let vrma_relpath = format!("{}.vrma", params.id);
     let vrma_path = output_dir.join(&vrma_relpath);
@@ -1137,7 +1151,8 @@ pub fn emit_vrma_expression_triplet(
     params: &crate::vrma_params::VrmaExpressionParams,
 ) -> Result<()> {
     use crate::vrma_emit::{
-        add_expression_weight_channel, build_empty_vrma, write_vrma_glb, ExpressionKind,
+        add_expression_weight_channel, build_empty_vrma, finalize_vrma_scenes, write_vrma_glb,
+        ExpressionKind,
     };
 
     std::fs::create_dir_all(output_dir)?;
@@ -1170,6 +1185,8 @@ pub fn emit_vrma_expression_triplet(
     let mut buffer = Vec::<u8>::new();
     add_expression_weight_channel(&mut doc, &mut buffer, node_idx, kind, &keyframes);
 
+    finalize_vrma_scenes(&mut doc);
+
     let vrma_relpath = format!("{}.vrma", params.id);
     let vrma_path = output_dir.join(&vrma_relpath);
     let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
@@ -1193,7 +1210,9 @@ pub fn emit_vrma_lookat_triplet(
     output_dir: &Utf8Path,
     params: &crate::vrma_params::VrmaLookAtParams,
 ) -> Result<()> {
-    use crate::vrma_emit::{add_look_at_channel, build_empty_vrma, write_vrma_glb};
+    use crate::vrma_emit::{
+        add_look_at_channel, build_empty_vrma, finalize_vrma_scenes, write_vrma_glb,
+    };
     use crate::vrma_params::{AvatarLookAtType, RotationAxis};
 
     std::fs::create_dir_all(output_dir)?;
@@ -1239,6 +1258,8 @@ pub fn emit_vrma_lookat_triplet(
         [0.0, 0.06, 0.0],
         &keyframes,
     );
+
+    finalize_vrma_scenes(&mut doc);
 
     let vrma_relpath = format!("{}.vrma", params.id);
     let vrma_path = output_dir.join(&vrma_relpath);

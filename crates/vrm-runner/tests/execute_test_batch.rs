@@ -125,7 +125,7 @@ fn manifest_carries_two_entries_with_absolute_paths() {
         "univrm".into(),
     );
 
-    assert_eq!(manifest.manifest_version, 1);
+    assert_eq!(manifest.manifest_version, 2);
     assert_eq!(manifest.renderer_name, "univrm");
     assert_eq!(manifest.tests.len(), 2);
     assert_eq!(manifest.tests[0].test_id, "a");
@@ -159,7 +159,7 @@ fn manifest_serializes_to_expected_json_shape() {
     );
 
     let json = serde_json::to_value(&manifest).expect("serialize");
-    assert_eq!(json["manifest_version"], 1);
+    assert_eq!(json["manifest_version"], 2);
     assert_eq!(json["renderer_name"], "univrm");
     assert_eq!(json["tests"][0]["test_id"], "x");
     assert_eq!(json["tests"][0]["camera"]["position"][2], 1.5);

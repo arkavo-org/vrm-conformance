@@ -48,16 +48,24 @@ pub fn build_manifest(
 ) -> BatchManifest {
     let tests = pairs
         .iter()
-        .map(|(plan, vrm_path)| BatchTestEntry {
-            test_id: plan.id.clone(),
-            vrm_path: absolutize(vrm_path),
-            spec_section: plan.spec_section.clone(),
-            camera: plan.camera,
-            lighting: plan.lighting.clone(),
-            post_processing: plan.post_processing.clone(),
-            output: plan.output,
-            physics: plan.physics.clone(),
-            animation: plan.animation.clone(),
+        .map(|(plan, vrm_path)| {
+            let abs_vrm = absolutize(vrm_path);
+            // Resolve animation.vrma.path relative to the VRM asset's parent
+            // directory so that relative sibling paths (e.g. "foo.vrma") become
+            // absolute before the manifest is handed to the Unity adapter. Unity
+            // has no concept of a "plans dir"; it only sees the manifest JSON.
+            let animation = resolve_animation_paths(&plan.animation, &abs_vrm);
+            BatchTestEntry {
+                test_id: plan.id.clone(),
+                vrm_path: abs_vrm,
+                spec_section: plan.spec_section.clone(),
+                camera: plan.camera,
+                lighting: plan.lighting.clone(),
+                post_processing: plan.post_processing.clone(),
+                output: plan.output,
+                physics: plan.physics.clone(),
+                animation,
+            }
         })
         .collect();
 
@@ -68,6 +76,45 @@ pub fn build_manifest(
         renderer_version: None,
         tests,
     }
+}
+
+/// Resolve any relative paths inside `AnimationConfig` to absolute paths,
+/// using `vrm_path`'s parent directory as the base.
+fn resolve_animation_paths(
+    animation: &Option<AnimationConfig>,
+    vrm_path: &Utf8PathBuf,
+) -> Option<AnimationConfig> {
+    let anim = animation.as_ref()?;
+    let base = vrm_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| Utf8PathBuf::from("."));
+
+    let vrma = anim.vrma.as_ref().map(|v| {
+        let resolved = absolutize_str_path(&v.path, &base);
+        vrm_test_plan::VrmaAnimation {
+            path: resolved,
+            apply_at_time: v.apply_at_time,
+        }
+    });
+    Some(AnimationConfig {
+        vrma,
+        root_transform: anim.root_transform.clone(),
+    })
+}
+
+/// Absolutize a path given as a `String`, using `base` as the parent
+/// directory for relative paths.
+fn absolutize_str_path(path: &str, base: &Utf8PathBuf) -> String {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() {
+        return path.to_string();
+    }
+    let joined = base.as_std_path().join(p);
+    // Canonicalize if the file exists; otherwise just join without
+    // resolving symlinks (the file may not exist yet at plan-build time).
+    let abs = joined.canonicalize().unwrap_or(joined);
+    abs.to_string_lossy().into_owned()
 }
 
 fn absolutize(p: &Utf8PathBuf) -> Utf8PathBuf {

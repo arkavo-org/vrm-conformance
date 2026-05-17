@@ -15,11 +15,12 @@
 //             Vrm10Runtime.Process() calls Vrm10Retarget.Retarget(ControlRig)
 //             + expression weight setters + LookAt.
 //
-//   Sample  : Vrm10AnimationInstance implements ITimeControl.SetTime(t)
-//             which sets AnimationState.time + calls animation.Sample().
-//             We replicate that pattern directly: grab the Animation
-//             component, disable playback speed, play, seek, sample —
-//             then call Runtime.Process() once.
+//   Sample  : The source GameObject has both an Animation (legacy) and an
+//             Animator (Mecanim) component. In PlayMode batch Mecanim blocks
+//             the legacy Animation from writing to bone Transforms. We disable
+//             the Animator momentarily, call AnimationClip.SampleAnimation to
+//             write transforms directly, then re-enable the Animator and call
+//             Runtime.Process() once to retarget the pose onto the target.
 //
 // Caller responsibility: load the .vrm via Vrm10.LoadPathAsync first,
 // then call VrmaDriver.LoadAndApply with the resulting Vrm10Instance.
@@ -136,29 +137,31 @@ namespace Conformance
             try
             {
                 // Sample the source animation at the requested time.
-                // Mirrors Vrm10AnimationInstance.ITimeControl.SetTime(t):
-                //   state.speed = 0; animation.Play(); state.time = t; animation.Sample();
+                //
+                // VrmAnimationImporter.OnLoadHierarchy adds an Animator component
+                // to the source GameObject for the humanoid retarget rig. In
+                // PlayMode batch the Mecanim Animator blocks the legacy Animation
+                // component from updating bone transforms (the two systems conflict).
+                // The fix: disable the Animator momentarily, call SampleAnimation
+                // (which directly writes into the Transform hierarchy), then
+                // re-enable the Animator. This is safe because we call Process()
+                // immediately after and then destroy the source GameObject.
                 var animation = gltfInstance.GetComponent<Animation>();
-                if (animation != null)
-                {
-                    AnimationState firstState = null;
-                    foreach (AnimationState s in animation)
-                    {
-                        firstState = s;
-                        break;
-                    }
+                var srcAnimator = gltfInstance.GetComponent<Animator>();
 
-                    if (firstState != null)
-                    {
-                        firstState.speed = 0f;
-                        firstState.enabled = true;
-                        animation.Play();
-                        firstState.time = time;
-                        animation.Sample();
-                    }
-                    // If no clips exist (static pose .vrma), the ControlRig
-                    // is already at rest pose — still valid to retarget.
+                if (srcAnimator != null && animation != null && animation.clip != null)
+                {
+                    srcAnimator.enabled = false;
+                    animation.clip.SampleAnimation(gltfInstance.gameObject, time);
+                    srcAnimator.enabled = true;
                 }
+                else if (animation != null && animation.clip != null)
+                {
+                    // No Animator — plain SampleAnimation is sufficient.
+                    animation.clip.SampleAnimation(gltfInstance.gameObject, time);
+                }
+                // If no clips exist (static pose .vrma), the ControlRig
+                // is already at rest pose — still valid to retarget.
 
                 // Wire up the source to the target and drive one retarget pass.
                 // Vrm10Runtime.Process() reads VrmAnimation.ControlRig and calls
