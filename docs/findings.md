@@ -1495,7 +1495,69 @@ Full primer forwarded to VMK at [VMK#165 #issuecomment-4472458466](https://githu
 
 T-pose conformance has a precedent for being audited as a one-time check per avatar (the methodology hazard #1 the VRMA design spec already calls out). The suite's `avatarA_1_0.vrm` should be audited against the 8 appearance criteria + the rest-rotation-is-non-identity reality before manual humanoid clips (issue [#10](https://github.com/arkavo-org/vrm-conformance/issues/10)) ship. A T-pose audit isn't currently a runner op — it's a one-time check at corpus-curation time.
 
-### Spring-bone rotation guidance for VMK (0.15.1 hair-helicopter defect)
+## VMK 0.15.1 verification — VRMA pose math + spring-bone rotation closures
+
+**Trigger:** VMK 0.15.1 ships closing four conformance issues filed during the 0.15.0 review window: VMK#264 (MToon discard_fragment defeats A2C — opt-in A2C path added), VMK#265 (VRM 0.x `_BlendMode=3` → `transparentWithZWrite` explicit), VMK#269 (VRMA retargeting zombie pose — pose-normalisation formula from `VRMC_vrm-1.0/how_to_transform_human_pose.md` shipped verbatim), and VMK#270 (spring-bone twin-tails horizontal during rotation — parent rotation now read fresh each frame). Release notes also call out two **behaviour changes**: spring-bone gravity is ~12× stronger, and `windAmplitude` is now velocity-scale (÷ ~60).
+
+**Method:** bumped `adapters/vrm-metal-kit/Package.swift` from 0.15.0 (`5378ade`) to 0.15.1 (`db5b90b`), re-rendered VMK-only over the unchanged 386-plan corpus, ran `scripts/consensus-report.sh` against the new manifest (UniVRM + three-vrm + godot-vrm PNGs cached from phase 6 bootstrap).
+
+### Headline numbers (vs phase 6 baseline)
+
+| metric | pre-0.15.1 | post-0.15.1 | Δ |
+|---|---|---|---|
+| **vrm-metal-kit vs univrm** | 75/76 (97% → 99%) | **80/81 (99%)** | +5 plans (new alpha sweep coverage), pass-rate held |
+| univrm vs vrm-metal-kit pairwise SSIM mean | 0.9491 | 0.9473 | −0.0018 |
+| three-vrm vs vrm-metal-kit pairwise SSIM mean | 0.9572 | 0.9575 | +0.0003 |
+| godot-vrm vs vrm-metal-kit pairwise SSIM mean | 0.9000 | 0.9016 | +0.0016 |
+| Top SSIM (VMK vs godot-vrm) | 0.9777 | **0.9996** | +0.0219 |
+| consensus_passed | 207/222 | 211/227 | +4 |
+
+**No VMK regressions.** The 0.9491 → 0.9473 dip in pairwise vs UniVRM is consistent with the gravity 12× behaviour change: some spring-bone plan rest positions shift, moving SSIM slightly.
+
+### Behaviour change verification: gravity 12× stronger (release-notes callout)
+
+Direct evidence — VMK 0.15.1 `swing_springbone_gravity_*` PNGs:
+
+```
+68b391e7764a swing_springbone_gravity_0.png       ← collapse
+68b391e7764a swing_springbone_gravity_1.png       ← collapse
+68b391e7764a swing_springbone_gravity_2.png       ← collapse
+3330d007e2ac swing_springbone_gravity_dir_anti.png
+8bd3bca3db2c swing_springbone_gravity_dir_default.png
+29723d51d5ca swing_springbone_gravity_dir_oblique.png
+c1afdb420d2e swing_springbone_gravity_dir_sideways.png
+```
+
+`swing_springbone_gravity_0/1/2` all share SHA `68b391e7764a` — at 12× stronger gravity, the magnitude sweep is saturated (anything > 0 pulls the chain to its fully-extended rest in the swing window). Direction sweep still distinguishes (4 distinct SHAs across 4 directions) because direction isn't affected by magnitude scaling.
+
+Similarly, `swing_springbone_stiffness_0/0p2` share the same SHA (stiffness too weak to resist the new strong gravity), while `_0p8/_1` distinguish. The behaviour-change callout is **verifiable from the cross-renderer signal** — exactly the surface a conformance suite should report.
+
+**Implication for the corpus:** the gravity + stiffness magnitude sweep values were calibrated against 0.15.0's gravity scale. They're now compressed at the low end. Either re-author the sweep with new values (e.g., `gravity ∈ {0.05, 0.10, 0.50}` instead of `{0.0, 0.5, 1.0}`) or document this as an intentional cross-version artefact. Not blocking; recorded for re-tuning when the spring-bone sweep gets a follow-up pass.
+
+### What 0.15.1 closures we CANNOT directly verify from our existing signal
+
+- **VMK#269 (VRMA retargeting)** — VMK now has VRMA library support, but the **VMK adapter's `Operations.swift`** still declares the 5 VRMA ops in `reservedPhases` (returning `-32000 vrma-v1`). Phase-7-equivalent adapter wiring would promote them to real, after which our 15-plan humanoid VRMA sweep would directly verify VMK#269 closure by comparing VMK pose dumps against UniVRM + three-vrm.
+- **VMK#270 (spring-bone rotation)** — vrm-conformance corpus doesn't currently rotate the avatar root during physics (the `animate_root_transform` op interpolates translation only). [vrm-conformance#12](https://github.com/arkavo-org/vrm-conformance/issues/12) tracks the rotation-while-physics test family that would verify this directly.
+- **VMK#264 (MToon A2C)** — opt-in path; our test plans don't request A2C explicitly, so default rendering is unchanged. Verification would require either an A2C-opt-in flag in the test plan schema, or layered-transparency fixture work ([vrm-conformance#11](https://github.com/arkavo-org/vrm-conformance/issues/11)).
+- **VMK#265 (VRM 0.x conversion)** — no VRM 0.x asset in the corpus; deferred per phase 3 scope.
+
+### Spec citations driving 0.15.1's VRMA closure
+
+The VMK 0.15.1 release notes credit two pieces of work from this suite:
+
+- **The T-pose primer at [VMK#165 #issuecomment-4472458466](https://github.com/arkavo-org/VRMMetalKit/issues/165#issuecomment-4472458466)** that documented the spec's pose-normalisation formula
+  `Normalised = W_A · L_A⁻¹ · A.LocalRotation · W_A⁻¹`
+  `B.LocalRotation = L_B · W_B⁻¹ · Normalised · W_B`
+  — shipped verbatim in 0.15.1's `VRMAnimationLoader.makeRotationSampler`.
+- **The phase 6 15-plan humanoid VRMA signal** (0/15 pass at spec tolerance, per-bone divergence equal to authored angle) that confirmed the defect was a normalisation failure rather than per-asset noise.
+
+The conformance suite's role of producing falsifiable signal that drives upstream closure is working as designed — same playbook the spring-bone + MToon closures used in prior phases.
+
+### Forward
+
+The biggest remaining gap is **VMK adapter VRMA wiring**: promote the 5 VRMA ops out of `reservedPhases` and bind them to VRMMetalKit's now-real VRMA library API. Once that lands, the 4-renderer cross-renderer pose-diff matrix becomes meaningful (currently 2-renderer only). The work is similar in shape to the phase 4 UniVRM + phase 5 three-vrm adapter wiring; estimated 8–12 commits.
+
+### Spring-bone rotation guidance for VMK (filed pre-0.15.1, closed in 0.15.1)
 
 A 0.15.1 (unreleased) tester reported twin-tails / side-locks sticking horizontally as the character rotates. Downstream framing identified 4 claimed spec violations; critical pass against canonical [VRMC_springBone-1.0 README.md](https://github.com/vrm-c/vrm-specification/blob/master/specification/VRMC_springBone-1.0/README.md):
 

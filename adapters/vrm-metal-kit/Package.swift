@@ -21,6 +21,45 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
+        // 0.15.1 (commit db5b90b, released 2026-05-17) closes:
+        //   - VMK#269 (VRMA retargeting "zombie pose"): VRMAnimationLoader's
+        //          makeRotationSampler used `L_B · L_A⁻¹ · A` which assumes
+        //          the animation and target model share the same world rest
+        //          orientation (W_A == W_B). VRMA_Locomotion_Pack/Idle.vrma
+        //          is authored arms-forward (-Z); VRM 1.0 spec models extend
+        //          arms along +X (T-pose), so the assumption fails and the
+        //          per-frame rotation drags the model bone into the VRMA's
+        //          pose space → both upper arms stuck forward. Fix ships
+        //          the spec's pose-normalisation formula verbatim:
+        //            Normalised = W_A · L_A⁻¹ · A.LocalRotation · W_A⁻¹
+        //            B = L_B · W_B⁻¹ · Normalised · W_B
+        //          The spec citation we forwarded at VMK#165 (closed in 0.15.1)
+        //          and the conformance suite's phase 6 15-plan signal (0/15
+        //          pass, worst per-bone divergence = exactly the authored
+        //          angle) drove the closure.
+        //   - VMK#270 (spring-bone twin-tails horizontal during rotation):
+        //          we just filed this — fix ships in this release. The root
+        //          cause matches the diagnostic we proposed: parent world
+        //          rotation was being captured-once rather than read fresh
+        //          each frame, so during rotation the stiffness restore
+        //          direction stayed world-fixed.
+        //   - VMK#264 (MToon discard_fragment defeats hardware A2C on MASK):
+        //          opt-in MSAA alpha-to-coverage path landed.
+        //   - VMK#265 (VRM 0.x _BlendMode=3 → transparentWithZWrite):
+        //          conversion now explicit.
+        //   Behavioural changes recorded in 0.15.1 release notes:
+        //   - **Spring-bone gravity is ~12× stronger.** Asset gravityPower
+        //          values may need reduction. The suite's existing
+        //          springbone_gravity_{0..1} settle sweep WILL surface a
+        //          ~12× change in tail rest position. This is a deliberate
+        //          spec-conformance correction, not a regression on our
+        //          end — but our tuned baseline plans may need re-rendering
+        //          (which a re-bootstrap accomplishes).
+        //   - **windAmplitude is now velocity-scale.** Hardcoded values
+        //          need to be divided by ~60. We do not use windAmplitude
+        //          in any test plan today (no wind axis in our sweep
+        //          corpus), so this is a no-op for us. Would-be filed as
+        //          a follow-up if we add a wind axis.
         // 0.15.0 (commit 5378ade) closes (all four were filed by this suite):
         //   - VMK#236 (VRMC_springBone collider parse silent-zero, scalar root
         //          cause): `parseVector3` returned nil for spec-typical mixed
@@ -170,7 +209,7 @@ let package = Package(
         // All nine were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "5378ade7e7d454e2c80ac5cd1821f2ce6feb1df6"
+            revision: "db5b90bff439bf5e64f2401d3a0b50ba5aeff800"
         ),
     ],
     targets: [
