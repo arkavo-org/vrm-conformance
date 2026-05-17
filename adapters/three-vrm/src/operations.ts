@@ -23,6 +23,13 @@ const PHASE_BY_RESERVED_METHOD: Record<string, string> = {
   set_expression: "Phase 3",
   set_humanoid_pose: "Phase 2",
   set_root_transform: "Phase 2",
+  // VRMA — real implementation deferred to vrma-phase5 of the VRMA plan
+  // when @pixiv/three-vrm-animation is added as a dependency.
+  load_vrma: "vrma-v1",
+  apply_vrma_at_time: "vrma-v1",
+  dump_humanoid_pose: "vrma-v1",
+  dump_expression_weights: "vrma-v1",
+  dump_look_at_state: "vrma-v1",
 };
 
 export interface DispatchSuccess<T = unknown> {
