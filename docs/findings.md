@@ -1464,3 +1464,11 @@ Five of the eight defect classes are tracked elsewhere (VMK closed 4 in 0.14.0/0
 ### Lesson for future downstream defect catalogs
 
 When a downstream user reports a visual defect with spec citations, the highest-value response is **mapping each defect to (a) the spec section it violates, (b) the existing upstream tracking issue, and (c) the corpus test_id that catches it**. Filing new issues is the exception; most defects in a well-tracked project already have an open issue. The exception in this round was the layered-transparency *corpus* gap — a clear corpus gap, not an unfiled defect.
+
+### Counter-datapoint: VMK 0.15.0 renders MToon transparency cleanly on a different asset
+
+A VMK tester evaluated a static T-pose render of a *different* VRM 1.0 asset (not `AvatarSample_A_1.0.vrm.glb`) and reported a clean, high-quality result on the three axes VMK#263 specifically calls out: alpha/transparency, depth sorting, and MToon specular/shading. Forwarded to [VMK#263 #issuecomment-4472438199](https://github.com/arkavo-org/VRMMetalKit/issues/263#issuecomment-4472438199) with a bisect proposal.
+
+This narrows VMK#263's repro from "universal MToon regression" to **asset-conditional or material-config-conditional**. Both assets are VRM 1.0 native — they hit different MToon paths inside VMK based on material parameters. The fastest path to root cause is a material-JSON diff between the failing AvatarSample_A and the working tester asset (alphaMode, transparentWithZWrite, renderQueueOffsetNumber, baseColorFactor.a).
+
+**Implication for the corpus:** the asset-conditional behavior is exactly the surface area that [vrm-conformance#11](https://github.com/arkavo-org/vrm-conformance/issues/11) (layered-transparency fixture) needs to cover. A parametric multi-mesh transparency sweep with varying material configs would catch the regression in whichever parameter combination triggers it, without depending on a specific asset's complete material block.
