@@ -91,7 +91,88 @@ pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
 
 use crate::sidecar::{build_default_test_plan, write_meta_json, write_test_yaml};
 use crate::spring_bone::{ColliderAttach, ColliderShape, SpringBoneParams, SpringBoneSceneParams};
-use crate::vrm_ext::{vrmc_spring_bone, vrmc_spring_bone_scene};
+use crate::vrm_ext::{vrmc_spring_bone, vrmc_spring_bone_scene, LookAtType, vrmc_vrm_with_lookat_type};
+
+/// Emit a `.vrm` GLB identical to `emit_vrm` except that the avatar's
+/// `VRMC_vrm.lookAt.type` is set to the caller-supplied value.
+/// Existing callers of `emit_vrm` are unaffected.
+pub fn emit_vrm_with_lookat_type(
+    params: &MToonParams,
+    lookat_type: LookAtType,
+    output: &Utf8Path,
+) -> Result<()> {
+    // 1) Mesh + buffer
+    let mesh = sphere(0.3, 24, 48);
+    let packed = pack_mesh(&mesh);
+
+    // 2) Humanoid skeleton
+    let skeleton = minimal_skeleton();
+    let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
+    let head_node = skeleton.bone_to_node["head"];
+
+    // 3) Mesh-bearing node parented to head.
+    let mesh_node_index = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_mesh", params.id),
+        "mesh": 0
+    }));
+    let head = &mut nodes[head_node];
+    let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
+    head_children.push(json!(mesh_node_index));
+    head["children"] = Value::Array(head_children);
+
+    // 4) Build the glTF JSON document with the requested lookAt.type.
+    let mut doc = json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
+        },
+        "extensionsUsed": ["KHR_materials_unlit", "VRMC_vrm", "VRMC_materials_mtoon"],
+        "extensionsRequired": ["VRMC_vrm"],
+        "scene": 0,
+        "scenes": [
+            { "nodes": [skeleton.root_node] }
+        ],
+        "nodes": nodes,
+        "meshes": [
+            {
+                "name": format!("{}_geom", params.id),
+                "primitives": [
+                    {
+                        "attributes": {
+                            "POSITION": 0,
+                            "NORMAL": 1,
+                            "TEXCOORD_0": 2
+                        },
+                        "indices": 3,
+                        "material": 0,
+                        "mode": 4
+                    }
+                ]
+            }
+        ],
+        "materials": [base_material(params)],
+        "extensions": {
+            "VRMC_vrm": vrmc_vrm_with_lookat_type(&params.id, &skeleton.bone_to_node, mesh_node_index, lookat_type)
+        }
+    });
+
+    for key in ["buffers", "bufferViews", "accessors"] {
+        doc[key] = packed.json[key].clone();
+    }
+
+    let json_bytes = serde_json::to_vec(&doc)?;
+    let glb = write_glb(&GlbDocument {
+        json: json_bytes,
+        binary: packed.binary,
+    })?;
+
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(output, glb)?;
+    Ok(())
+}
 
 /// Returns `true` when the scene contains any extended-shape collider
 /// (Plane, InsideSphere, InsideCapsule) or any spring with a joint angle
@@ -1095,6 +1176,67 @@ pub fn emit_vrma_expression_triplet(
     let plan = crate::sidecar::build_vrma_expression_test_plan(params, &vrm_relpath, &vrma_relpath);
     let yaml_path = output_dir.join(format!("{}.test.yaml", params.id));
     crate::sidecar::write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// Emit a VRMA lookAt sweep triplet: .vrm + .vrma + .test.yaml.
+///
+/// The .vrm uses the avatar lookAt.type specified by `params.avatar_lookat_type`
+/// (bone or expression). The .vrma carries a single lookAt gaze rotation from
+/// identity to the target direction over `params.duration_s`. The .test.yaml
+/// declares `animation.vrma` so the runner drives the VRMA op sequence.
+pub fn emit_vrma_lookat_triplet(
+    output_dir: &Utf8Path,
+    params: &crate::vrma_params::VrmaLookAtParams,
+) -> Result<()> {
+    use crate::vrma_emit::{add_look_at_channel, build_empty_vrma, write_vrma_glb};
+    use crate::vrma_params::{AvatarLookAtType, RotationAxis};
+
+    std::fs::create_dir_all(output_dir)?;
+
+    // 1. .vrm with the avatar's lookAt.type matching params.
+    let vrm_relpath = format!("{}.vrm", params.id);
+    let vrm_path = output_dir.join(&vrm_relpath);
+    let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
+    let avatar_lookat = match params.avatar_lookat_type {
+        AvatarLookAtType::Bone => LookAtType::Bone,
+        AvatarLookAtType::Expression => LookAtType::Expression,
+    };
+    emit_vrm_with_lookat_type(&mtoon_defaults, avatar_lookat, &vrm_path)?;
+
+    // 2. .vrma with a single lookAt gaze direction.
+    let mut doc = build_empty_vrma();
+    doc["nodes"].as_array_mut().unwrap().push(serde_json::json!({
+        "name": "vrma_lookat_target"
+    }));
+    let node_idx: usize = 0; // first (and only) node
+
+    let half_rad = (params.angle_deg.to_radians()) / 2.0;
+    let sin_h = half_rad.sin();
+    let cos_h = half_rad.cos();
+    let target_quat = match params.axis {
+        RotationAxis::X => [sin_h, 0.0, 0.0, cos_h],
+        RotationAxis::Y => [0.0, sin_h, 0.0, cos_h],
+        RotationAxis::Z => [0.0, 0.0, sin_h, cos_h],
+    };
+    let keyframes: [(f32, [f32; 4]); 2] = [
+        (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
+        (params.duration_s, target_quat),
+    ];
+
+    let mut buffer = Vec::<u8>::new();
+    add_look_at_channel(&mut doc, &mut buffer, node_idx, [0.0, 0.06, 0.0], &keyframes);
+
+    let vrma_relpath = format!("{}.vrma", params.id);
+    let vrma_path = output_dir.join(&vrma_relpath);
+    let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
+    std::fs::write(&vrma_path, &vrma_bytes)?;
+
+    // 3. .test.yaml.
+    let plan =
+        crate::sidecar::build_vrma_lookat_test_plan(params, &vrm_relpath, &vrma_relpath);
+    crate::sidecar::write_test_yaml(&plan, &output_dir.join(format!("{}.test.yaml", params.id)))?;
 
     Ok(())
 }

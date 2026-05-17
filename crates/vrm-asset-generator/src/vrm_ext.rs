@@ -8,6 +8,45 @@ use crate::params::{AlphaMode, MToonParams, OutlineWidthMode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
+/// Choice of `VRMC_vrm.lookAt.type` per the VRM 1.0 spec.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LookAtType {
+    Bone,
+    Expression,
+}
+
+impl LookAtType {
+    fn as_str(self) -> &'static str {
+        match self {
+            LookAtType::Bone => "bone",
+            LookAtType::Expression => "expression",
+        }
+    }
+}
+
+fn lookat_block(lookat_type: LookAtType) -> Value {
+    json!({
+        "type": lookat_type.as_str(),
+        "offsetFromHeadBone": [0.0, 0.06, 0.0],
+        "rangeMapHorizontalInner": { "inputMaxValue": 90.0, "outputScale": 10.0 },
+        "rangeMapHorizontalOuter": { "inputMaxValue": 90.0, "outputScale": 10.0 },
+        "rangeMapVerticalDown":     { "inputMaxValue": 90.0, "outputScale": 10.0 },
+        "rangeMapVerticalUp":       { "inputMaxValue": 90.0, "outputScale": 10.0 }
+    })
+}
+
+/// Like `vrmc_vrm` but takes the avatar's lookAt.type.
+pub fn vrmc_vrm_with_lookat_type(
+    meta_name: &str,
+    bone_to_node: &BTreeMap<String, usize>,
+    mesh_node: usize,
+    lookat_type: LookAtType,
+) -> Value {
+    let mut v = vrmc_vrm(meta_name, bone_to_node, mesh_node);
+    v["lookAt"] = lookat_block(lookat_type);
+    v
+}
+
 /// Build the VRMC_vrm extension JSON.
 ///
 /// `bone_to_node` maps VRM bone names to glTF node indices (from the

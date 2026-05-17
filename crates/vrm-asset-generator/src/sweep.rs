@@ -442,6 +442,37 @@ fn build_multichain_scene(id: &str, chain_count: u32, sharing_mode: &str) -> Spr
     }
 }
 
+pub fn vrma_lookat_sweep() -> Vec<crate::vrma_params::VrmaLookAtParams> {
+    use crate::vrma_params::{AvatarLookAtType, RotationAxis, VrmaLookAtParams};
+
+    let directions: [(&str, RotationAxis, f32); 5] = [
+        ("yaw_neg60", RotationAxis::Y, -60.0),
+        ("yaw_pos60", RotationAxis::Y, 60.0),
+        ("pitch_neg30", RotationAxis::X, -30.0),
+        ("pitch_pos30", RotationAxis::X, 30.0),
+        ("neutral", RotationAxis::Y, 0.0),
+    ];
+    let configs = [AvatarLookAtType::Bone, AvatarLookAtType::Expression];
+
+    let mut out = Vec::new();
+    for (dir_name, axis, angle) in directions {
+        for config in configs {
+            let config_str = match config {
+                AvatarLookAtType::Bone => "bone",
+                AvatarLookAtType::Expression => "expr",
+            };
+            out.push(VrmaLookAtParams {
+                id: format!("vrma_lookat_{dir_name}_{config_str}"),
+                axis,
+                angle_deg: angle,
+                avatar_lookat_type: config,
+                duration_s: 1.0,
+            });
+        }
+    }
+    out
+}
+
 pub fn vrma_expression_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> {
     use crate::vrma_params::VrmaExpressionParams;
 

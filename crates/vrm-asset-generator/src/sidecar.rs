@@ -349,6 +349,41 @@ pub fn build_vrma_expression_test_plan(
     plan
 }
 
+/// Build a test plan for a VRMA lookAt sweep triplet.
+///
+/// Starts from the default camera/lighting/output settings and overlays:
+/// - `spec_section`: names VRMC_vrm_animation and the gaze direction + avatar config
+/// - `animation.vrma`: path to the `.vrma` file + `apply_at_time`
+/// - `diff.pose_tolerance`: tight lookAt yaw/pitch tolerance
+pub fn build_vrma_lookat_test_plan(
+    params: &crate::vrma_params::VrmaLookAtParams,
+    vrm_relpath: &str,
+    vrma_relpath: &str,
+) -> TestPlan {
+    let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
+    let mut plan = build_default_test_plan(&mtoon_defaults, vrm_relpath);
+    plan.spec_section = format!(
+        "VRMC_vrm_animation (lookAt sweep: {:?} {:+.0}\u{00b0} vs avatar.{:?})",
+        params.axis, params.angle_deg, params.avatar_lookat_type
+    );
+    plan.animation = Some(AnimationConfig {
+        root_transform: None,
+        vrma: Some(VrmaAnimation {
+            path: vrma_relpath.into(),
+            apply_at_time: params.duration_s,
+        }),
+    });
+    plan.diff.pose_tolerance = Some(vrm_test_plan::PoseTolerance {
+        per_bone_quaternion_radians: 0.010,
+        hips_translation_m: 0.005,
+        per_preset_expression: 0.005,
+        per_custom_expression: 0.005,
+        look_at_yaw_pitch_degrees: 1.0,
+        offset_from_head_bone_m: 0.001,
+    });
+    plan
+}
+
 fn default_properties(_params: &MToonParams) -> Vec<PropertyAssertion> {
     // v0.1 default: one general-purpose lower-quad average-luminance check.
     // Test-specific assertions get added per parameter combination later.
