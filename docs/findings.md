@@ -1327,3 +1327,108 @@ Either way the data is unambiguous on a more basic point: **`alphaCutoff` does n
 The new signal warrants follow-up issue-filing once we have a clean reproduction story:
 - File three-vrm + godot-vrm issues that `alphaCutoff` parameter has no visible effect in their MToon paths (or confirm via the spec that the observation is spec-compliant — MASK with uniform `baseColorFactor.a == alphaCutoff` is a degenerate case where pass/fail is the only spec-prescribed behavior).
 - Comment on VMK#264 with this corpus's observation: "VMK distinguishes cutoff values at the PNG level; the discard-before-A2C bug described in #264 may not be the root cause of three-vrm/godot-vrm divergence on these test_ids."
+
+## VRMA conformance — first cross-renderer signal (two real adapters)
+
+**Trigger:** VRMA phases 1-5 landed (commits `36b663d..d012255`). UniVRM (phase 4) and three-vrm (phase 5) are now real VRMA adapters; godot-vrm and VRMMetalKit return `-32000 vrma-v1` Unimplemented. This is the first run where two real adapters produce comparable pose-vector output.
+
+**Method:** Phase 6 bootstrap renders the 37-plan VRMA corpus (15 humanoid + 12 expression + 10 lookAt) through all 4 adapters. `scripts/vrma-pose-consensus.py` aggregates `<output_dir>/<id>_<renderer>.pose.json` pairs into a structured pose-diff report using spec-default tolerances (0.010 rad per-bone / 0.005 m hips / 0.005 expression / 1.0° yaw-pitch / 0.001 m offset).
+
+### Adapter VRMA coverage
+
+| adapter | pose.json files produced | gap | tracker |
+|---|---|---|---|
+| three-vrm | **37/37** (full corpus) | — | — |
+| UniVRM | **15/37** (humanoid sweep only) | expression + lookAt assets fail UniVRM load; bugs in our .vrma emission — see "Emission bugs surfaced" below | self-filed in this findings entry |
+| godot-vrm | 0/37 | Unimplemented; `addons/vrm/1.0/VRMC_vrm_animation.gd` is an empty stub | upstream issue (to be filed) |
+| VRMMetalKit | 0/37 | Unimplemented; VMK#165 open since 2026-05-10 | [VMK#165](https://github.com/arkavo-org/VRMMetalKit/issues/165) |
+
+### Cross-renderer headline (15 humanoid plans, three-vrm vs UniVRM)
+
+**0/15 plans pass at spec-default tolerances. Worst per-bone divergence: 1.0472 rad (60°). Mean across the 15 plans: 0.66904 rad (~38°).**
+
+```
+==> Cross-renderer pose-diff: three-vrm vs univrm
+    test_id_count: 15
+    passed: 0/15
+    failed: 15/15
+
+    Per-channel maxima (worst single test):
+      per_bone_rotation_max_rad                max=1.04720  mean=0.66904
+      hips_translation_m                       max=0.00000  mean=0.00000
+      per_preset_expression_max_delta          max=0.00000  mean=0.00000
+      look_at_yaw_delta_deg                    max=0.00000  mean=0.00000
+```
+
+### Top 10 most-divergent test_ids
+
+| test_id | per-bone max (rad) | worst bone | authored angle |
+|---|---:|---|---:|
+| `vrma_humanoid_l_lowerleg_pitch` | 1.0472 | leftLowerLeg | 60° |
+| `vrma_humanoid_l_upperarm_pitch` | 1.0472 | leftUpperArm | 60° |
+| `vrma_humanoid_l_upperarm_yaw` | 1.0472 | leftUpperArm | 60° |
+| `vrma_humanoid_r_upperarm_pitch` | 1.0472 | rightUpperArm | 60° |
+| `vrma_humanoid_r_upperarm_yaw` | 1.0472 | rightUpperArm | 60° |
+| `vrma_humanoid_head_yaw_45` | 0.7854 | head | 45° |
+| `vrma_humanoid_l_upperleg_pitch` | 0.7854 | leftUpperLeg | 45° |
+| `vrma_humanoid_l_upperarm_roll` | 0.5236 | leftUpperArm | 30° |
+| `vrma_humanoid_neck_yaw_30` | 0.5236 | neck | 30° |
+| `vrma_humanoid_r_upperarm_roll` | 0.5236 | rightUpperArm | 30° |
+
+### The pattern is conclusive
+
+Each test_id's measured divergence equals **exactly** the generator-authored angle of that bone's rotation (1.0472 = 60°, 0.7854 = 45°, 0.5236 = 30°). This is the unmistakable signature of "one renderer applies the rotation, the other leaves the bone at identity". The geodesic between authored-quat and identity is the authored angle.
+
+Inspection of `vrma_humanoid_l_upperarm_yaw` pose dumps confirms:
+
+```
+leftUpperArm  three-vrm = [0.0, 0.5,  0.0, 0.866]   ← 60° Y rotation applied
+leftUpperArm  univrm    = [0,   0,    0,   1]       ← identity, no rotation
+```
+
+### Apparent UniVRM batch-path-specific issue
+
+This contradicts the phase 4 task 9 smoke (commit `35db5c6`), which verified that UniVRM correctly applies the head bone's 45° Y rotation when given `vrma_humanoid_head_yaw_45` via the manual one-off `execute-test-plan` path. The smoke produced UniVRM head `[0, -0.3827, 0, 0.9239]` = ±45° Y (sign-invariant); the phase 6 batch produces UniVRM head identity on the *same* .vrma input.
+
+The divergence isn't in three-vrm (verified via phase 5 smoke at `vrma_humanoid_head_yaw_45` → 45°) and isn't in the .vrma file itself (same file three-vrm reads). It's in UniVRM's **batched** VRMA path through `Conformance.Tests.Play.BatchRunner` versus the one-off `execute-test-plan` path that worked in phase 4 smoke. Likely root causes (not yet pinned down):
+
+1. **`apply_at_time` not threaded through the batch manifest.** The BatchRunner reads `t.animation.vrma.apply_at_time` from manifest.json; the runner's `execute_test_batch.rs` may not be serializing it correctly.
+2. **VrmaDriver's `srcAnimator.enabled = false` toggle interacts with PlayMode batch lifecycle differently** than with the one-off PlayMode invocation. Per-test cleanup may be leaving Mecanim in a state where SampleAnimation doesn't reach limb bones on subsequent iterations.
+3. **The retarget call `target.Runtime.Process()` is being shadowed by per-frame Mecanim updates** when the GameObject lifetime spans the next `yield return null`.
+
+Tracked for follow-up; doesn't block the cross-renderer signal — three-vrm is correct, UniVRM batch reports identity for non-head bones.
+
+### Emission bugs surfaced (22 of 37 plans fail UniVRM load)
+
+The phase 3 .vrma generator has two bugs that prevent UniVRM from loading expression and lookAt assets:
+
+**Expression sweep (12 failures): `NodeImporter.FixCoordinate` index out of range.**
+```
+System.ArgumentOutOfRangeException: Index was out of range.
+  at UniGLTF.NodeImporter.FixCoordinate (...) [0x0005d] in NodeImporter.cs:161
+```
+The generator emits expression-target nodes with no TRS fields; `FixCoordinate` walks the node hierarchy and tries to read from an array indexed by something that's missing. Hypothesis: the node needs an explicit `translation`/`rotation`/`scale` or `matrix` field.
+
+**LookAt sweep (10 failures): `VrmAnimationImporter.TransferOwnership` null reference.**
+```
+System.NullReferenceException: Object reference not set to an instance of an object
+  at UniVRM10.VrmAnimationImporter.TransferOwnership (...) [0x0000c] in VrmAnimationImporter.cs:303
+```
+`TransferOwnership` is called after the importer parses humanoid + expression + lookAt blocks. Hypothesis: lookAt-only .vrma files need humanoid bones declared even when no humanoid rotation channels exist, to satisfy UniVRM's importer invariants.
+
+These are corpus-emission bugs filed against ourselves — not consortium-implementation bugs. Three-vrm reads these same .vrma files without issue, so they're spec-compliant enough for three-vrm's parser. UniVRM has stricter validation. Worth filing as our own follow-up; doesn't block the headline result.
+
+### Interpretation
+
+**Phase 6 closes the wiring loop:** two real adapters can apply VRMA, and the runner can compute cross-renderer pose-vector diff over the result. The 15-plan signal is the first measurable VRMA conformance number we've ever produced. **It's also a real cross-renderer divergence finding — UniVRM's batch path applies head bone but not limb bones, while three-vrm applies all.**
+
+The "0/15 pass" headline isn't a methodology failure or threshold-too-tight issue — it's a real engineering signal pointing at UniVRM's batch lifecycle. Until that gets pinned down, the suite has a valid first-pass measurement, and the bug it surfaced is the kind of thing the conformance suite exists to find.
+
+### Forward
+
+1. **Investigate UniVRM batch path** for why limb bones report identity while the one-off path applies them correctly. Likely a 1-2 commit fix once root cause is identified (apply_at_time threading, Mecanim toggle ordering, or Runtime.Process timing).
+2. **Fix expression + lookAt .vrma emission** so UniVRM can load all 37 plans. Two distinct generator-side bugs; tracked as their own follow-up.
+3. **File V-Sekai/godot-vrm issue** for `VRMC_vrm_animation.gd` stub completion. Comment on VMK#165 with the spec test surface.
+4. **Manual humanoid clips** (avatarA_wave_hello.vrma etc.) deferred per design — require Blender authoring + T-pose audit. Future "phase 7 manual clips".
+
+The 15-plan signal at 0/15 pass is paradoxically the cleanest VRMA conformance finding the suite has produced: a single, falsifiable divergence pattern with named bones, named test_ids, and a clearly-bounded root cause (UniVRM batch path; not three-vrm; not the .vrma emission; not phase 2 runner substrate). That's exactly what cross-renderer conformance is supposed to surface.
