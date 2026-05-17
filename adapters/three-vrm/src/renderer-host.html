@@ -122,6 +122,10 @@
         state.vrmaClip = createVRMAnimationClip(state.vrmAnimation, state.vrm);
         state.vrmaMixer = new THREE.AnimationMixer(state.vrm.scene);
         const action = state.vrmaMixer.clipAction(state.vrmaClip);
+        // LoopOnce + clampWhenFinished so setTime(duration) holds the final
+        // pose instead of wrapping back to t=0.
+        action.setLoop(THREE.LoopOnce, 0);
+        action.clampWhenFinished = true;
         action.play();
 
         const anim = state.vrmAnimation;
