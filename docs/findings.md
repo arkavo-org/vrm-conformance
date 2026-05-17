@@ -1571,3 +1571,48 @@ A 0.15.1 (unreleased) tester reported twin-tails / side-locks sticking horizonta
 Forwarded to VMK at [VMK#270](https://github.com/arkavo-org/VRMMetalKit/issues/270) with diagnostic suggestions (check `parentWorldRotation` is read fresh each frame; log the 4 force-term magnitudes; verify whether the asset declares `center`).
 
 **Corpus gap surfaced:** the suite's `animate_root_transform` op exercises translation-driven inertia but not rotation-driven inertia. A new `animate_root_rotation` op + 12–18 variant rotation-while-physics sweep would catch this defect class. Filed as [vrm-conformance#12](https://github.com/arkavo-org/vrm-conformance/issues/12).
+
+## Gap-fill: gravity magnitude sweep retuned for VMK 0.15.1's spec-correct gravity scale
+
+**Trigger:** verifying VMK 0.15.1, the `swing_springbone_gravity_{0,1,2}.png` PNGs all share SHA `68b391e7764a` on VMK — the 12× behaviour-change collapse. A pointed user question — "Is gravity being tested?" — surfaced the deeper issue: even pre-0.15.1, the gravity magnitude sweep `{0.0, 1.0, 2.0}` was only discriminating on **one renderer** (three-vrm). VMK + godot-vrm + UniVRM all collapsed to a single SHA across the magnitude axis.
+
+### Pre-retune cross-renderer SHAs (swing variants)
+
+| renderer | distinct SHAs (3 magnitudes) | status |
+|---|---|---|
+| three-vrm | **3/3** | discriminates correctly |
+| vrm-metal-kit (0.15.1) | 1/3 | saturated at 12× scale |
+| godot-vrm | 1/3 | known godot spring-bone defect |
+| univrm | 1/3 | values too large for spec-correct scale |
+
+Three of the four renderers were giving the suite zero signal on the gravity-power axis. The corpus had a real coverage gap even before 0.15.1; the 12× change just made it more visible.
+
+### Retune
+
+Replaced `{0.0, 1.0, 2.0}` with `{0.0, 0.02, 0.05, 0.10, 0.20}` — 5 values spanning the post-spec-compliance discrimination band. Lower end (0.02) is just above three-vrm's noise floor; upper end (0.20) is well below VMK 0.15.1's saturation threshold.
+
+### Post-retune cross-renderer SHAs (swing variants)
+
+| renderer | distinct SHAs (5 magnitudes) | status |
+|---|---|---|
+| **three-vrm** | **5/5** | discriminates fully |
+| **vrm-metal-kit (0.15.1)** | **5/5** | discriminates fully — VMK is now a member of the spec-correct cluster on gravity-power |
+| godot-vrm | 1/5 | still collapses; known defect tracked separately |
+| univrm | (re-run pending — first attempt blocked by an unrelated UniVRM batch bug, see below) |
+
+The gap is closed: VMK + three-vrm now both produce 5-way distinct PNG SHAs across the new gravity sweep. Cross-renderer signal on the gravity-power axis is real and falsifiable.
+
+### Unrelated UniVRM BatchRunner bug surfaced during retune verification
+
+UniVRM batch reported `VrmaApplyFailed: vrma file not found:` on every retuned `swing_springbone_gravity_*` test plan. Root cause: Unity's `JsonUtility` deserializes absent JSON sub-objects as default-constructed instances rather than null. A test plan with `animation: { root_transform: {...} }` and no `vrma` block produced a non-null `VrmaDto` with empty `path`. The BatchRunner's previous `t.animation.vrma != null` guard passed → tried to load `""` → reported VrmaApplyFailed on non-VRMA tests.
+
+Fixed by guarding on both null AND empty-path: `t.animation.vrma != null && !string.IsNullOrEmpty(t.animation.vrma.path)`. Bug was latent — would have triggered on any non-VRMA test going through the batch since VRMA phase 4. The retune flushed it out because it added 4 new non-VRMA swing tests with similar manifest shapes; one of them happened to be the first to deserialize through the broken guard. Same root cause as the JsonUtility quirk that's known to affect other Unity adapters; the conformance suite caught it.
+
+### Forward
+
+Same playbook applies. The gravity-power sweep is now a real cross-renderer signal:
+- Three-vrm and VMK agree on what each magnitude produces (within SSIM noise floor)
+- godot-vrm's collapse becomes the next investigation target — file as a separate finding when surfacing it for V-Sekai/godot-vrm
+- The suite continues to produce falsifiable signal driving upstream closure
+
+The retune is a one-time methodology adjustment, not a recurring concern. Future renderer regressions on the gravity axis will surface as a renderer dropping out of the 5/5 distinct band — same mechanism as the spring-bone closure findings from prior phases.
