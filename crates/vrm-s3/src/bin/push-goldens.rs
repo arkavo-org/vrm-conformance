@@ -138,5 +138,7 @@ fn local_manifest_entry(
             .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string()),
         positions_url: None,
         positions_blake3: None,
+        vrma_url: None,
+        vrma_blake3: None,
     })
 }

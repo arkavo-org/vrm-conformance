@@ -26,6 +26,12 @@ pub struct ManifestEntry {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub positions_blake3: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vrma_url: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vrma_blake3: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +93,8 @@ mod tests {
             submitted_at: "2026-05-10T12:00:00Z".into(),
             positions_url: None,
             positions_blake3: None,
+            vrma_url: None,
+            vrma_blake3: None,
         }
     }
 
@@ -104,6 +112,8 @@ mod tests {
             submitted_at: "2026-05-15T12:00:00Z".into(),
             positions_url: Some("s3://b/x.positions.json".into()),
             positions_blake3: Some("blake3:bbb".into()),
+            vrma_url: None,
+            vrma_blake3: None,
         };
         let s = serde_json::to_string(&e).unwrap();
         let back: ManifestEntry = serde_json::from_str(&s).unwrap();
@@ -128,6 +138,8 @@ mod tests {
             submitted_at: "2026-05-15T12:00:00Z".into(),
             positions_url: None,
             positions_blake3: None,
+            vrma_url: None,
+            vrma_blake3: None,
         };
         let v: serde_json::Value = serde_json::to_value(&e).unwrap();
         assert!(
@@ -200,5 +212,57 @@ mod tests {
         assert_eq!(m.entries[0].image_blake3, e.image_blake3);
         assert_eq!(m.entries[0].byte_size, e.byte_size);
         assert_eq!(m.entries[0].submitted_at, e.submitted_at);
+    }
+
+    #[test]
+    fn manifest_entry_roundtrips_vrma_url() {
+        let e = ManifestEntry {
+            test_id: "vrma_humanoid_x".into(),
+            renderer_name: "univrm".into(),
+            renderer_version: "v0.131.0".into(),
+            git_hash: "abc".into(),
+            metadata: sample_metadata(),
+            image_url: "s3://b/x.png".into(),
+            image_blake3: "blake3:img".into(),
+            byte_size: 1024,
+            submitted_at: "2026-05-10T12:00:00Z".into(),
+            positions_url: None,
+            positions_blake3: None,
+            vrma_url: Some("s3://b/x.vrma".into()),
+            vrma_blake3: Some("blake3:vrma".into()),
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        let back: ManifestEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.vrma_url.as_deref(), Some("s3://b/x.vrma"));
+        assert_eq!(back.vrma_blake3.as_deref(), Some("blake3:vrma"));
+        assert!(json.contains(r#""vrma_url":"s3://b/x.vrma""#));
+    }
+
+    #[test]
+    fn manifest_entry_omits_vrma_fields_when_none() {
+        let e = ManifestEntry {
+            test_id: "mtoon_default".into(),
+            renderer_name: "univrm".into(),
+            renderer_version: "v0.131.0".into(),
+            git_hash: "abc".into(),
+            metadata: sample_metadata(),
+            image_url: "s3://b/x.png".into(),
+            image_blake3: "blake3:img".into(),
+            byte_size: 1024,
+            submitted_at: "2026-05-10T12:00:00Z".into(),
+            positions_url: None,
+            positions_blake3: None,
+            vrma_url: None,
+            vrma_blake3: None,
+        };
+        let v: serde_json::Value = serde_json::to_value(&e).unwrap();
+        assert!(
+            v.get("vrma_url").is_none(),
+            "vrma_url None must be omitted, got {v}"
+        );
+        assert!(
+            v.get("vrma_blake3").is_none(),
+            "vrma_blake3 None must be omitted, got {v}"
+        );
     }
 }

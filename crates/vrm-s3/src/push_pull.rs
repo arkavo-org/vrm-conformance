@@ -53,6 +53,8 @@ pub async fn push_png(file: &Utf8Path, test_id: &str, opts: &PushOptions) -> Res
         submitted_at: now_rfc3339(),
         positions_url: None,
         positions_blake3: None,
+        vrma_url: None,
+        vrma_blake3: None,
     })
 }
 

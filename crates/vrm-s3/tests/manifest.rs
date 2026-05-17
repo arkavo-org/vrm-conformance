@@ -23,6 +23,8 @@ fn manifest_round_trips_json() {
             submitted_at: "2026-05-10T12:00:00Z".into(),
             positions_url: None,
             positions_blake3: None,
+            vrma_url: None,
+            vrma_blake3: None,
         }],
     };
     let s = serde_json::to_string(&m).unwrap();
