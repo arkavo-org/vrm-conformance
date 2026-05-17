@@ -15,3 +15,4 @@ pub mod spring_bone;
 pub mod sweep;
 pub mod vrm_ext;
 pub mod vrma_emit;
+pub mod vrma_params;
