@@ -91,7 +91,9 @@ pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
 
 use crate::sidecar::{build_default_test_plan, write_meta_json, write_test_yaml};
 use crate::spring_bone::{ColliderAttach, ColliderShape, SpringBoneParams, SpringBoneSceneParams};
-use crate::vrm_ext::{vrmc_spring_bone, vrmc_spring_bone_scene, LookAtType, vrmc_vrm_with_lookat_type};
+use crate::vrm_ext::{
+    vrmc_spring_bone, vrmc_spring_bone_scene, vrmc_vrm_with_lookat_type, LookAtType,
+};
 
 /// Emit a `.vrm` GLB identical to `emit_vrm` except that the avatar's
 /// `VRMC_vrm.lookAt.type` is set to the caller-supplied value.
@@ -1117,8 +1119,7 @@ pub fn emit_vrma_humanoid_triplet(
     std::fs::write(&vrma_path, &vrma_bytes)?;
 
     // 3. Emit the .test.yaml.
-    let plan =
-        crate::sidecar::build_vrma_humanoid_test_plan(params, &vrm_relpath, &vrma_relpath);
+    let plan = crate::sidecar::build_vrma_humanoid_test_plan(params, &vrm_relpath, &vrma_relpath);
     let yaml_path = output_dir.join(format!("{}.test.yaml", params.id));
     crate::sidecar::write_test_yaml(&plan, &yaml_path)?;
 
@@ -1135,7 +1136,9 @@ pub fn emit_vrma_expression_triplet(
     output_dir: &Utf8Path,
     params: &crate::vrma_params::VrmaExpressionParams,
 ) -> Result<()> {
-    use crate::vrma_emit::{add_expression_weight_channel, build_empty_vrma, write_vrma_glb, ExpressionKind};
+    use crate::vrma_emit::{
+        add_expression_weight_channel, build_empty_vrma, write_vrma_glb, ExpressionKind,
+    };
 
     std::fs::create_dir_all(output_dir)?;
 
@@ -1207,9 +1210,12 @@ pub fn emit_vrma_lookat_triplet(
 
     // 2. .vrma with a single lookAt gaze direction.
     let mut doc = build_empty_vrma();
-    doc["nodes"].as_array_mut().unwrap().push(serde_json::json!({
-        "name": "vrma_lookat_target"
-    }));
+    doc["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "name": "vrma_lookat_target"
+        }));
     let node_idx: usize = 0; // first (and only) node
 
     let half_rad = (params.angle_deg.to_radians()) / 2.0;
@@ -1226,7 +1232,13 @@ pub fn emit_vrma_lookat_triplet(
     ];
 
     let mut buffer = Vec::<u8>::new();
-    add_look_at_channel(&mut doc, &mut buffer, node_idx, [0.0, 0.06, 0.0], &keyframes);
+    add_look_at_channel(
+        &mut doc,
+        &mut buffer,
+        node_idx,
+        [0.0, 0.06, 0.0],
+        &keyframes,
+    );
 
     let vrma_relpath = format!("{}.vrma", params.id);
     let vrma_path = output_dir.join(&vrma_relpath);
@@ -1234,8 +1246,7 @@ pub fn emit_vrma_lookat_triplet(
     std::fs::write(&vrma_path, &vrma_bytes)?;
 
     // 3. .test.yaml.
-    let plan =
-        crate::sidecar::build_vrma_lookat_test_plan(params, &vrm_relpath, &vrma_relpath);
+    let plan = crate::sidecar::build_vrma_lookat_test_plan(params, &vrm_relpath, &vrma_relpath);
     crate::sidecar::write_test_yaml(&plan, &output_dir.join(format!("{}.test.yaml", params.id)))?;
 
     Ok(())

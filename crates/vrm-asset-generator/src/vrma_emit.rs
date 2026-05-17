@@ -115,8 +115,10 @@ pub fn add_expression_weight_channel(
     kind: ExpressionKind,
     keyframes: &[(f32, f32)],
 ) {
-    let translation_keyframes: Vec<(f32, [f32; 3])> =
-        keyframes.iter().map(|(t, w)| (*t, [*w, 0.0, 0.0])).collect();
+    let translation_keyframes: Vec<(f32, [f32; 3])> = keyframes
+        .iter()
+        .map(|(t, w)| (*t, [*w, 0.0, 0.0]))
+        .collect();
     add_node_translation_channel(doc, buffer, node_index, &translation_keyframes);
 
     let ext = doc["extensions"]["VRMC_vrm_animation"]
@@ -349,7 +351,10 @@ mod tests {
             used.contains(&"VRMC_vrm_animation"),
             "extensionsUsed must list VRMC_vrm_animation, got {used:?}"
         );
-        assert_eq!(parsed["extensions"]["VRMC_vrm_animation"]["specVersion"], "1.0");
+        assert_eq!(
+            parsed["extensions"]["VRMC_vrm_animation"]["specVersion"],
+            "1.0"
+        );
     }
 
     #[test]
@@ -365,7 +370,18 @@ mod tests {
             &mut buffer,
             0,
             "head",
-            &[(0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]), (1.0, [0.0, std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2])],
+            &[
+                (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
+                (
+                    1.0,
+                    [
+                        0.0,
+                        std::f32::consts::FRAC_1_SQRT_2,
+                        0.0,
+                        std::f32::consts::FRAC_1_SQRT_2,
+                    ],
+                ),
+            ],
         );
 
         let humanoid = &doc["extensions"]["VRMC_vrm_animation"]["humanoid"];
@@ -414,7 +430,10 @@ mod tests {
     fn custom_expression_lands_in_custom_section() {
         let mut doc = build_empty_vrma();
         let mut buffer = Vec::<u8>::new();
-        doc["nodes"].as_array_mut().unwrap().push(json!({ "name": "smug" }));
+        doc["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "name": "smug" }));
 
         add_expression_weight_channel(
             &mut doc,
@@ -440,22 +459,31 @@ mod tests {
         let mut doc = build_empty_vrma();
         let mut buffer = Vec::<u8>::new();
 
-        doc["nodes"].as_array_mut().unwrap().push(json!({ "name": "look_at_target" }));
+        doc["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "name": "look_at_target" }));
 
         add_look_at_channel(
             &mut doc,
             &mut buffer,
             0,
             [0.0, 0.06, 0.0],
-            &[(0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]), (1.0, [0.0, 0.259, 0.0, 0.966])],
+            &[
+                (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
+                (1.0, [0.0, 0.259, 0.0, 0.966]),
+            ],
         );
 
         let look_at = &doc["extensions"]["VRMC_vrm_animation"]["lookAt"];
         assert_eq!(look_at["node"], 0);
         let offset = look_at["offsetFromHeadBone"].as_array().unwrap();
         assert_eq!(offset.len(), 3);
-        assert!((offset[1].as_f64().unwrap() - 0.06_f64).abs() < 1e-5,
-            "offsetFromHeadBone[1] should be ~0.06, got {}", offset[1]);
+        assert!(
+            (offset[1].as_f64().unwrap() - 0.06_f64).abs() < 1e-5,
+            "offsetFromHeadBone[1] should be ~0.06, got {}",
+            offset[1]
+        );
 
         // Must NOT pollute humanBones with a placeholder.
         let humanoid = doc["extensions"]["VRMC_vrm_animation"].get("humanoid");
@@ -463,7 +491,9 @@ mod tests {
             if let Some(bones) = h.get("humanBones") {
                 let bone_names: Vec<&String> = bones.as_object().unwrap().keys().collect();
                 assert!(
-                    !bone_names.iter().any(|n| n.contains("look_at") || n.contains("placeholder")),
+                    !bone_names
+                        .iter()
+                        .any(|n| n.contains("look_at") || n.contains("placeholder")),
                     "lookAt must not pollute humanBones, got {bone_names:?}"
                 );
             }
@@ -472,9 +502,12 @@ mod tests {
         // A rotation channel must exist for the lookAt node.
         let anim = &doc["animations"][0];
         let channels = anim["channels"].as_array().unwrap();
-        let has_rotation_for_node_0 = channels.iter().any(|c| {
-            c["target"]["node"] == 0 && c["target"]["path"] == "rotation"
-        });
-        assert!(has_rotation_for_node_0, "expected rotation channel on node 0 for lookAt");
+        let has_rotation_for_node_0 = channels
+            .iter()
+            .any(|c| c["target"]["node"] == 0 && c["target"]["path"] == "rotation");
+        assert!(
+            has_rotation_for_node_0,
+            "expected rotation channel on node 0 for lookAt"
+        );
     }
 }

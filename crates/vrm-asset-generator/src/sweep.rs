@@ -477,8 +477,16 @@ pub fn vrma_expression_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> 
     use crate::vrma_params::VrmaExpressionParams;
 
     let presets = [
-        "happy", "angry", "sad", "relaxed", "surprised",
-        "aa", "ih", "ou", "ee", "blink",
+        "happy",
+        "angry",
+        "sad",
+        "relaxed",
+        "surprised",
+        "aa",
+        "ih",
+        "ou",
+        "ee",
+        "blink",
     ];
     let custom = ["smug", "drowsy"];
 
@@ -562,12 +570,7 @@ pub fn vrma_humanoid_sweep() -> Vec<crate::vrma_params::VrmaHumanoidParams> {
             RotationAxis::X,
             60.0,
         ),
-        (
-            "vrma_humanoid_neck_yaw_30",
-            "neck",
-            RotationAxis::Y,
-            30.0,
-        ),
+        ("vrma_humanoid_neck_yaw_30", "neck", RotationAxis::Y, 30.0),
     ];
 
     entries
@@ -615,7 +618,11 @@ mod vrma_expression_sweep_tests {
     fn expression_sweep_all_duration_1s() {
         let variants = vrma_expression_sweep();
         for v in &variants {
-            assert!((v.duration_s - 1.0).abs() < 1e-6, "{}: duration should be 1.0", v.id);
+            assert!(
+                (v.duration_s - 1.0).abs() < 1e-6,
+                "{}: duration should be 1.0",
+                v.id
+            );
         }
     }
 }
