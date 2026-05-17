@@ -65,3 +65,7 @@ fastlane/test_output
 # Humanoid fixtures: symlinks to upstream-licensed VRM avatars
 # (VRM Platform License 1.0). Materialized by scripts/install-humanoid-fixtures.sh.
 assets/humanoid/
+
+# Python bytecode cache (vrma-pose-consensus.py + future python helpers)
+__pycache__/
+*.pyc
