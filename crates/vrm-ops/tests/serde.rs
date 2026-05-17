@@ -125,7 +125,7 @@ fn dump_humanoid_pose_result_roundtrip() {
         bones: vec![
             HumanoidBoneRotation {
                 name: "leftUpperArm".into(),
-                local_rotation_quat: [0.0, 0.0, 0.7071, 0.7071],
+                local_rotation_quat: [0.0, 0.0, std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2],
             },
             HumanoidBoneRotation {
                 name: "head".into(),
