@@ -60,3 +60,32 @@ fn unimplemented_error_round_trips() {
     assert_eq!(parsed.code, -32000);
     assert_eq!(parsed.data.unwrap()["phase"].as_str().unwrap(), "v1.x");
 }
+
+#[test]
+fn load_vrma_params_roundtrip() {
+    let p = LoadVrmaParams {
+        vrma_path: "/tmp/test.vrma".into(),
+    };
+    let s = serde_json::to_string(&p).unwrap();
+    let back: LoadVrmaParams = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.vrma_path, "/tmp/test.vrma");
+    assert!(s.contains(r#""vrma_path":"/tmp/test.vrma""#));
+}
+
+#[test]
+fn load_vrma_result_roundtrip() {
+    let r = LoadVrmaResult {
+        vrma_handle: 42,
+        channel_summary: VrmaChannelSummary {
+            humanoid_bones: 15,
+            expressions: 3,
+            has_look_at: true,
+            duration_seconds: 1.0,
+        },
+    };
+    let s = serde_json::to_string(&r).unwrap();
+    let back: LoadVrmaResult = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.vrma_handle, 42);
+    assert_eq!(back.channel_summary.humanoid_bones, 15);
+    assert!(back.channel_summary.has_look_at);
+}

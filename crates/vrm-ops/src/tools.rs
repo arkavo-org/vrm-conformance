@@ -167,6 +167,40 @@ pub struct DumpBonePositionsResult {
     pub springs: Vec<SpringPositions>,
 }
 
+/// Load a `.vrma` file (VRMC_vrm_animation glTF) and return an opaque handle
+/// plus a summary of the channels it contains. Only the first animation
+/// (`animations[0]`) is treated as the portable clip per VRMA spec; multi-
+/// animation `.vrma` files are accepted but only `animations[0]` is sampled.
+///
+/// Adapters that do not implement VRMA MUST return `-32000 Unimplemented`
+/// with `data: { phase: "vrma-v1" }`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadVrmaParams {
+    /// Filesystem path to a `.vrma` file. BLAKE3 refs (`blake3:<64-hex>`)
+    /// are also accepted by adapters that resolve content-addressed inputs.
+    pub vrma_path: String,
+}
+
+/// Summary of the channels a loaded `.vrma` references.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VrmaChannelSummary {
+    /// Count of humanoid bones referenced (by `humanoid.humanBones`).
+    pub humanoid_bones: u32,
+    /// Count of expressions referenced (preset + custom combined).
+    pub expressions: u32,
+    /// True if the `.vrma` contains a `lookAt` block.
+    pub has_look_at: bool,
+    /// Duration of `animations[0]` in seconds.
+    pub duration_seconds: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadVrmaResult {
+    /// Opaque handle the adapter assigns; subsequent ops reference this.
+    pub vrma_handle: u32,
+    pub channel_summary: VrmaChannelSummary,
+}
+
 /// Empty result type for ops that return no payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitResult {}
