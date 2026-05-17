@@ -38,6 +38,7 @@ export class BrowserSession {
   // We don't load multiple VRMs into the same page — three-vrm renders one
   // avatar at a time — so loading a new asset implicitly clears the previous.
   private currentAsset: LoadedAsset | null = null;
+  private currentVrma: LoadedAsset | null = null;
 
   async start(): Promise<void> {
     if (this.browser) return;
@@ -71,6 +72,32 @@ export class BrowserSession {
               status: 500,
               contentType: "text/plain",
               body: `read asset failed: ${(err as Error).message}`,
+            }),
+          );
+      }
+      if (url.startsWith("https://app.local/vrma")) {
+        const vrma = this.currentVrma;
+        if (!vrma) {
+          return route.fulfill({
+            status: 404,
+            contentType: "text/plain",
+            body: "no vrma loaded",
+          });
+        }
+        return fs
+          .readFile(vrma.diskPath)
+          .then((buffer) =>
+            route.fulfill({
+              status: 200,
+              contentType: "model/gltf-binary",
+              body: buffer,
+            }),
+          )
+          .catch((err: unknown) =>
+            route.fulfill({
+              status: 500,
+              contentType: "text/plain",
+              body: `read vrma failed: ${(err as Error).message}`,
             }),
           );
       }
@@ -162,6 +189,80 @@ export class BrowserSession {
     );
   }
 
+  async loadVrma(diskPath: string): Promise<{
+    vrma_handle: number;
+    channel_summary: {
+      humanoid_bones: number;
+      expressions: number;
+      has_look_at: boolean;
+      duration_seconds: number;
+    };
+  }> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    if (!fsSync.existsSync(diskPath)) {
+      throw new Error(`vrma not found: ${diskPath}`);
+    }
+    this.currentVrma = { diskPath };
+    return await this.page.evaluate(
+      ({ url }: { url: string }) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__loadVrma(url),
+      { url: "https://app.local/vrma" },
+    );
+  }
+
+  async applyVrmaAtTime(params: unknown): Promise<{
+    channels_applied: {
+      humanoid_bones: number;
+      expressions: number;
+      look_at: boolean;
+    };
+  }> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    return await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (p) => (window as any).__applyVrmaAtTime(p),
+      params,
+    );
+  }
+
+  async dumpHumanoidPose(): Promise<{
+    bones: Array<{ name: string; local_rotation_quat: number[] }>;
+    hips_translation: number[];
+    bones_missing: string[];
+  }> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    return await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__dumpHumanoidPose(),
+    );
+  }
+
+  async dumpExpressionWeights(): Promise<{
+    presets: Record<string, number>;
+    custom: Record<string, number>;
+  }> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    return await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__dumpExpressionWeights(),
+    );
+  }
+
+  async dumpLookAtState(): Promise<{
+    gaze_direction_quat: number[];
+    yaw_deg: number;
+    pitch_deg: number;
+    applied_via: string;
+    offset_from_head_bone: number[];
+  }> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    return await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__dumpLookAtState(),
+    );
+  }
+
   async render(params: {
     width: number;
     height: number;
@@ -198,6 +299,7 @@ export class BrowserSession {
       // ignore — page may be unhealthy
     }
     this.currentAsset = null;
+    this.currentVrma = null;
   }
 
   async dispose(): Promise<void> {
