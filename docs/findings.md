@@ -1494,3 +1494,18 @@ Full primer forwarded to VMK at [VMK#165 #issuecomment-4472458466](https://githu
 **Methodology note** (record for future):
 
 T-pose conformance has a precedent for being audited as a one-time check per avatar (the methodology hazard #1 the VRMA design spec already calls out). The suite's `avatarA_1_0.vrm` should be audited against the 8 appearance criteria + the rest-rotation-is-non-identity reality before manual humanoid clips (issue [#10](https://github.com/arkavo-org/vrm-conformance/issues/10)) ship. A T-pose audit isn't currently a runner op — it's a one-time check at corpus-curation time.
+
+### Spring-bone rotation guidance for VMK (0.15.1 hair-helicopter defect)
+
+A 0.15.1 (unreleased) tester reported twin-tails / side-locks sticking horizontally as the character rotates. Downstream framing identified 4 claimed spec violations; critical pass against canonical [VRMC_springBone-1.0 README.md](https://github.com/vrm-c/vrm-specification/blob/master/specification/VRMC_springBone-1.0/README.md):
+
+| user claim | accuracy | correct framing |
+|---|---|---|
+| "Verlet integration required" | overstated | Spec §SpringBone Algorithm explicitly marks the section `*non-normative*`. Verlet is the reference path; the mandate is on observable behavior. |
+| "gravityPower + gravityDir applied per frame" | **accurate** | Pseudocode: `external = deltaTime * gravityDir * gravityPower; nextTail += external`. |
+| "stiffness pulls toward rest pose" | partial | The pseudocode is `stiffness = deltaTime * parentWorldRotation * initialLocalRotation * boneAxis * stiffnessForce`. **The rest direction uses parent's CURRENT world rotation, not cached.** If VMK caches `initialParentWorldRotation`, the spring locks toward a world-fixed direction — manifests as "horizontal stick during rotation". |
+| "World-vs-local evaluation error" | spirit-correct but missing the spec mechanism | The spec has a `center` field per SpringChain that switches integration into center-relative space precisely for the "model rotates / walks" case. World space is the default; `center` is the spec's prescribed mechanism. |
+
+Forwarded to VMK at [VMK#270](https://github.com/arkavo-org/VRMMetalKit/issues/270) with diagnostic suggestions (check `parentWorldRotation` is read fresh each frame; log the 4 force-term magnitudes; verify whether the asset declares `center`).
+
+**Corpus gap surfaced:** the suite's `animate_root_transform` op exercises translation-driven inertia but not rotation-driven inertia. A new `animate_root_rotation` op + 12–18 variant rotation-while-physics sweep would catch this defect class. Filed as [vrm-conformance#12](https://github.com/arkavo-org/vrm-conformance/issues/12).
