@@ -125,7 +125,12 @@ fn dump_humanoid_pose_result_roundtrip() {
         bones: vec![
             HumanoidBoneRotation {
                 name: "leftUpperArm".into(),
-                local_rotation_quat: [0.0, 0.0, std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2],
+                local_rotation_quat: [
+                    0.0,
+                    0.0,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ],
             },
             HumanoidBoneRotation {
                 name: "head".into(),
@@ -160,7 +165,7 @@ fn dump_expression_weights_result_roundtrip() {
 #[test]
 fn dump_look_at_state_result_roundtrip() {
     let r = DumpLookAtStateResult {
-        gaze_direction_quat: [0.0, 0.2588, 0.0, 0.9659],  // 30° yaw
+        gaze_direction_quat: [0.0, 0.2588, 0.0, 0.9659], // 30° yaw
         yaw_deg: 30.0,
         pitch_deg: 0.0,
         applied_via: LookAtAppliedVia::Bone,
