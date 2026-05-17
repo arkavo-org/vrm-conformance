@@ -127,6 +127,24 @@ else
     rm -rf "$MULTICHAIN_DIR"; mkdir -p "$MULTICHAIN_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-multichain-sweep \
         --output-dir "$MULTICHAIN_DIR" --json >/dev/null
+
+    echo "==> Emitting VRMA humanoid sweep (VRMA phase 3: 15 plans)"
+    VRMA_HUMANOID_DIR="$GOLDENS_DIR/_assets_vrma_humanoid"
+    rm -rf "$VRMA_HUMANOID_DIR"; mkdir -p "$VRMA_HUMANOID_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-vrma-humanoid-sweep \
+        --output-dir "$VRMA_HUMANOID_DIR" --json >/dev/null
+
+    echo "==> Emitting VRMA expression sweep (VRMA phase 3: 12 plans)"
+    VRMA_EXPRESSION_DIR="$GOLDENS_DIR/_assets_vrma_expression"
+    rm -rf "$VRMA_EXPRESSION_DIR"; mkdir -p "$VRMA_EXPRESSION_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-vrma-expression-sweep \
+        --output-dir "$VRMA_EXPRESSION_DIR" --json >/dev/null
+
+    echo "==> Emitting VRMA lookAt sweep (VRMA phase 3: 10 plans, dual avatar configs)"
+    VRMA_LOOKAT_DIR="$GOLDENS_DIR/_assets_vrma_lookat"
+    rm -rf "$VRMA_LOOKAT_DIR"; mkdir -p "$VRMA_LOOKAT_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-vrma-lookat-sweep \
+        --output-dir "$VRMA_LOOKAT_DIR" --json >/dev/null
 fi
 
 # mapfile -t TEST_PLANS isn't available on macOS's bundled bash 3.2.
