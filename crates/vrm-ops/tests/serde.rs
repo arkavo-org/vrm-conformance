@@ -156,3 +156,34 @@ fn dump_expression_weights_result_roundtrip() {
     assert_eq!(back.presets.get("happy"), Some(&0.83));
     assert_eq!(back.custom.get("smug"), Some(&0.5));
 }
+
+#[test]
+fn dump_look_at_state_result_roundtrip() {
+    let r = DumpLookAtStateResult {
+        gaze_direction_quat: [0.0, 0.2588, 0.0, 0.9659],  // 30° yaw
+        yaw_deg: 30.0,
+        pitch_deg: 0.0,
+        applied_via: LookAtAppliedVia::Bone,
+        offset_from_head_bone: [0.0, 0.06, 0.0],
+    };
+    let s = serde_json::to_string(&r).unwrap();
+    let back: DumpLookAtStateResult = serde_json::from_str(&s).unwrap();
+    assert!(matches!(back.applied_via, LookAtAppliedVia::Bone));
+    assert_eq!(back.yaw_deg, 30.0);
+
+    // Variant serialization sanity
+    assert!(s.contains(r#""applied_via":"bone""#));
+}
+
+#[test]
+fn dump_look_at_state_applied_via_off_serializes() {
+    let r = DumpLookAtStateResult {
+        gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
+        yaw_deg: 0.0,
+        pitch_deg: 0.0,
+        applied_via: LookAtAppliedVia::Off,
+        offset_from_head_bone: [0.0, 0.0, 0.0],
+    };
+    let s = serde_json::to_string(&r).unwrap();
+    assert!(s.contains(r#""applied_via":"off""#));
+}

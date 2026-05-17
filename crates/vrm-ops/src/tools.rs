@@ -277,6 +277,46 @@ pub struct DumpExpressionWeightsResult {
     pub custom: std::collections::BTreeMap<String, f32>,
 }
 
+/// Dump current eye gaze state. Per the VRMA spec, the .vrma file declares
+/// gaze direction via a node rotation quaternion plus `offsetFromHeadBone`.
+/// The avatar's `VRMC_vrm.lookAt.type` (bone vs aim) determines how that
+/// direction is applied — that distinction lives in the avatar config,
+/// not in VRMA. This op exposes both:
+///   - the raw VRMA-declared gaze (quat + spec-defined Extrinsic ZXY
+///     yaw/pitch)
+///   - the avatar's application mode (`applied_via`)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DumpLookAtStateParams {
+    pub session_id: String,
+}
+
+/// How the avatar (per its `VRMC_vrm.lookAt.type`) applies the gaze
+/// direction declared by the .vrma. Reported by the adapter from the
+/// avatar's config, not derived from the .vrma.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LookAtAppliedVia {
+    /// Avatar `VRMC_vrm.lookAt.type: bone` — gaze rotates head/eye bones.
+    Bone,
+    /// Avatar `VRMC_vrm.lookAt.type: expression` — gaze drives lookUp/
+    /// lookDown/lookLeft/lookRight preset expressions.
+    Expression,
+    /// Avatar has no LookAt configured, or the renderer doesn't apply it.
+    Off,
+}
+
+/// Raw quaternion gaze direction + spec-defined Extrinsic ZXY yaw/pitch
+/// (yaw = rotation around Y, pitch = rotation around X) + avatar's
+/// application mode + head-local offset.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DumpLookAtStateResult {
+    pub gaze_direction_quat: [f32; 4],
+    pub yaw_deg: f32,
+    pub pitch_deg: f32,
+    pub applied_via: LookAtAppliedVia,
+    pub offset_from_head_bone: [f32; 3],
+}
+
 /// Empty result type for ops that return no payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitResult {}
