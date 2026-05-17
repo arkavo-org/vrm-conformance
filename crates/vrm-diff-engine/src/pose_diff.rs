@@ -123,8 +123,14 @@ pub fn diff_pose(
         &reference_expressions.custom,
     );
 
-    // lookAt still pending — task 4.
-    let _ = (actual_look_at, reference_look_at);
+    // LookAt: yaw and pitch independent abs-deltas in degrees;
+    // offsetFromHeadBone is Euclidean distance.
+    let yaw_delta = (actual_look_at.yaw_deg - reference_look_at.yaw_deg).abs();
+    let pitch_delta = (actual_look_at.pitch_deg - reference_look_at.pitch_deg).abs();
+    let offset_delta = euclidean_distance(
+        &actual_look_at.offset_from_head_bone,
+        &reference_look_at.offset_from_head_bone,
+    );
 
     let humanoid_pass =
         per_bone_max <= tolerances.per_bone_quaternion_radians
@@ -132,6 +138,10 @@ pub fn diff_pose(
     let expressions_pass =
         preset_max <= tolerances.per_preset_expression
             && custom_max <= tolerances.per_custom_expression;
+    let look_at_pass =
+        yaw_delta <= tolerances.look_at_yaw_pitch_degrees
+            && pitch_delta <= tolerances.look_at_yaw_pitch_degrees
+            && offset_delta <= tolerances.offset_from_head_bone_m;
 
     PoseDiffReport {
         per_bone_rotation_max_rad: per_bone_max,
@@ -141,10 +151,10 @@ pub fn diff_pose(
         per_preset_expression_worst: preset_worst,
         per_custom_expression_max_delta: custom_max,
         per_custom_expression_worst: custom_worst,
-        look_at_yaw_delta_deg: 0.0,
-        look_at_pitch_delta_deg: 0.0,
-        offset_from_head_bone_m: 0.0,
-        overall_passed: humanoid_pass && expressions_pass,
+        look_at_yaw_delta_deg: yaw_delta,
+        look_at_pitch_delta_deg: pitch_delta,
+        offset_from_head_bone_m: offset_delta,
+        overall_passed: humanoid_pass && expressions_pass && look_at_pass,
     }
 }
 
@@ -390,5 +400,74 @@ mod tests {
             &PoseTolerances::default(),
         );
         assert!((report.per_preset_expression_max_delta - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn look_at_yaw_delta_exceeds_tolerance() {
+        let actual_look = DumpLookAtStateResult {
+            gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
+            yaw_deg: 30.0,
+            pitch_deg: 0.0,
+            applied_via: LookAtAppliedVia::Bone,
+            offset_from_head_bone: [0.0, 0.06, 0.0],
+        };
+        let ref_look = DumpLookAtStateResult {
+            gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
+            yaw_deg: 0.0,  // 30° delta — exceeds 1° default
+            pitch_deg: 0.0,
+            applied_via: LookAtAppliedVia::Bone,
+            offset_from_head_bone: [0.0, 0.06, 0.0],
+        };
+        let bones = DumpHumanoidPoseResult {
+            bones: vec![],
+            hips_translation: [0.0, 0.0, 0.0],
+            bones_missing: vec![],
+        };
+        let report = diff_pose(
+            &bones,
+            &bones,
+            &empty_expressions(),
+            &empty_expressions(),
+            &actual_look,
+            &ref_look,
+            &PoseTolerances::default(),
+        );
+        assert!(!report.overall_passed);
+        assert!((report.look_at_yaw_delta_deg - 30.0).abs() < 1e-5);
+        assert_eq!(report.look_at_pitch_delta_deg, 0.0);
+    }
+
+    #[test]
+    fn offset_from_head_bone_diff() {
+        let look_a = DumpLookAtStateResult {
+            gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
+            yaw_deg: 0.0,
+            pitch_deg: 0.0,
+            applied_via: LookAtAppliedVia::Bone,
+            offset_from_head_bone: [0.0, 0.06, 0.0],
+        };
+        let look_b = DumpLookAtStateResult {
+            gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
+            yaw_deg: 0.0,
+            pitch_deg: 0.0,
+            applied_via: LookAtAppliedVia::Bone,
+            offset_from_head_bone: [0.0, 0.065, 0.0],  // 5mm — exceeds 1mm default
+        };
+        let bones = DumpHumanoidPoseResult {
+            bones: vec![],
+            hips_translation: [0.0, 0.0, 0.0],
+            bones_missing: vec![],
+        };
+        let report = diff_pose(
+            &bones,
+            &bones,
+            &empty_expressions(),
+            &empty_expressions(),
+            &look_a,
+            &look_b,
+            &PoseTolerances::default(),
+        );
+        assert!(!report.overall_passed);
+        assert!((report.offset_from_head_bone_m - 0.005).abs() < 1e-5);
     }
 }
