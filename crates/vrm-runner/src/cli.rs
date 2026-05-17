@@ -38,6 +38,22 @@ pub enum Cmd {
         /// `position_diff` block in the JSON summary.
         #[arg(long, value_name = "PATH")]
         reference_positions: Option<Utf8PathBuf>,
+        /// Optional `.vrma` file path. When set, the runner calls
+        /// `load_vrma` and `apply_vrma_at_time(--apply-at-time)` before
+        /// render, then dumps humanoid pose + expression weights +
+        /// lookAt state to `<output_dir>/<id>_<renderer>.pose.json`.
+        #[arg(long = "vrma", value_name = "PATH")]
+        vrma_path: Option<Utf8PathBuf>,
+        /// Sample time (seconds) for `apply_vrma_at_time`. Ignored when
+        /// `--vrma` is not set.
+        #[arg(long = "apply-at-time", default_value_t = 0.0)]
+        apply_at_time: f32,
+        /// Optional reference pose JSON fixture (with `humanoid`,
+        /// `expressions`, `look_at` top-level keys matching the runner's
+        /// pose.json shape). When set + `--vrma` set, the runner runs
+        /// pose_diff and includes the report in JSON output.
+        #[arg(long = "reference-pose-json", value_name = "PATH")]
+        reference_pose_json: Option<Utf8PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -172,6 +188,9 @@ pub fn run(cli: Cli) -> Result<()> {
             renderer_name,
             reference,
             reference_positions,
+            vrma_path,
+            apply_at_time,
+            reference_pose_json,
             json: emit_json,
         } => {
             let plan_value = load_plan(&plan)?;
@@ -184,17 +203,17 @@ pub fn run(cli: Cli) -> Result<()> {
                 emit_progress_ndjson: emit_json,
                 reference,
                 reference_positions,
-                vrma_path: None,
-                apply_at_time: 0.0,
-                reference_pose_json: None,
+                vrma_path,
+                apply_at_time,
+                reference_pose_json,
             };
             let result = execute_plan(&plan_value, &opts)?;
             if emit_json {
-                let overall_passed = match (&result.diff, &result.position_diff) {
-                    (Some(d), Some(p)) => d.overall_passed() && p.passed,
-                    (Some(d), None) => d.overall_passed(),
-                    (None, Some(p)) => p.passed,
-                    (None, None) => true,
+                let overall_passed = {
+                    let ssim_pass = result.diff.as_ref().map(|d| d.overall_passed()).unwrap_or(true);
+                    let position_pass = result.position_diff.as_ref().map(|p| p.passed).unwrap_or(true);
+                    let pose_pass = result.pose_diff.as_ref().map(|p| p.overall_passed).unwrap_or(true);
+                    ssim_pass && position_pass && pose_pass
                 };
                 let mut summary = json!({
                     "ok": true,
@@ -209,6 +228,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 if let Some(pos_diff) = &result.position_diff {
                     summary["position_diff"] = serde_json::to_value(pos_diff)?;
+                }
+                if let Some(pose_diff) = &result.pose_diff {
+                    summary["pose_diff"] = serde_json::to_value(pose_diff)?;
                 }
                 println!("{}", serde_json::to_string(&summary)?);
             } else {
@@ -522,7 +544,10 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "asset_dir": { "type": "string" },
                                 "output_dir": { "type": "string" },
                                 "reference": { "type": "string" },
-                                "reference_positions": { "type": "string", "description": "Path to a positions JSON file (DumpBonePositionsResult shape) to diff dumped bone positions against." }
+                                "reference_positions": { "type": "string", "description": "Path to a positions JSON file (DumpBonePositionsResult shape) to diff dumped bone positions against." },
+                                "vrma": { "type": "string", "description": "Path to a .vrma file. When set, the runner loads it and applies it at --apply-at-time before render, dumping pose/expressions/lookAt to <output_dir>/<id>_<renderer>.pose.json." },
+                                "apply_at_time": { "type": "number", "default": 0.0, "description": "Sample time (seconds) for apply_vrma_at_time. Ignored when --vrma is not set." },
+                                "reference_pose_json": { "type": "string", "description": "Path to a reference pose JSON fixture. When set with --vrma, the runner runs pose_diff and includes the report in JSON output." }
                             }
                         },
                         "output_schema": {
@@ -535,6 +560,7 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "actual_color_space": { "type": "string" },
                                 "diff": { "type": ["object", "null"] },
                                 "position_diff": { "type": ["object", "null"], "description": "Present only when reference_positions was provided. Two-threshold position-space diff report (see vrm_diff_engine::positions::PositionDiffReport).", "properties": { "per_joint_max_drift_m": { "type": "number" }, "chain_summed_drift_m": { "type": "number" }, "per_joint_tolerance_m": { "type": "number" }, "chain_max_drift_m": { "type": "number" }, "worst_joint_index": { "type": "integer" }, "passed": { "type": "boolean" } } },
+                                "pose_diff": { "type": ["object", "null"], "description": "Present only when --vrma and --reference-pose-json were provided. Pose-space diff report comparing dumped pose against reference fixture." },
                                 "overall_passed": { "type": "boolean" }
                             }
                         }
