@@ -1598,7 +1598,7 @@ Replaced `{0.0, 1.0, 2.0}` with `{0.0, 0.02, 0.05, 0.10, 0.20}` — 5 values spa
 | **three-vrm** | **5/5** | discriminates fully |
 | **vrm-metal-kit (0.15.1)** | **5/5** | discriminates fully — VMK is now a member of the spec-correct cluster on gravity-power |
 | godot-vrm | 1/5 | still collapses; known defect tracked separately |
-| univrm | (re-run pending — first attempt blocked by an unrelated UniVRM batch bug, see below) |
+| univrm | 1/5 (all 5 share SHA `5253c7934887`) | new cross-renderer finding — UniVRM's spring-bone swing setup doesn't visibly apply gravity_power regardless of value; status=`ok` per the runner so it's not a parse error, it's a runtime non-application |
 
 The gap is closed: VMK + three-vrm now both produce 5-way distinct PNG SHAs across the new gravity sweep. Cross-renderer signal on the gravity-power axis is real and falsifiable.
 
@@ -1608,11 +1608,23 @@ UniVRM batch reported `VrmaApplyFailed: vrma file not found:` on every retuned `
 
 Fixed by guarding on both null AND empty-path: `t.animation.vrma != null && !string.IsNullOrEmpty(t.animation.vrma.path)`. Bug was latent — would have triggered on any non-VRMA test going through the batch since VRMA phase 4. The retune flushed it out because it added 4 new non-VRMA swing tests with similar manifest shapes; one of them happened to be the first to deserialize through the broken guard. Same root cause as the JsonUtility quirk that's known to affect other Unity adapters; the conformance suite caught it.
 
+### New finding: UniVRM swing-path gravity is invisible
+
+After the JsonUtility guard fix, UniVRM successfully processes all 5 retuned gravity variants (`status=ok` in results.ndjson) — but produces the **same SHA** across all 5 magnitudes. Three different possibilities:
+
+1. **UniVRM's swing test setup doesn't tick physics during the swing window.** Our swing tests use `animate_root_transform` translation over a 0.25s window. UniVRM may evaluate the render at the end of the translation but not advance spring-bone simulation between frames.
+2. **UniVRM caps gravity at an internal threshold.** The 5 values may all be normalized to the same effective gravity.
+3. **Render-time PNG rounding masks small displacement differences.** All 5 values produce slightly different chain positions but SSIM-level identical PNGs (unlikely given how SHA-distinct VMK and three-vrm are at the same values).
+
+(1) is the most likely. The previous 3-value gravity sweep `{0.0, 1.0, 2.0}` also collapsed on UniVRM swing — and at those larger values, a renderer that ticks physics should produce dramatically different chain positions. UniVRM may simply not be sampling the spring-bone state per-frame during the swing animation. This warrants investigation, possibly upstream filing once we have a deterministic repro.
+
+Tracking as future follow-up: file UniVRM swing-physics-stepping issue when the repro is tight enough.
+
 ### Forward
 
 Same playbook applies. The gravity-power sweep is now a real cross-renderer signal:
 - Three-vrm and VMK agree on what each magnitude produces (within SSIM noise floor)
-- godot-vrm's collapse becomes the next investigation target — file as a separate finding when surfacing it for V-Sekai/godot-vrm
+- godot-vrm + UniVRM collapse becomes the next investigation target on the gravity axis
 - The suite continues to produce falsifiable signal driving upstream closure
 
 The retune is a one-time methodology adjustment, not a recurring concern. Future renderer regressions on the gravity axis will surface as a renderer dropping out of the 5/5 distinct band — same mechanism as the spring-bone closure findings from prior phases.
