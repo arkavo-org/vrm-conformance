@@ -118,3 +118,27 @@ fn apply_vrma_at_time_result_roundtrip() {
     assert_eq!(back.channels_applied.humanoid_bones, 12);
     assert!(!back.channels_applied.look_at);
 }
+
+#[test]
+fn dump_humanoid_pose_result_roundtrip() {
+    let r = DumpHumanoidPoseResult {
+        bones: vec![
+            HumanoidBoneRotation {
+                name: "leftUpperArm".into(),
+                local_rotation_quat: [0.0, 0.0, 0.7071, 0.7071],
+            },
+            HumanoidBoneRotation {
+                name: "head".into(),
+                local_rotation_quat: [0.0, 0.0, 0.0, 1.0],
+            },
+        ],
+        hips_translation: [0.0, 0.05, 0.0],
+        bones_missing: vec!["leftThumbDistal".into()],
+    };
+    let s = serde_json::to_string(&r).unwrap();
+    let back: DumpHumanoidPoseResult = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.bones.len(), 2);
+    assert_eq!(back.bones[0].name, "leftUpperArm");
+    assert_eq!(back.hips_translation[1], 0.05);
+    assert_eq!(back.bones_missing[0], "leftThumbDistal");
+}

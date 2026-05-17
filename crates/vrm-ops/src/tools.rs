@@ -228,6 +228,35 @@ pub struct ApplyVrmaAtTimeResult {
     pub channels_applied: VrmaChannelsApplied,
 }
 
+/// Dump per-bone local rotations + hips translation for the loaded VRM as
+/// of the most recent state-advancing op (`apply_vrma_at_time`, `render`,
+/// `reset_physics`, etc.). Per the VRMA spec, only the `hips` bone carries
+/// translation; all other humanoid bones contribute only rotation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DumpHumanoidPoseParams {
+    pub session_id: String,
+}
+
+/// Single humanoid bone rotation. The name follows the spec's bone-name
+/// enum (`hips`, `leftUpperArm`, ...). Quaternion in `[x, y, z, w]` order
+/// matching glTF convention.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HumanoidBoneRotation {
+    pub name: String,
+    pub local_rotation_quat: [f32; 4],
+}
+
+/// Bones present in the .vrm with their local rotations, plus the hips
+/// translation, plus any bones that the .vrma referenced but the .vrm
+/// does not have (excluded from per-bone diff per methodology hazard #3).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DumpHumanoidPoseResult {
+    pub bones: Vec<HumanoidBoneRotation>,
+    pub hips_translation: [f32; 3],
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bones_missing: Vec<String>,
+}
+
 /// Empty result type for ops that return no payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitResult {}
