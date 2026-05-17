@@ -137,6 +137,126 @@ pub fn add_humanoid_bone_rotation_channel(
     doc["buffers"][0]["byteLength"] = json!(buffer.len());
 }
 
+/// Whether an expression is one of the 14 spec-defined presets or a
+/// caller-named custom expression.
+#[derive(Debug, Clone, Copy)]
+pub enum ExpressionKind<'a> {
+    Preset(&'a str),
+    Custom(&'a str),
+}
+
+/// Add an expression weight animation channel.
+///
+/// Per the VRMA spec, weights are the X-component of node.translation
+/// animation. Y and Z are always 0.
+pub fn add_expression_weight_channel(
+    doc: &mut Value,
+    buffer: &mut Vec<u8>,
+    node_index: usize,
+    kind: ExpressionKind,
+    keyframes: &[(f32, f32)],
+) {
+    let translation_keyframes: Vec<(f32, [f32; 3])> =
+        keyframes.iter().map(|(t, w)| (*t, [*w, 0.0, 0.0])).collect();
+    add_node_translation_channel(doc, buffer, node_index, &translation_keyframes);
+
+    let ext = doc["extensions"]["VRMC_vrm_animation"]
+        .as_object_mut()
+        .unwrap();
+    let expressions = ext
+        .entry("expressions")
+        .or_insert_with(|| json!({ "preset": {}, "custom": {} }));
+    let expressions_obj = expressions.as_object_mut().unwrap();
+    expressions_obj
+        .entry("preset".to_string())
+        .or_insert_with(|| json!({}));
+    expressions_obj
+        .entry("custom".to_string())
+        .or_insert_with(|| json!({}));
+
+    let (key, name) = match kind {
+        ExpressionKind::Preset(n) => ("preset", n),
+        ExpressionKind::Custom(n) => ("custom", n),
+    };
+    let category = expressions_obj[key].as_object_mut().unwrap();
+    category.insert(name.to_string(), json!({ "node": node_index }));
+}
+
+fn add_node_translation_channel(
+    doc: &mut Value,
+    buffer: &mut Vec<u8>,
+    node_index: usize,
+    keyframes: &[(f32, [f32; 3])],
+) {
+    ensure_buffer_infrastructure(doc);
+
+    let timestamps: Vec<f32> = keyframes.iter().map(|(t, _)| *t).collect();
+    let timestamp_offset = buffer.len();
+    for t in &timestamps {
+        buffer.extend_from_slice(&t.to_le_bytes());
+    }
+    let timestamp_byte_length = buffer.len() - timestamp_offset;
+    align_to_4(buffer);
+
+    let values_offset = buffer.len();
+    for (_, v) in keyframes {
+        for c in v {
+            buffer.extend_from_slice(&c.to_le_bytes());
+        }
+    }
+    let values_byte_length = buffer.len() - values_offset;
+    align_to_4(buffer);
+
+    let bv_arr = doc["bufferViews"].as_array_mut().unwrap();
+    let timestamp_bv = bv_arr.len();
+    bv_arr.push(json!({
+        "buffer": 0,
+        "byteOffset": timestamp_offset,
+        "byteLength": timestamp_byte_length,
+    }));
+    let values_bv = bv_arr.len();
+    bv_arr.push(json!({
+        "buffer": 0,
+        "byteOffset": values_offset,
+        "byteLength": values_byte_length,
+    }));
+
+    let acc_arr = doc["accessors"].as_array_mut().unwrap();
+    let timestamp_acc = acc_arr.len();
+    let max_time = timestamps.iter().copied().fold(0.0_f32, f32::max);
+    acc_arr.push(json!({
+        "bufferView": timestamp_bv,
+        "componentType": 5126,
+        "count": timestamps.len(),
+        "type": "SCALAR",
+        "min": [0.0],
+        "max": [max_time],
+    }));
+    let values_acc = acc_arr.len();
+    acc_arr.push(json!({
+        "bufferView": values_bv,
+        "componentType": 5126,
+        "count": keyframes.len(),
+        "type": "VEC3",
+    }));
+
+    let anim = doc["animations"][0].as_object_mut().unwrap();
+    let samplers = anim.get_mut("samplers").unwrap().as_array_mut().unwrap();
+    let sampler_index = samplers.len();
+    samplers.push(json!({
+        "input": timestamp_acc,
+        "output": values_acc,
+        "interpolation": "LINEAR",
+    }));
+    let channels = anim.get_mut("channels").unwrap().as_array_mut().unwrap();
+    channels.push(json!({
+        "sampler": sampler_index,
+        "target": { "node": node_index, "path": "translation" },
+    }));
+
+    doc["buffers"][0]["byteLength"] = json!(buffer.len());
+}
+
 fn ensure_buffer_infrastructure(doc: &mut Value) {
     if doc.get("accessors").is_none() {
         doc["accessors"] = json!([]);
@@ -222,5 +342,56 @@ mod tests {
         // Buffer should now hold timestamps (2 × f32 = 8 bytes) + quaternions (2 × 4 × f32 = 32 bytes), aligned.
         assert!(buffer.len() >= 40, "buffer too small: {}", buffer.len());
         assert_eq!(buffer.len() % 4, 0, "buffer not 4-aligned");
+    }
+
+    #[test]
+    fn expression_weight_emits_translation_channel_with_x_component() {
+        let mut doc = build_empty_vrma();
+        let mut buffer = Vec::<u8>::new();
+
+        let nodes_arr = doc["nodes"].as_array_mut().unwrap();
+        nodes_arr.push(json!({ "name": "happy_expr_target" }));
+
+        add_expression_weight_channel(
+            &mut doc,
+            &mut buffer,
+            0,
+            ExpressionKind::Preset("happy"),
+            &[(0.0_f32, 0.0_f32), (0.5, 1.0), (1.0, 0.0)],
+        );
+
+        let presets = &doc["extensions"]["VRMC_vrm_animation"]["expressions"]["preset"];
+        assert_eq!(presets["happy"]["node"], 0);
+
+        let anim = &doc["animations"][0];
+        let channels = anim["channels"].as_array().unwrap();
+        let last = channels.last().unwrap();
+        assert_eq!(last["target"]["path"], "translation");
+        assert_eq!(last["target"]["node"], 0);
+    }
+
+    #[test]
+    fn custom_expression_lands_in_custom_section() {
+        let mut doc = build_empty_vrma();
+        let mut buffer = Vec::<u8>::new();
+        doc["nodes"].as_array_mut().unwrap().push(json!({ "name": "smug" }));
+
+        add_expression_weight_channel(
+            &mut doc,
+            &mut buffer,
+            0,
+            ExpressionKind::Custom("smug"),
+            &[(0.0_f32, 0.0_f32), (1.0, 0.7)],
+        );
+
+        let expressions = &doc["extensions"]["VRMC_vrm_animation"]["expressions"];
+        assert_eq!(expressions["custom"]["smug"]["node"], 0);
+        assert!(
+            !expressions
+                .get("preset")
+                .map(|p| p.as_object().is_some_and(|o| o.contains_key("smug")))
+                .unwrap_or(false),
+            "custom expression must not leak into preset section"
+        );
     }
 }
