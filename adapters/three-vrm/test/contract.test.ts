@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readMessage, writeMessage } from "../src/framing.ts";
+import { knownMethods } from "../src/operations.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -125,6 +126,19 @@ test("VRMA ops return Unimplemented with phase vrma-v1", async () => {
       h.stdin.end();
       await new Promise((r) => h.child.on("exit", r));
     }
+  }
+});
+
+test("knownMethods() catalog includes all 5 VRMA ops", () => {
+  const methods = new Set(knownMethods());
+  for (const op of [
+    "load_vrma",
+    "apply_vrma_at_time",
+    "dump_humanoid_pose",
+    "dump_expression_weights",
+    "dump_look_at_state",
+  ]) {
+    assert.ok(methods.has(op), `knownMethods missing ${op}`);
   }
 });
 
