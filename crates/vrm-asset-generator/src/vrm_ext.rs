@@ -105,7 +105,7 @@ pub fn base_material(p: &MToonParams) -> Value {
         AlphaMode::Blend => "BLEND",
     };
 
-    json!({
+    let mut material = json!({
         "name": p.id,
         "pbrMetallicRoughness": {
             "baseColorFactor": p.base_color_factor,
@@ -118,7 +118,16 @@ pub fn base_material(p: &MToonParams) -> Value {
             "KHR_materials_unlit": {},
             "VRMC_materials_mtoon": vrmc_materials_mtoon(p)
         }
-    })
+    });
+
+    // alphaCutoff is meaningful only when alphaMode == MASK per glTF spec.
+    // Omit on OPAQUE/BLEND so renderers fall back to the spec default (0.5
+    // for MASK; ignored elsewhere) rather than carrying a misleading value.
+    if matches!(p.alpha_mode, AlphaMode::Mask) {
+        material["alphaCutoff"] = json!(p.alpha_cutoff);
+    }
+
+    material
 }
 
 use crate::spring_bone::{

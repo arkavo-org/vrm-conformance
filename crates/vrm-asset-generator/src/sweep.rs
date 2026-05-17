@@ -1,7 +1,7 @@
 //! MToon basic parameter sweep: ~50 assets, one per axis-value pair, all
 //! other parameters held at `MToonParams::defaults()`.
 
-use crate::params::{MToonParams, OutlineWidthMode};
+use crate::params::{AlphaMode, MToonParams, OutlineWidthMode};
 use crate::spring_bone::{
     ColliderAttach, ColliderGroupParams, ColliderParams, ColliderShape, SpringBoneParams,
     SpringBoneSceneParams,
@@ -84,6 +84,31 @@ pub fn mtoon_basic_sweep() -> Vec<MToonParams> {
     for v in [false, true] {
         let mut p = MToonParams::defaults(format!("mtoon_doubleSided_{v}"));
         p.double_sided = v;
+        out.push(p);
+    }
+
+    // alphaMode × alphaCutoff (MASK) and transparentWithZWrite (BLEND).
+    // Exercises VMK#264 (MToon shader discard_fragment defeats A2C on MASK)
+    // by routing the renderer through its MASK pipeline; cross-renderer SSIM
+    // against UniVRM/three-vrm/godot-vrm surfaces any divergence. The default
+    // `mtoon_default` already covers the OPAQUE baseline.
+    for cutoff in [0.25_f32, 0.5, 0.75] {
+        let mut p = MToonParams::defaults(format!(
+            "mtoon_alpha_mask_cutoff_{}",
+            fmt_num(cutoff)
+        ));
+        p.alpha_mode = AlphaMode::Mask;
+        p.alpha_cutoff = cutoff;
+        // A semi-transparent base color so MASK has something to clip.
+        p.base_color_factor = [1.0, 1.0, 1.0, cutoff];
+        out.push(p);
+    }
+    for z in [false, true] {
+        let mut p = MToonParams::defaults(format!("mtoon_alpha_blend_zwrite_{z}"));
+        p.alpha_mode = AlphaMode::Blend;
+        p.transparent_with_z_write = z;
+        // Half-transparent base color for BLEND so the path actually composites.
+        p.base_color_factor = [1.0, 1.0, 1.0, 0.5];
         out.push(p);
     }
 

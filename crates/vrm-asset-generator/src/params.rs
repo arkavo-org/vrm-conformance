@@ -35,6 +35,9 @@ pub struct MToonParams {
     pub uv_animation_rotation_speed_factor: f32,
 
     pub alpha_mode: AlphaMode,
+    /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
+    /// emitted in the material JSON only on Mask. glTF default is 0.5.
+    pub alpha_cutoff: f32,
     pub transparent_with_z_write: bool,
     pub render_queue_offset_number: i32,
 
@@ -65,6 +68,7 @@ impl MToonParams {
             uv_animation_scroll_y_speed_factor: 0.0,
             uv_animation_rotation_speed_factor: 0.0,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: 0.5,
             transparent_with_z_write: false,
             render_queue_offset_number: 0,
             double_sided: false,
