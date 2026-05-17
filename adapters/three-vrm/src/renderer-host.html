@@ -136,6 +136,37 @@
         };
       };
 
+      window.__applyVrmaAtTime = function (params) {
+        if (!state.vrm) throw new Error("applyVrmaAtTime: no VRM loaded");
+        if (!state.vrmaMixer || !state.vrmaClip) {
+          throw new Error("applyVrmaAtTime: no VRMA loaded — call loadVrma first");
+        }
+        const time = params.time_seconds ?? 0.0;
+
+        // Seek deterministically. setTime sets the mixer's playhead but
+        // does not advance simulation state on its own — call update(0) so
+        // the bound bones, expression weights, and lookAt evaluator pick
+        // up the new sampled state.
+        state.vrmaMixer.setTime(time);
+        state.vrmaMixer.update(0);
+
+        // Drive the VRM's per-frame update so spring-bone + lookAt
+        // evaluators re-derive their state from the newly-set bones.
+        if (typeof state.vrm.update === "function") {
+          state.vrm.update(0);
+        }
+
+        return {
+          channels_applied: {
+            humanoid_bones: state.vrmAnimation.humanoidTracks?.rotation?.size ?? 0,
+            expressions:
+              (state.vrmAnimation.expressionTracks?.preset?.size ?? 0) +
+              (state.vrmAnimation.expressionTracks?.custom?.size ?? 0),
+            look_at: state.vrmAnimation.lookAtTrack != null,
+          },
+        };
+      };
+
       window.__setCamera = function (params) {
         ensureRenderer(state.canvas?.width ?? 1024, state.canvas?.height ?? 1024);
         state.camera.position.set(...params.position);
