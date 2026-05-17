@@ -45,6 +45,19 @@ func test_set_expression_returns_phase_3() -> void:
     var r: Dictionary = await Operations.dispatch(null, null, 5, "set_expression", {})
     _assert_eq(r.get("error", {}).get("data", {}).get("phase"), "Phase 3", "phase label")
 
+func test_vrma_ops_return_vrma_v1() -> void:
+    var methods: Array = [
+        "load_vrma",
+        "apply_vrma_at_time",
+        "dump_humanoid_pose",
+        "dump_expression_weights",
+        "dump_look_at_state",
+    ]
+    for method in methods:
+        var r: Dictionary = await Operations.dispatch(null, null, 100, method, {})
+        _assert_eq(r.get("error", {}).get("code"), -32000, "%s code" % method)
+        _assert_eq(r.get("error", {}).get("data", {}).get("phase"), "vrma-v1", "%s phase" % method)
+
 func test_id_is_echoed_on_unknown_method() -> void:
     var r1: Dictionary = await Operations.dispatch(null, null, "abc-123", "definitely_not_a_method", {})
     _assert_eq(r1.get("id"), "abc-123", "string id echoed on -32601 path")

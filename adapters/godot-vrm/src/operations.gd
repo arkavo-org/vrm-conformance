@@ -14,6 +14,13 @@ const PHASE_BY_RESERVED_METHOD := {
     "set_expression": "Phase 3",
     "set_humanoid_pose": "Phase 2",
     "set_root_transform": "Phase 2",
+    # VRMA — V-Sekai/godot-vrm ships an empty VRMC_vrm_animation.gd stub;
+    # real implementation deferred until upstream completes it.
+    "load_vrma": "vrma-v1",
+    "apply_vrma_at_time": "vrma-v1",
+    "dump_humanoid_pose": "vrma-v1",
+    "dump_expression_weights": "vrma-v1",
+    "dump_look_at_state": "vrma-v1",
 }
 
 # Phase 1 method names. dispatch() routes these to Session.<name>.
