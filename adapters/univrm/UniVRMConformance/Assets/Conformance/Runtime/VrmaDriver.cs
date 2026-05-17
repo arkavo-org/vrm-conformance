@@ -211,6 +211,60 @@ namespace Conformance
             (HumanBodyBones.RightFoot,     "rightFoot"),
         };
 
+        // 14 spec-defined VRMA presets. Order matches the spec's enum.
+        // lookUp/lookDown/lookLeft/lookRight are excluded from VRMA preset
+        // expressions per spec — they are driven by LookAt instead.
+        private static readonly ExpressionPreset[] PresetEnum = new[]
+        {
+            ExpressionPreset.happy,
+            ExpressionPreset.angry,
+            ExpressionPreset.sad,
+            ExpressionPreset.relaxed,
+            ExpressionPreset.surprised,
+            ExpressionPreset.aa,
+            ExpressionPreset.ih,
+            ExpressionPreset.ou,
+            ExpressionPreset.ee,
+            ExpressionPreset.oh,
+            ExpressionPreset.blink,
+            ExpressionPreset.blinkLeft,
+            ExpressionPreset.blinkRight,
+            ExpressionPreset.neutral,
+        };
+
+        private static void AppendExpressions(StringBuilder sb, Vrm10Instance target)
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+
+            sb.Append("\"expressions\":{\"presets\":{");
+            bool first = true;
+            foreach (var preset in PresetEnum)
+            {
+                var key = ExpressionKey.CreateFromPreset(preset);
+                float weight = target.Runtime.Expression.GetWeight(key);
+                if (!first) sb.Append(',');
+                first = false;
+                sb.AppendFormat(inv, "\"{0}\":{1}", preset.ToString(), weight);
+            }
+            sb.Append("},\"custom\":{");
+
+            // Iterate all expression keys known to the runtime; emit those whose
+            // Preset == ExpressionPreset.custom (i.e. non-preset / author-defined).
+            // ExpressionKeys is IReadOnlyList<ExpressionKey> populated during
+            // Vrm10RuntimeExpression construction from target.Vrm.Expression.Clips.
+            bool firstCustom = true;
+            foreach (var key in target.Runtime.Expression.ExpressionKeys)
+            {
+                if (key.Preset != ExpressionPreset.custom) continue;
+                float weight = target.Runtime.Expression.GetWeight(key);
+                if (!firstCustom) sb.Append(',');
+                firstCustom = false;
+                sb.AppendFormat(inv, "\"{0}\":{1}", key.Name, weight);
+            }
+
+            sb.Append("}}");
+        }
+
         private static void AppendHumanoidPose(StringBuilder sb, Vrm10Instance target)
         {
             sb.Append("\"humanoid\":{\"bones\":[");
@@ -271,7 +325,9 @@ namespace Conformance
             var sb = new StringBuilder(2048);
             sb.Append('{');
             AppendHumanoidPose(sb, target);
-            sb.Append(",\"expressions\":null,\"look_at\":null}");
+            sb.Append(',');
+            AppendExpressions(sb, target);
+            sb.Append(",\"look_at\":null}");
             return sb.ToString();
         }
 
