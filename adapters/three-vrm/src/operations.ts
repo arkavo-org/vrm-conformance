@@ -23,13 +23,6 @@ const PHASE_BY_RESERVED_METHOD: Record<string, string> = {
   set_expression: "Phase 3",
   set_humanoid_pose: "Phase 2",
   set_root_transform: "Phase 2",
-  // VRMA — real implementation deferred to vrma-phase5 of the VRMA plan
-  // when @pixiv/three-vrm-animation is added as a dependency.
-  load_vrma: "vrma-v1",
-  apply_vrma_at_time: "vrma-v1",
-  dump_humanoid_pose: "vrma-v1",
-  dump_expression_weights: "vrma-v1",
-  dump_look_at_state: "vrma-v1",
 };
 
 export interface DispatchSuccess<T = unknown> {
@@ -117,6 +110,41 @@ export async function dispatch(
         const result = await ctx.session.dumpBonePositions(p);
         return { ok: true, result };
       }
+      case "load_vrma": {
+        const p = params as { vrma_path?: string };
+        if (!p?.vrma_path) return badParams("missing vrma_path");
+        const result = await ctx.session.loadVrma(p.vrma_path);
+        return { ok: true, result };
+      }
+      case "apply_vrma_at_time": {
+        const p = params as {
+          session_id?: string;
+          vrma_handle?: number;
+          vrm_handle?: number;
+          time_seconds?: number;
+        };
+        if (!p?.session_id) return badParams("missing session_id");
+        const result = await ctx.session.applyVrmaAtTime(p);
+        return { ok: true, result };
+      }
+      case "dump_humanoid_pose": {
+        const p = params as { session_id?: string };
+        if (!p?.session_id) return badParams("missing session_id");
+        const result = await ctx.session.dumpHumanoidPose();
+        return { ok: true, result };
+      }
+      case "dump_expression_weights": {
+        const p = params as { session_id?: string };
+        if (!p?.session_id) return badParams("missing session_id");
+        const result = await ctx.session.dumpExpressionWeights();
+        return { ok: true, result };
+      }
+      case "dump_look_at_state": {
+        const p = params as { session_id?: string };
+        if (!p?.session_id) return badParams("missing session_id");
+        const result = await ctx.session.dumpLookAtState();
+        return { ok: true, result };
+      }
       default: {
         const phase = PHASE_BY_RESERVED_METHOD[method];
         if (phase) {
@@ -189,6 +217,11 @@ export function knownMethods(): string[] {
     "reset_physics",
     "animate_root_transform",
     "dump_bone_positions",
+    "load_vrma",
+    "apply_vrma_at_time",
+    "dump_humanoid_pose",
+    "dump_expression_weights",
+    "dump_look_at_state",
     ...Object.keys(PHASE_BY_RESERVED_METHOD),
   ];
 }

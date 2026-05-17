@@ -104,31 +104,6 @@ test("reserved phase-3 op (set_expression) returns phase Phase 3", async () => {
   }
 });
 
-test("VRMA ops return Unimplemented with phase vrma-v1", async () => {
-  const methods = [
-    "load_vrma",
-    "apply_vrma_at_time",
-    "dump_humanoid_pose",
-    "dump_expression_weights",
-    "dump_look_at_state",
-  ];
-  for (const method of methods) {
-    const h = spawnAdapter();
-    try {
-      const resp = await rpc(h, 100 + methods.indexOf(method), method, {});
-      assert.equal(resp.error?.code, -32000, `${method} code`);
-      assert.deepEqual(
-        resp.error?.data,
-        { phase: "vrma-v1" },
-        `${method} data`,
-      );
-    } finally {
-      h.stdin.end();
-      await new Promise((r) => h.child.on("exit", r));
-    }
-  }
-});
-
 test("knownMethods() catalog includes all 5 VRMA ops", () => {
   const methods = new Set(knownMethods());
   for (const op of [
