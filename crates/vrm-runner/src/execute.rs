@@ -87,6 +87,85 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         )
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
 
+    // VRMA op sequence: load .vrma, apply at time, dump pose state.
+    // Runs after set_post_processing and before physics so the dumps
+    // capture the pure VRMA-applied pose, uncontaminated by physics.
+    let (humanoid_dump, expression_dump, look_at_dump) = if let Some(vrma) =
+        plan.animation.as_ref().and_then(|a| a.vrma.as_ref())
+    {
+        progress(opts, "load_vrma", &plan.id, json!({ "vrma_path": &vrma.path }));
+        let loaded: ops::LoadVrmaResult = adapter
+            .call("load_vrma", load_vrma_params(&opts.asset_dir, vrma))
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+        progress(
+            opts,
+            "apply_vrma_at_time",
+            &plan.id,
+            json!({ "time_seconds": vrma.apply_at_time }),
+        );
+        let _: ops::ApplyVrmaAtTimeResult = adapter
+            .call(
+                "apply_vrma_at_time",
+                apply_vrma_at_time_params(
+                    &session_id,
+                    loaded.vrma_handle,
+                    0,
+                    vrma.apply_at_time,
+                ),
+            )
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+        progress(opts, "dump_humanoid_pose", &plan.id, json!({}));
+        let humanoid: ops::DumpHumanoidPoseResult = adapter
+            .call(
+                "dump_humanoid_pose",
+                ops::DumpHumanoidPoseParams {
+                    session_id: session_id.clone(),
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+        progress(opts, "dump_expression_weights", &plan.id, json!({}));
+        let expressions: ops::DumpExpressionWeightsResult = adapter
+            .call(
+                "dump_expression_weights",
+                ops::DumpExpressionWeightsParams {
+                    session_id: session_id.clone(),
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+        progress(opts, "dump_look_at_state", &plan.id, json!({}));
+        let look_at: ops::DumpLookAtStateResult = adapter
+            .call(
+                "dump_look_at_state",
+                ops::DumpLookAtStateParams {
+                    session_id: session_id.clone(),
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+        (Some(humanoid), Some(expressions), Some(look_at))
+    } else {
+        (None, None, None)
+    };
+
+    if let (Some(h), Some(e), Some(la)) = (&humanoid_dump, &expression_dump, &look_at_dump) {
+        let dumps_path = opts
+            .output_dir
+            .join(format!("{}_{}.pose.json", plan.id, opts.renderer_name));
+        if let Some(parent) = dumps_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let payload = json!({
+            "humanoid": h,
+            "expressions": e,
+            "look_at": la,
+        });
+        std::fs::write(&dumps_path, serde_json::to_string_pretty(&payload)?)?;
+    }
+
     if let Some(physics) = &plan.physics {
         progress(
             opts,

@@ -76,3 +76,33 @@ pub fn render_params(session_id: &str, p: &plan::Output, output_path: String) ->
         output_type: ops::OutputType::Color,
     }
 }
+
+pub fn load_vrma_params(
+    asset_dir: &camino::Utf8Path,
+    v: &plan::VrmaAnimation,
+) -> ops::LoadVrmaParams {
+    // Resolve relative paths against asset_dir; absolute paths pass through.
+    let p = camino::Utf8PathBuf::from(&v.path);
+    let resolved = if p.is_absolute() {
+        p
+    } else {
+        asset_dir.join(p)
+    };
+    ops::LoadVrmaParams {
+        vrma_path: resolved.to_string(),
+    }
+}
+
+pub fn apply_vrma_at_time_params(
+    session_id: &str,
+    vrma_handle: u32,
+    vrm_handle: u32,
+    apply_at_time: f32,
+) -> ops::ApplyVrmaAtTimeParams {
+    ops::ApplyVrmaAtTimeParams {
+        session_id: session_id.into(),
+        vrma_handle,
+        vrm_handle,
+        time_seconds: apply_at_time,
+    }
+}
