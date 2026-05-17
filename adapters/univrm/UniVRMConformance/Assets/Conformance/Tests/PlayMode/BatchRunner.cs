@@ -72,7 +72,7 @@ namespace Conformance.Tests.Play
             foreach (var t in manifest.tests)
             {
                 Manifest.EntryDto entry = null;
-                yield return RenderOneCo(manifest.output_dir, t, e => entry = e);
+                yield return RenderOneCo(manifest.output_dir, manifest.renderer_name, t, e => entry = e);
                 WriteLine(stream, JsonUtility.ToJson(entry));
             }
 
@@ -83,7 +83,7 @@ namespace Conformance.Tests.Play
         // (the EditMode path), but with `yield return null` between key
         // steps so Unity has frames to process spring-bone scheduling and
         // shader compilation.
-        private IEnumerator RenderOneCo(string outputDir, Manifest.TestEntryDto t, Action<Manifest.EntryDto> setEntry)
+        private IEnumerator RenderOneCo(string outputDir, string rendererName, Manifest.TestEntryDto t, Action<Manifest.EntryDto> setEntry)
         {
             try
             {
@@ -143,12 +143,15 @@ namespace Conformance.Tests.Play
             // Vrm10Instance components).
             yield return null;
 
+            // Setup phase — no yield, so a plain try/catch is fine here.
+            Camera cam = null;
+            Exception setupException = null;
             try
             {
                 PhysicsDriver.DisableAutoUpdate(vrm);
 
                 cameraGo = new GameObject("Camera");
-                var cam = cameraGo.AddComponent<Camera>();
+                cam = cameraGo.AddComponent<Camera>();
                 SceneSetup.ConfigureCamera(cam, t.camera);
 
                 lightGo = new GameObject("Directional");
@@ -158,7 +161,55 @@ namespace Conformance.Tests.Play
                 // Spring-bone settle + animation. PlayMode == real work.
                 PhysicsDriver.Settle(vrm, t.physics);
                 PhysicsDriver.AnimateRootTransform(vrm, t.animation);
+            }
+            catch (Exception e)
+            {
+                setupException = e;
+            }
 
+            if (setupException != null)
+            {
+                if (cameraGo != null) UnityEngine.Object.DestroyImmediate(cameraGo);
+                if (lightGo != null) UnityEngine.Object.DestroyImmediate(lightGo);
+                if (vrmGo != null) UnityEngine.Object.DestroyImmediate(vrmGo);
+                setEntry(ErrorEntry(t.test_id, -32002, "RenderFailed", "L4", setupException.ToString()));
+                yield break;
+            }
+
+            // VRMA — load + apply at time t, then dump pose state alongside the
+            // rendered PNG. Only runs when the test plan declares animation.vrma.
+            // Yielding the coroutine requires being outside a try-with-catch block
+            // (C# iterator restriction), hence the split from the setup phase above.
+            if (t.animation != null && t.animation.vrma != null)
+            {
+                VrmaDriver.ApplyResult vrmaResult = null;
+                yield return VrmaDriver.LoadAndApply(
+                    t.animation.vrma.path,
+                    vrm,
+                    t.animation.vrma.apply_at_time,
+                    r => { vrmaResult = r; });
+
+                if (vrmaResult == null || !vrmaResult.ok)
+                {
+                    if (cameraGo != null) UnityEngine.Object.DestroyImmediate(cameraGo);
+                    if (lightGo != null) UnityEngine.Object.DestroyImmediate(lightGo);
+                    if (vrmGo != null) UnityEngine.Object.DestroyImmediate(vrmGo);
+                    setEntry(ErrorEntry(
+                        t.test_id, -32000, "VrmaApplyFailed", "L4",
+                        vrmaResult?.error ?? "VrmaDriver did not invoke onComplete"));
+                    yield break;
+                }
+
+                var poseJson = VrmaDriver.BuildPoseJson(vrm);
+                var posePath = Path.Combine(
+                    outputDir,
+                    $"{t.test_id}_{rendererName}.pose.json");
+                VrmaDriver.WritePoseJson(posePath, poseJson);
+            }
+
+            // Render phase — has finally for guaranteed cleanup.
+            try
+            {
                 var outputPath = Path.Combine(outputDir, t.test_id + ".png");
                 var captureResult = Capture.Render(cam, t.output, outputPath);
 
