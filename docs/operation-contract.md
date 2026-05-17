@@ -231,6 +231,49 @@ Returns world-space joint positions for one or all spring-bone chains in the ses
 | godot-vrm | implemented (reads `vrm_secondary.spring_bones[].joint_nodes` → Skeleton3D global pose) |
 | univrm | returns `-32000 Unimplemented` (phase: "L3") |
 
+## VRMA (VRMC_vrm_animation) operations
+
+Defined in the [VRMA conformance design spec](superpowers/specs/2026-05-17-vrma-conformance-design.md). Adapters that have not implemented VRMA return the standard Unimplemented envelope:
+
+```
+-32000 Unimplemented   data: { "phase": "vrma-v1" }
+```
+
+### `load_vrma`
+
+Parse a `.vrma` file (VRMC_vrm_animation glTF) and return an opaque handle plus a summary of the channels it contains. Only `animations[0]` is treated as the portable clip per VRMA spec.
+
+- Params: `LoadVrmaParams { vrma_path: string }`
+- Result: `LoadVrmaResult { vrma_handle: u32, channel_summary: { humanoid_bones, expressions, has_look_at, duration_seconds } }`
+
+### `apply_vrma_at_time`
+
+Sample the loaded clip at `time_seconds` and write the resulting pose onto the avatar identified by `vrm_handle`. Linear interpolation is the spec-mandated default. State-advancing.
+
+- Params: `ApplyVrmaAtTimeParams { session_id, vrma_handle, vrm_handle, time_seconds }`
+- Result: `ApplyVrmaAtTimeResult { channels_applied: { humanoid_bones, expressions, look_at } }`
+
+### `dump_humanoid_pose`
+
+Return per-bone local rotations + the hips translation as of the most recent state-advancing op. Bones referenced by the .vrma but absent from the .vrm appear in `bones_missing` and are excluded from per-bone diff (methodology hazard #3).
+
+- Params: `DumpHumanoidPoseParams { session_id }`
+- Result: `DumpHumanoidPoseResult { bones, hips_translation, bones_missing }`
+
+### `dump_expression_weights`
+
+Return current expression weights, preset + custom kept structurally separate per spec. Weights are clamped to `[0, 1]`.
+
+- Params: `DumpExpressionWeightsParams { session_id }`
+- Result: `DumpExpressionWeightsResult { presets: map<string, f32>, custom: map<string, f32> }`
+
+### `dump_look_at_state`
+
+Return current gaze direction (raw quat + spec-defined Extrinsic ZXY yaw/pitch) and the avatar's application mode (`bone | expression | off`).
+
+- Params: `DumpLookAtStateParams { session_id }`
+- Result: `DumpLookAtStateResult { gaze_direction_quat, yaw_deg, pitch_deg, applied_via, offset_from_head_bone }`
+
 ## Reserved operations (Phase 2+)
 
 Required to be **declared** by every adapter (`describe` lists them) but may return a structured `Unimplemented` error in v0.1:
