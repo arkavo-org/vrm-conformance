@@ -120,6 +120,31 @@ namespace Conformance
                 };
             }
 
+            // VRMA tests require PlayMode (AnimationClipPlayable graphs).
+            // EditMode batch path rejects them explicitly so failures surface as
+            // "feature: vrma" rather than silent rest-pose renders.
+            // PlayMode batch (Conformance.Tests.Play.BatchRunner) handles the real
+            // VRMA application path (phase 4 task 8).
+            if (t.animation != null && t.animation.vrma != null)
+            {
+                return new Manifest.EntryDto
+                {
+                    test_id = t.test_id,
+                    status = "error",
+                    error = new Manifest.ErrorDto
+                    {
+                        code = -32000,
+                        message = "VRMA tests require PlayMode batch (animation.vrma present)",
+                        data = new Manifest.ErrorDataDto
+                        {
+                            feature = "vrma",
+                            value = t.animation.vrma.path,
+                            supported = new[] { "RUN_UNIVRM_PLAYMODE=1 with Conformance.Tests.Play.BatchRunner" },
+                        },
+                    },
+                };
+            }
+
             GameObject vrmGo = null;
             GameObject lightGo = null;
             GameObject cameraGo = null;
