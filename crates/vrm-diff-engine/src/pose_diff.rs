@@ -111,30 +111,40 @@ pub fn diff_pose(
         &reference_humanoid.hips_translation,
     );
 
-    // Expressions + lookAt stay at zero defaults until tasks 3 and 4.
-    let _ = (
-        actual_expressions,
-        reference_expressions,
-        actual_look_at,
-        reference_look_at,
+    // Expressions: preset + custom kept separate per spec. A missing
+    // entry on either side is treated as weight 0 (the renderer doesn't
+    // apply the expression). Pick the worst per category.
+    let (preset_max, preset_worst) = max_expression_delta(
+        &actual_expressions.presets,
+        &reference_expressions.presets,
     );
+    let (custom_max, custom_worst) = max_expression_delta(
+        &actual_expressions.custom,
+        &reference_expressions.custom,
+    );
+
+    // lookAt still pending — task 4.
+    let _ = (actual_look_at, reference_look_at);
 
     let humanoid_pass =
         per_bone_max <= tolerances.per_bone_quaternion_radians
             && hips <= tolerances.hips_translation_m;
+    let expressions_pass =
+        preset_max <= tolerances.per_preset_expression
+            && custom_max <= tolerances.per_custom_expression;
 
     PoseDiffReport {
         per_bone_rotation_max_rad: per_bone_max,
         per_bone_rotation_worst_bone: worst_bone,
         hips_translation_m: hips,
-        per_preset_expression_max_delta: 0.0,
-        per_preset_expression_worst: None,
-        per_custom_expression_max_delta: 0.0,
-        per_custom_expression_worst: None,
+        per_preset_expression_max_delta: preset_max,
+        per_preset_expression_worst: preset_worst,
+        per_custom_expression_max_delta: custom_max,
+        per_custom_expression_worst: custom_worst,
         look_at_yaw_delta_deg: 0.0,
         look_at_pitch_delta_deg: 0.0,
         offset_from_head_bone_m: 0.0,
-        overall_passed: humanoid_pass,
+        overall_passed: humanoid_pass && expressions_pass,
     }
 }
 
@@ -152,6 +162,27 @@ fn euclidean_distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
     let dy = a[1] - b[1];
     let dz = a[2] - b[2];
     (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+fn max_expression_delta(
+    actual: &std::collections::BTreeMap<String, f32>,
+    reference: &std::collections::BTreeMap<String, f32>,
+) -> (f32, Option<String>) {
+    let mut keys: std::collections::BTreeSet<&String> = actual.keys().collect();
+    keys.extend(reference.keys());
+
+    let mut max = 0.0_f32;
+    let mut worst: Option<String> = None;
+    for k in keys {
+        let a = actual.get(k).copied().unwrap_or(0.0);
+        let r = reference.get(k).copied().unwrap_or(0.0);
+        let d = (a - r).abs();
+        if d > max {
+            max = d;
+            worst = Some(k.clone());
+        }
+    }
+    (max, worst)
 }
 
 #[cfg(test)]
@@ -290,5 +321,74 @@ mod tests {
             &PoseTolerances::default(),
         );
         assert!(report.overall_passed);
+    }
+
+    #[test]
+    fn preset_expression_max_delta_picked() {
+        let mut actual_presets = std::collections::BTreeMap::new();
+        actual_presets.insert("happy".into(), 0.5_f32);
+        actual_presets.insert("blink".into(), 0.0_f32);
+        let actual = DumpExpressionWeightsResult {
+            presets: actual_presets,
+            custom: Default::default(),
+        };
+
+        let mut ref_presets = std::collections::BTreeMap::new();
+        ref_presets.insert("happy".into(), 0.4_f32);  // delta 0.1 (fails 0.005 tol)
+        ref_presets.insert("blink".into(), 0.0_f32);  // delta 0.0
+        let reference = DumpExpressionWeightsResult {
+            presets: ref_presets,
+            custom: Default::default(),
+        };
+
+        let bones = DumpHumanoidPoseResult {
+            bones: vec![],
+            hips_translation: [0.0, 0.0, 0.0],
+            bones_missing: vec![],
+        };
+        let report = diff_pose(
+            &bones,
+            &bones,
+            &actual,
+            &reference,
+            &identity_look_at(),
+            &identity_look_at(),
+            &PoseTolerances::default(),
+        );
+        assert!(!report.overall_passed);
+        assert!((report.per_preset_expression_max_delta - 0.1).abs() < 1e-5);
+        assert_eq!(report.per_preset_expression_worst.as_deref(), Some("happy"));
+    }
+
+    #[test]
+    fn missing_preset_treated_as_zero() {
+        // Actual has happy=0.5; reference has no entry for happy.
+        // A missing entry on either side is treated as weight 0
+        // (renderer doesn't apply that expression).
+        let mut actual_presets = std::collections::BTreeMap::new();
+        actual_presets.insert("happy".into(), 0.5);
+        let actual = DumpExpressionWeightsResult {
+            presets: actual_presets,
+            custom: Default::default(),
+        };
+        let reference = DumpExpressionWeightsResult {
+            presets: Default::default(),
+            custom: Default::default(),
+        };
+        let bones = DumpHumanoidPoseResult {
+            bones: vec![],
+            hips_translation: [0.0, 0.0, 0.0],
+            bones_missing: vec![],
+        };
+        let report = diff_pose(
+            &bones,
+            &bones,
+            &actual,
+            &reference,
+            &identity_look_at(),
+            &identity_look_at(),
+            &PoseTolerances::default(),
+        );
+        assert!((report.per_preset_expression_max_delta - 0.5).abs() < 1e-5);
     }
 }
