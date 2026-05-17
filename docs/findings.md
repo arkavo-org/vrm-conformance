@@ -1434,3 +1434,33 @@ The "0/15 pass" headline isn't a methodology failure or threshold-too-tight issu
 6. External — [VMK#165](https://github.com/arkavo-org/VRMMetalKit/issues/165) commented and [V-Sekai/godot-vrm#142](https://github.com/V-Sekai/godot-vrm/issues/142) filed for the two `Unimplemented` adapter gaps.
 
 The 15-plan signal at 0/15 pass is paradoxically the cleanest VRMA conformance finding the suite has produced: a single, falsifiable divergence pattern with named bones, named test_ids, and a clearly-bounded root cause (UniVRM batch path; not three-vrm; not the .vrma emission; not phase 2 runner substrate). That's exactly what cross-renderer conformance is supposed to surface.
+
+## Downstream-user-reported VMK defect catalog — spec-section to tracking map
+
+A downstream user assembled a catalog of observed VMK visual defects with explicit spec citations. Each maps to a concrete spec section + an existing VMK issue + this corpus's coverage status. Recorded here for traceability so future reports can be cross-checked against this taxonomy before filing.
+
+| user-observed defect | spec section violated | VMK tracking | corpus coverage |
+|---|---|---|---|
+| Hair loses transparency (becomes opaque) | glTF 2.0 §3.9.4 `alphaMode` + VRMC_materials_mtoon `transparentWithZWrite` | [VMK#263](https://github.com/arkavo-org/VRMMetalKit/issues/263) open | partial — alpha sweep single-mesh only; [vrm-conformance#11](https://github.com/arkavo-org/vrm-conformance/issues/11) opens layered fixture gap |
+| Hair rendered behind opaque ear | VRM 1.0 standard render-queue (transparent after opaque) | [VMK#263](https://github.com/arkavo-org/VRMMetalKit/issues/263) open | **no** — [vrm-conformance#11](https://github.com/arkavo-org/vrm-conformance/issues/11) |
+| Arms twist inside-out during walking | VRMC_vrm_animation + VRMC_vrm Humanoid quaternion retarget | [VMK#165](https://github.com/arkavo-org/VRMMetalKit/issues/165) open (no VRMA impl yet) | partial — single-bone VRMA via phase 3 sweep; multi-bone walks deferred to [vrm-conformance#10](https://github.com/arkavo-org/vrm-conformance/issues/10) |
+| Joints bend backwards | same as above (rest-pose delta calculation) | VMK#165 | same — single-bone covered, multi-bone deferred |
+| Hair clips through face (static) | VRMC_node_collider boundary | **fixed VMK#236 in 0.15.0** | verified — 24-variant collider sweep 11/12 distinct post-fix |
+| Hair clips through face (during fast motion) | VRMC_node_collider + frame timing | [VMK#267](https://github.com/arkavo-org/VRMMetalKit/issues/267) open (1-frame writeBonesToNodes lag) | partial — swing sweep exercises motion but 0.2 m / 0.25 s window may not surface 1-frame lag; avatarA_bosom_swing more realistic |
+| Hair flies rigidly / doesn't fall under gravity | VRMC_springBone stiffness + gravity math | **fixed VMK#240 in 0.15.0** | verified — stiffness swing 4/4 distinct post-fix |
+| Bust caves inward | VRMC_springBone origin/offset + zero-settle | **fixed VMK#233 in 0.14.0** | verified — `avatarA_bosom_zerosettle` SSIM jumped 0.7928 → 0.8396 vs three-vrm |
+
+### What was actionable from the catalog
+
+Two follow-ups landed:
+
+1. **Comments on VMK#263 + VMK#267** ([#263 comment](https://github.com/arkavo-org/VRMMetalKit/issues/263#issuecomment-4472357789), [#267 comment](https://github.com/arkavo-org/VRMMetalKit/issues/267#issuecomment-4472358560)) — forwarded the spec citations + corpus-coverage status to the VMK team, plus the layered-transparency fixture offer.
+2. **[vrm-conformance#11](https://github.com/arkavo-org/vrm-conformance/issues/11)** — corpus gap for layered-transparency MToon fixture (multi-mesh, opaque + transparent layered) so VMK#263 fix can be cross-renderer verified.
+
+### What was already covered
+
+Five of the eight defect classes are tracked elsewhere (VMK closed 4 in 0.14.0/0.15.0; VMK#165 + #267 + #263 remain open). Phase 6's VRMA work covers the multi-bone retargeting axes from the spec angle. The corpus's existing avatarA humanoid plans + the spring-bone closure work already exercise the post-fix verification path for the four closed VMK issues.
+
+### Lesson for future downstream defect catalogs
+
+When a downstream user reports a visual defect with spec citations, the highest-value response is **mapping each defect to (a) the spec section it violates, (b) the existing upstream tracking issue, and (c) the corpus test_id that catches it**. Filing new issues is the exception; most defects in a well-tracked project already have an open issue. The exception in this round was the layered-transparency *corpus* gap — a clear corpus gap, not an unfiled defect.
