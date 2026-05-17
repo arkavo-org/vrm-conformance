@@ -212,6 +212,110 @@
         state.renderer.toneMappingExposure = params.exposure ?? 1.0;
       };
 
+      const HUMANOID_BONES = [
+        "hips", "spine", "chest", "neck", "head",
+        "leftShoulder", "leftUpperArm", "leftLowerArm", "leftHand",
+        "rightShoulder", "rightUpperArm", "rightLowerArm", "rightHand",
+        "leftUpperLeg", "leftLowerLeg", "leftFoot",
+        "rightUpperLeg", "rightLowerLeg", "rightFoot",
+      ];
+
+      const PRESET_EXPRESSIONS = [
+        "happy", "angry", "sad", "relaxed", "surprised",
+        "aa", "ih", "ou", "ee", "oh",
+        "blink", "blinkLeft", "blinkRight", "neutral",
+      ];
+
+      window.__dumpHumanoidPose = function () {
+        if (!state.vrm) throw new Error("dumpHumanoidPose: no VRM loaded");
+        const bones = [];
+        const missing = [];
+        let hipsTranslation = [0, 0, 0];
+        for (const name of HUMANOID_BONES) {
+          const node = state.vrm.humanoid.getNormalizedBoneNode(name);
+          if (node == null) {
+            missing.push(name);
+            continue;
+          }
+          const q = node.quaternion;
+          bones.push({ name, local_rotation_quat: [q.x, q.y, q.z, q.w] });
+          if (name === "hips") {
+            const p = node.position;
+            hipsTranslation = [p.x, p.y, p.z];
+          }
+        }
+        return {
+          bones,
+          hips_translation: hipsTranslation,
+          bones_missing: missing,
+        };
+      };
+
+      window.__dumpExpressionWeights = function () {
+        if (!state.vrm) throw new Error("dumpExpressionWeights: no VRM loaded");
+        const presets = {};
+        const custom = {};
+        const em = state.vrm.expressionManager;
+        if (!em) return { presets, custom };
+
+        for (const name of PRESET_EXPRESSIONS) {
+          presets[name] = em.getValue(name) ?? 0.0;
+        }
+
+        const presetSet = new Set(PRESET_EXPRESSIONS);
+        const exprList = em.expressions ?? [];
+        for (const expr of exprList) {
+          const exprName = expr.expressionName ?? expr.name;
+          if (!exprName || presetSet.has(exprName)) continue;
+          custom[exprName] = em.getValue(exprName) ?? 0.0;
+        }
+
+        return { presets, custom };
+      };
+
+      window.__dumpLookAtState = function () {
+        if (!state.vrm) throw new Error("dumpLookAtState: no VRM loaded");
+        const lookAt = state.vrm.lookAt;
+        const yaw = lookAt?.yaw ?? 0.0;
+        const pitch = lookAt?.pitch ?? 0.0;
+
+        // Derive gaze quat. THREE.Euler with 'YXZ' order matches the VRM spec
+        // convention (yaw around Y, pitch around X, no roll).
+        const euler = new THREE.Euler(
+          THREE.MathUtils.degToRad(pitch),
+          THREE.MathUtils.degToRad(yaw),
+          0,
+          "YXZ",
+        );
+        const q = new THREE.Quaternion().setFromEuler(euler);
+
+        // VRMLookAtBoneApplier and VRMLookAtExpressionApplier both expose a
+        // static `type` property ("bone" / "expression") on their constructor.
+        let appliedVia = "off";
+        if (lookAt?.applier) {
+          const staticType = lookAt.applier.constructor?.type;
+          if (staticType === "bone") appliedVia = "bone";
+          else if (staticType === "expression") appliedVia = "expression";
+          else {
+            // fallback: discriminate via constructor name
+            const ctorName = lookAt.applier.constructor?.name ?? "";
+            if (ctorName.includes("Bone")) appliedVia = "bone";
+            else if (ctorName.includes("Expression")) appliedVia = "expression";
+          }
+        }
+
+        const offset = lookAt?.offsetFromHeadBone;
+        const offsetArr = offset ? [offset.x, offset.y, offset.z] : [0, 0, 0];
+
+        return {
+          gaze_direction_quat: [q.x, q.y, q.z, q.w],
+          yaw_deg: yaw,
+          pitch_deg: pitch,
+          applied_via: appliedVia,
+          offset_from_head_bone: offsetArr,
+        };
+      };
+
       window.__render = async function (params) {
         ensureRenderer(params.width, params.height);
         // color_space=Srgb is the v1.0 default and the only mode three-vrm
