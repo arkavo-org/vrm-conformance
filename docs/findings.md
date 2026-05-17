@@ -1426,9 +1426,11 @@ The "0/15 pass" headline isn't a methodology failure or threshold-too-tight issu
 
 ### Forward
 
-1. **Investigate UniVRM batch path** for why limb bones report identity while the one-off path applies them correctly. Likely a 1-2 commit fix once root cause is identified (apply_at_time threading, Mecanim toggle ordering, or Runtime.Process timing).
-2. **Fix expression + lookAt .vrma emission** so UniVRM can load all 37 plans. Two distinct generator-side bugs; tracked as their own follow-up.
-3. **File V-Sekai/godot-vrm issue** for `VRMC_vrm_animation.gd` stub completion. Comment on VMK#165 with the spec test surface.
-4. **Manual humanoid clips** (avatarA_wave_hello.vrma etc.) deferred per design — require Blender authoring + T-pose audit. Future "phase 7 manual clips".
+1. **[#6](https://github.com/arkavo-org/vrm-conformance/issues/6)** — UniVRM batch path: head bone applies, limb bones at identity. The signal driver. Likely apply_at_time threading or Mecanim toggle ordering.
+2. **[#7](https://github.com/arkavo-org/vrm-conformance/issues/7)** — Expression .vrma emission: NodeImporter.FixCoordinate index range (12 plans).
+3. **[#8](https://github.com/arkavo-org/vrm-conformance/issues/8)** — LookAt .vrma emission: TransferOwnership null reference (10 plans).
+4. **[#9](https://github.com/arkavo-org/vrm-conformance/issues/9)** — execute-test-batch relative-path resolution: surfaced during phase 6 staging.
+5. **[#10](https://github.com/arkavo-org/vrm-conformance/issues/10)** — Phase 7 manual humanoid clips tracker (Blender authoring + T-pose audit).
+6. External — [VMK#165](https://github.com/arkavo-org/VRMMetalKit/issues/165) commented and [V-Sekai/godot-vrm#142](https://github.com/V-Sekai/godot-vrm/issues/142) filed for the two `Unimplemented` adapter gaps.
 
 The 15-plan signal at 0/15 pass is paradoxically the cleanest VRMA conformance finding the suite has produced: a single, falsifiable divergence pattern with named bones, named test_ids, and a clearly-bounded root cause (UniVRM batch path; not three-vrm; not the .vrma emission; not phase 2 runner substrate). That's exactly what cross-renderer conformance is supposed to surface.
