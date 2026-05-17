@@ -270,6 +270,29 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
             None
         };
 
+    let pose_diff = if let Some(ref_path) = &opts.reference_pose_json {
+        // The actual pose dump was written during the VRMA op sequence
+        // earlier in execute_plan (when animation.vrma was set).
+        let actual_path = opts
+            .output_dir
+            .join(format!("{}_{}.pose.json", plan.id, opts.renderer_name));
+        if !actual_path.exists() {
+            anyhow::bail!(
+                "reference_pose_json set but no pose.json captured at {actual_path}\
+                 — does the test plan have animation.vrma?"
+            );
+        }
+        progress(
+            opts,
+            "pose_diff",
+            &plan.id,
+            json!({ "reference_pose_json": ref_path }),
+        );
+        Some(crate::diff::diff_pose_one(plan, &actual_path, ref_path)?)
+    } else {
+        None
+    };
+
     Ok(ExecuteResult {
         test_id: plan.id.clone(),
         renderer: opts.renderer_name.clone(),
@@ -277,7 +300,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         actual_color_space: render.actual_color_space,
         diff,
         position_diff,
-        pose_diff: None,
+        pose_diff,
     })
 }
 

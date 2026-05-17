@@ -6,11 +6,15 @@
 
 use anyhow::{Context, Result};
 use camino::Utf8Path;
+use vrm_diff_engine::pose_diff::{diff_pose, PoseDiffReport, PoseTolerances};
 use vrm_diff_engine::positions::{diff_positions, PositionDiffReport};
 use vrm_diff_engine::property::eval_property;
 use vrm_diff_engine::result::DiffResult;
 use vrm_diff_engine::ssim::ssim_pngs;
-use vrm_ops::tools::DumpBonePositionsResult;
+use vrm_ops::tools::{
+    DumpBonePositionsResult, DumpExpressionWeightsResult, DumpHumanoidPoseResult,
+    DumpLookAtStateResult,
+};
 use vrm_test_plan::TestPlan;
 
 const PER_JOINT_TOL_SETTLE_M: f32 = 0.005;
@@ -110,4 +114,64 @@ pub fn diff_positions_one(
         .ok_or_else(|| anyhow::anyhow!("reference dump contained zero springs"))?;
 
     Ok(diff_positions(a, b, per_joint_tol, chain_tol))
+}
+
+/// Reference fixture file format for pose_diff. The runner writes the
+/// adapter's dump_humanoid_pose / dump_expression_weights /
+/// dump_look_at_state results under `<output_dir>/<id>_<renderer>.pose.json`
+/// during execute_plan; the reference passed to `reference_pose_json` must
+/// have the same shape.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct ReferencePoseFixture {
+    pub humanoid: DumpHumanoidPoseResult,
+    pub expressions: DumpExpressionWeightsResult,
+    pub look_at: DumpLookAtStateResult,
+}
+
+/// Run pose_diff against a reference fixture file. The actual side is the
+/// per-test pose.json the runner wrote during execute_plan. Tolerances
+/// come from `plan.diff.pose_tolerance` if set, else PoseTolerances::default().
+pub fn diff_pose_one(
+    plan: &TestPlan,
+    actual_path: &Utf8Path,
+    reference_path: &Utf8Path,
+) -> Result<PoseDiffReport> {
+    let actual: ReferencePoseFixture = serde_json::from_str(
+        &std::fs::read_to_string(actual_path)
+            .with_context(|| format!("reading actual pose dump {actual_path}"))?,
+    )
+    .with_context(|| format!("parsing actual pose dump {actual_path}"))?;
+    let reference: ReferencePoseFixture = serde_json::from_str(
+        &std::fs::read_to_string(reference_path)
+            .with_context(|| format!("reading reference_pose_json {reference_path}"))?,
+    )
+    .with_context(|| format!("parsing reference_pose_json {reference_path}"))?;
+
+    let tolerances = plan
+        .diff
+        .pose_tolerance
+        .as_ref()
+        .map(pose_tolerance_to_engine)
+        .unwrap_or_default();
+
+    Ok(diff_pose(
+        &actual.humanoid,
+        &reference.humanoid,
+        &actual.expressions,
+        &reference.expressions,
+        &actual.look_at,
+        &reference.look_at,
+        &tolerances,
+    ))
+}
+
+fn pose_tolerance_to_engine(t: &vrm_test_plan::PoseTolerance) -> PoseTolerances {
+    PoseTolerances {
+        per_bone_quaternion_radians: t.per_bone_quaternion_radians,
+        hips_translation_m: t.hips_translation_m,
+        per_preset_expression: t.per_preset_expression,
+        per_custom_expression: t.per_custom_expression,
+        look_at_yaw_pitch_degrees: t.look_at_yaw_pitch_degrees,
+        offset_from_head_bone_m: t.offset_from_head_bone_m,
+    }
 }
