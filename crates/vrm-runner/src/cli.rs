@@ -210,9 +210,21 @@ pub fn run(cli: Cli) -> Result<()> {
             let result = execute_plan(&plan_value, &opts)?;
             if emit_json {
                 let overall_passed = {
-                    let ssim_pass = result.diff.as_ref().map(|d| d.overall_passed()).unwrap_or(true);
-                    let position_pass = result.position_diff.as_ref().map(|p| p.passed).unwrap_or(true);
-                    let pose_pass = result.pose_diff.as_ref().map(|p| p.overall_passed).unwrap_or(true);
+                    let ssim_pass = result
+                        .diff
+                        .as_ref()
+                        .map(|d| d.overall_passed())
+                        .unwrap_or(true);
+                    let position_pass = result
+                        .position_diff
+                        .as_ref()
+                        .map(|p| p.passed)
+                        .unwrap_or(true);
+                    let pose_pass = result
+                        .pose_diff
+                        .as_ref()
+                        .map(|p| p.overall_passed)
+                        .unwrap_or(true);
                     ssim_pass && position_pass && pose_pass
                 };
                 let mut summary = json!({

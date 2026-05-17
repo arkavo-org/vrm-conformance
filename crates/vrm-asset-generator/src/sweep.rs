@@ -93,10 +93,7 @@ pub fn mtoon_basic_sweep() -> Vec<MToonParams> {
     // against UniVRM/three-vrm/godot-vrm surfaces any divergence. The default
     // `mtoon_default` already covers the OPAQUE baseline.
     for cutoff in [0.25_f32, 0.5, 0.75] {
-        let mut p = MToonParams::defaults(format!(
-            "mtoon_alpha_mask_cutoff_{}",
-            fmt_num(cutoff)
-        ));
+        let mut p = MToonParams::defaults(format!("mtoon_alpha_mask_cutoff_{}", fmt_num(cutoff)));
         p.alpha_mode = AlphaMode::Mask;
         p.alpha_cutoff = cutoff;
         // A semi-transparent base color so MASK has something to clip.

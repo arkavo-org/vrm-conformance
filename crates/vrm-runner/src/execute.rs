@@ -93,7 +93,12 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
     let (humanoid_dump, expression_dump, look_at_dump) = if let Some(vrma) =
         plan.animation.as_ref().and_then(|a| a.vrma.as_ref())
     {
-        progress(opts, "load_vrma", &plan.id, json!({ "vrma_path": &vrma.path }));
+        progress(
+            opts,
+            "load_vrma",
+            &plan.id,
+            json!({ "vrma_path": &vrma.path }),
+        );
         let loaded: ops::LoadVrmaResult = adapter
             .call("load_vrma", load_vrma_params(&opts.asset_dir, vrma))
             .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
@@ -107,12 +112,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         let _: ops::ApplyVrmaAtTimeResult = adapter
             .call(
                 "apply_vrma_at_time",
-                apply_vrma_at_time_params(
-                    &session_id,
-                    loaded.vrma_handle,
-                    0,
-                    vrma.apply_at_time,
-                ),
+                apply_vrma_at_time_params(&session_id, loaded.vrma_handle, 0, vrma.apply_at_time),
             )
             .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
 

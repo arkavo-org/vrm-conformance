@@ -4,9 +4,7 @@
 //! tolerances supplied by the caller.
 
 use serde::{Deserialize, Serialize};
-use vrm_ops::tools::{
-    DumpExpressionWeightsResult, DumpHumanoidPoseResult, DumpLookAtStateResult,
-};
+use vrm_ops::tools::{DumpExpressionWeightsResult, DumpHumanoidPoseResult, DumpLookAtStateResult};
 
 /// Per-channel tolerances. All in their respective units (radians, meters,
 /// scalar deltas, degrees). A pass requires every per-channel max to be
@@ -114,14 +112,10 @@ pub fn diff_pose(
     // Expressions: preset + custom kept separate per spec. A missing
     // entry on either side is treated as weight 0 (the renderer doesn't
     // apply the expression). Pick the worst per category.
-    let (preset_max, preset_worst) = max_expression_delta(
-        &actual_expressions.presets,
-        &reference_expressions.presets,
-    );
-    let (custom_max, custom_worst) = max_expression_delta(
-        &actual_expressions.custom,
-        &reference_expressions.custom,
-    );
+    let (preset_max, preset_worst) =
+        max_expression_delta(&actual_expressions.presets, &reference_expressions.presets);
+    let (custom_max, custom_worst) =
+        max_expression_delta(&actual_expressions.custom, &reference_expressions.custom);
 
     // LookAt: yaw and pitch independent abs-deltas in degrees;
     // offsetFromHeadBone is Euclidean distance.
@@ -132,16 +126,13 @@ pub fn diff_pose(
         &reference_look_at.offset_from_head_bone,
     );
 
-    let humanoid_pass =
-        per_bone_max <= tolerances.per_bone_quaternion_radians
-            && hips <= tolerances.hips_translation_m;
-    let expressions_pass =
-        preset_max <= tolerances.per_preset_expression
-            && custom_max <= tolerances.per_custom_expression;
-    let look_at_pass =
-        yaw_delta <= tolerances.look_at_yaw_pitch_degrees
-            && pitch_delta <= tolerances.look_at_yaw_pitch_degrees
-            && offset_delta <= tolerances.offset_from_head_bone_m;
+    let humanoid_pass = per_bone_max <= tolerances.per_bone_quaternion_radians
+        && hips <= tolerances.hips_translation_m;
+    let expressions_pass = preset_max <= tolerances.per_preset_expression
+        && custom_max <= tolerances.per_custom_expression;
+    let look_at_pass = yaw_delta <= tolerances.look_at_yaw_pitch_degrees
+        && pitch_delta <= tolerances.look_at_yaw_pitch_degrees
+        && offset_delta <= tolerances.offset_from_head_bone_m;
 
     PoseDiffReport {
         per_bone_rotation_max_rad: per_bone_max,
@@ -284,7 +275,7 @@ mod tests {
         };
         let pose_b = DumpHumanoidPoseResult {
             bones: vec![],
-            hips_translation: [0.020, 0.0, 0.0],  // 20mm — exceeds 5mm default
+            hips_translation: [0.020, 0.0, 0.0], // 20mm — exceeds 5mm default
             bones_missing: vec![],
         };
         let report = diff_pose(
@@ -344,8 +335,8 @@ mod tests {
         };
 
         let mut ref_presets = std::collections::BTreeMap::new();
-        ref_presets.insert("happy".into(), 0.4_f32);  // delta 0.1 (fails 0.005 tol)
-        ref_presets.insert("blink".into(), 0.0_f32);  // delta 0.0
+        ref_presets.insert("happy".into(), 0.4_f32); // delta 0.1 (fails 0.005 tol)
+        ref_presets.insert("blink".into(), 0.0_f32); // delta 0.0
         let reference = DumpExpressionWeightsResult {
             presets: ref_presets,
             custom: Default::default(),
@@ -413,7 +404,7 @@ mod tests {
         };
         let ref_look = DumpLookAtStateResult {
             gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
-            yaw_deg: 0.0,  // 30° delta — exceeds 1° default
+            yaw_deg: 0.0, // 30° delta — exceeds 1° default
             pitch_deg: 0.0,
             applied_via: LookAtAppliedVia::Bone,
             offset_from_head_bone: [0.0, 0.06, 0.0],
@@ -451,7 +442,7 @@ mod tests {
             yaw_deg: 0.0,
             pitch_deg: 0.0,
             applied_via: LookAtAppliedVia::Bone,
-            offset_from_head_bone: [0.0, 0.065, 0.0],  // 5mm — exceeds 1mm default
+            offset_from_head_bone: [0.0, 0.065, 0.0], // 5mm — exceeds 1mm default
         };
         let bones = DumpHumanoidPoseResult {
             bones: vec![],

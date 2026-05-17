@@ -100,18 +100,12 @@ fn dispatch(
         }
 
         "load_vrma" => json_result(handlers::load_vrma(registry, deser(params)?)),
-        "apply_vrma_at_time" => {
-            json_result(handlers::apply_vrma_at_time(registry, deser(params)?))
-        }
-        "dump_humanoid_pose" => {
-            json_result(handlers::dump_humanoid_pose(registry, deser(params)?))
-        }
+        "apply_vrma_at_time" => json_result(handlers::apply_vrma_at_time(registry, deser(params)?)),
+        "dump_humanoid_pose" => json_result(handlers::dump_humanoid_pose(registry, deser(params)?)),
         "dump_expression_weights" => {
             json_result(handlers::dump_expression_weights(registry, deser(params)?))
         }
-        "dump_look_at_state" => {
-            json_result(handlers::dump_look_at_state(registry, deser(params)?))
-        }
+        "dump_look_at_state" => json_result(handlers::dump_look_at_state(registry, deser(params)?)),
 
         // Reserved-but-declared ops: return Unimplemented with the phase
         // the operation belongs to. Matches the Swift adapter's labels.
