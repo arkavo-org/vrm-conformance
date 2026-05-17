@@ -186,10 +186,93 @@ namespace Conformance
             onComplete?.Invoke(result);
         }
 
-        // Pose-dump methods land in tasks 5-7. Stubbed here.
+        // VRM 1.0 spec humanoid bones — 15 required + 4 commonly-supported optional.
+        // Order matches the VRMA spec's humanBones declaration order.
+        private static readonly (HumanBodyBones Enum, string VrmName)[] HumanoidBones = new[]
+        {
+            (HumanBodyBones.Hips,          "hips"),
+            (HumanBodyBones.Spine,         "spine"),
+            (HumanBodyBones.Chest,         "chest"),
+            (HumanBodyBones.Neck,          "neck"),
+            (HumanBodyBones.Head,          "head"),
+            (HumanBodyBones.LeftShoulder,  "leftShoulder"),
+            (HumanBodyBones.LeftUpperArm,  "leftUpperArm"),
+            (HumanBodyBones.LeftLowerArm,  "leftLowerArm"),
+            (HumanBodyBones.LeftHand,      "leftHand"),
+            (HumanBodyBones.RightShoulder, "rightShoulder"),
+            (HumanBodyBones.RightUpperArm, "rightUpperArm"),
+            (HumanBodyBones.RightLowerArm, "rightLowerArm"),
+            (HumanBodyBones.RightHand,     "rightHand"),
+            (HumanBodyBones.LeftUpperLeg,  "leftUpperLeg"),
+            (HumanBodyBones.LeftLowerLeg,  "leftLowerLeg"),
+            (HumanBodyBones.LeftFoot,      "leftFoot"),
+            (HumanBodyBones.RightUpperLeg, "rightUpperLeg"),
+            (HumanBodyBones.RightLowerLeg, "rightLowerLeg"),
+            (HumanBodyBones.RightFoot,     "rightFoot"),
+        };
+
+        private static void AppendHumanoidPose(StringBuilder sb, Vrm10Instance target)
+        {
+            sb.Append("\"humanoid\":{\"bones\":[");
+
+            bool first = true;
+            var missing = new System.Collections.Generic.List<string>();
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+
+            Transform hipsT = null;
+
+            foreach (var (boneEnum, vrmName) in HumanoidBones)
+            {
+                if (!target.TryGetBoneTransform(boneEnum, out var t))
+                {
+                    missing.Add(vrmName);
+                    continue;
+                }
+                if (boneEnum == HumanBodyBones.Hips) hipsT = t;
+
+                if (!first) sb.Append(',');
+                first = false;
+                var q = t.localRotation;
+                sb.AppendFormat(inv,
+                    "{{\"name\":\"{0}\",\"local_rotation_quat\":[{1},{2},{3},{4}]}}",
+                    vrmName, q.x, q.y, q.z, q.w);
+            }
+
+            sb.Append("],");
+
+            if (hipsT != null)
+            {
+                var p = hipsT.localPosition;
+                sb.AppendFormat(inv,
+                    "\"hips_translation\":[{0},{1},{2}]",
+                    p.x, p.y, p.z);
+            }
+            else
+            {
+                sb.Append("\"hips_translation\":[0.0,0.0,0.0]");
+            }
+
+            if (missing.Count > 0)
+            {
+                sb.Append(",\"bones_missing\":[");
+                for (int i = 0; i < missing.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(missing[i]).Append('"');
+                }
+                sb.Append(']');
+            }
+
+            sb.Append('}');
+        }
+
         public static string BuildPoseJson(Vrm10Instance target)
         {
-            return "{\"humanoid\":null,\"expressions\":null,\"look_at\":null}";
+            var sb = new StringBuilder(2048);
+            sb.Append('{');
+            AppendHumanoidPose(sb, target);
+            sb.Append(",\"expressions\":null,\"look_at\":null}");
+            return sb.ToString();
         }
 
         public static void WritePoseJson(string path, string json)
