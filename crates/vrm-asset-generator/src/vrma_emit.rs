@@ -52,6 +52,101 @@ pub fn add_humanoid_bone_rotation_channel(
     bone_name: &str,
     keyframes: &[(f32, [f32; 4])],
 ) {
+    add_node_rotation_channel(doc, buffer, node_index, keyframes);
+
+    let ext = doc["extensions"]["VRMC_vrm_animation"]
+        .as_object_mut()
+        .unwrap();
+    let humanoid = ext
+        .entry("humanoid")
+        .or_insert_with(|| json!({ "humanBones": {} }));
+    let human_bones = humanoid["humanBones"].as_object_mut().unwrap();
+    human_bones.insert(bone_name.to_string(), json!({ "node": node_index }));
+}
+
+/// Add a lookAt gaze direction animation channel to the document.
+///
+/// `node_index` is the glTF node index whose rotation encodes the gaze quaternion.
+/// `offset_from_head_bone` is the 3-vec offset used by the VRMA spec.
+/// `keyframes` is `[(time_seconds, [x, y, z, w])]`.
+///
+/// Side effects:
+/// - Writes a `node.rotation` animation channel (same binary path as humanoid bone rotation)
+/// - Sets `doc["extensions"]["VRMC_vrm_animation"]["lookAt"]` to
+///   `{ "node": node_index, "offsetFromHeadBone": [...] }`
+/// - Does NOT touch `humanoid.humanBones`
+pub fn add_look_at_channel(
+    doc: &mut Value,
+    buffer: &mut Vec<u8>,
+    node_index: usize,
+    offset_from_head_bone: [f32; 3],
+    keyframes: &[(f32, [f32; 4])],
+) {
+    add_node_rotation_channel(doc, buffer, node_index, keyframes);
+
+    let ext = doc["extensions"]["VRMC_vrm_animation"]
+        .as_object_mut()
+        .unwrap();
+    ext.insert(
+        "lookAt".to_string(),
+        json!({
+            "node": node_index,
+            "offsetFromHeadBone": offset_from_head_bone,
+        }),
+    );
+}
+
+/// Whether an expression is one of the 14 spec-defined presets or a
+/// caller-named custom expression.
+#[derive(Debug, Clone, Copy)]
+pub enum ExpressionKind<'a> {
+    Preset(&'a str),
+    Custom(&'a str),
+}
+
+/// Add an expression weight animation channel.
+///
+/// Per the VRMA spec, weights are the X-component of node.translation
+/// animation. Y and Z are always 0.
+pub fn add_expression_weight_channel(
+    doc: &mut Value,
+    buffer: &mut Vec<u8>,
+    node_index: usize,
+    kind: ExpressionKind,
+    keyframes: &[(f32, f32)],
+) {
+    let translation_keyframes: Vec<(f32, [f32; 3])> =
+        keyframes.iter().map(|(t, w)| (*t, [*w, 0.0, 0.0])).collect();
+    add_node_translation_channel(doc, buffer, node_index, &translation_keyframes);
+
+    let ext = doc["extensions"]["VRMC_vrm_animation"]
+        .as_object_mut()
+        .unwrap();
+    let expressions = ext
+        .entry("expressions")
+        .or_insert_with(|| json!({ "preset": {}, "custom": {} }));
+    let expressions_obj = expressions.as_object_mut().unwrap();
+    expressions_obj
+        .entry("preset".to_string())
+        .or_insert_with(|| json!({}));
+    expressions_obj
+        .entry("custom".to_string())
+        .or_insert_with(|| json!({}));
+
+    let (key, name) = match kind {
+        ExpressionKind::Preset(n) => ("preset", n),
+        ExpressionKind::Custom(n) => ("custom", n),
+    };
+    let category = expressions_obj[key].as_object_mut().unwrap();
+    category.insert(name.to_string(), json!({ "node": node_index }));
+}
+
+fn add_node_rotation_channel(
+    doc: &mut Value,
+    buffer: &mut Vec<u8>,
+    node_index: usize,
+    keyframes: &[(f32, [f32; 4])],
+) {
     ensure_buffer_infrastructure(doc);
 
     // 1. Write timestamp buffer (f32 LE)
@@ -123,63 +218,8 @@ pub fn add_humanoid_bone_rotation_channel(
         "target": { "node": node_index, "path": "rotation" },
     }));
 
-    // 6. Update VRMC_vrm_animation.humanoid.humanBones
-    let ext = doc["extensions"]["VRMC_vrm_animation"]
-        .as_object_mut()
-        .unwrap();
-    let humanoid = ext
-        .entry("humanoid")
-        .or_insert_with(|| json!({ "humanBones": {} }));
-    let human_bones = humanoid["humanBones"].as_object_mut().unwrap();
-    human_bones.insert(bone_name.to_string(), json!({ "node": node_index }));
-
-    // 7. Update buffer byteLength
+    // 6. Update buffer byteLength
     doc["buffers"][0]["byteLength"] = json!(buffer.len());
-}
-
-/// Whether an expression is one of the 14 spec-defined presets or a
-/// caller-named custom expression.
-#[derive(Debug, Clone, Copy)]
-pub enum ExpressionKind<'a> {
-    Preset(&'a str),
-    Custom(&'a str),
-}
-
-/// Add an expression weight animation channel.
-///
-/// Per the VRMA spec, weights are the X-component of node.translation
-/// animation. Y and Z are always 0.
-pub fn add_expression_weight_channel(
-    doc: &mut Value,
-    buffer: &mut Vec<u8>,
-    node_index: usize,
-    kind: ExpressionKind,
-    keyframes: &[(f32, f32)],
-) {
-    let translation_keyframes: Vec<(f32, [f32; 3])> =
-        keyframes.iter().map(|(t, w)| (*t, [*w, 0.0, 0.0])).collect();
-    add_node_translation_channel(doc, buffer, node_index, &translation_keyframes);
-
-    let ext = doc["extensions"]["VRMC_vrm_animation"]
-        .as_object_mut()
-        .unwrap();
-    let expressions = ext
-        .entry("expressions")
-        .or_insert_with(|| json!({ "preset": {}, "custom": {} }));
-    let expressions_obj = expressions.as_object_mut().unwrap();
-    expressions_obj
-        .entry("preset".to_string())
-        .or_insert_with(|| json!({}));
-    expressions_obj
-        .entry("custom".to_string())
-        .or_insert_with(|| json!({}));
-
-    let (key, name) = match kind {
-        ExpressionKind::Preset(n) => ("preset", n),
-        ExpressionKind::Custom(n) => ("custom", n),
-    };
-    let category = expressions_obj[key].as_object_mut().unwrap();
-    category.insert(name.to_string(), json!({ "node": node_index }));
 }
 
 fn add_node_translation_channel(
@@ -393,5 +433,48 @@ mod tests {
                 .unwrap_or(false),
             "custom expression must not leak into preset section"
         );
+    }
+
+    #[test]
+    fn look_at_emits_node_rotation_channel() {
+        let mut doc = build_empty_vrma();
+        let mut buffer = Vec::<u8>::new();
+
+        doc["nodes"].as_array_mut().unwrap().push(json!({ "name": "look_at_target" }));
+
+        add_look_at_channel(
+            &mut doc,
+            &mut buffer,
+            0,
+            [0.0, 0.06, 0.0],
+            &[(0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]), (1.0, [0.0, 0.259, 0.0, 0.966])],
+        );
+
+        let look_at = &doc["extensions"]["VRMC_vrm_animation"]["lookAt"];
+        assert_eq!(look_at["node"], 0);
+        let offset = look_at["offsetFromHeadBone"].as_array().unwrap();
+        assert_eq!(offset.len(), 3);
+        assert!((offset[1].as_f64().unwrap() - 0.06_f64).abs() < 1e-5,
+            "offsetFromHeadBone[1] should be ~0.06, got {}", offset[1]);
+
+        // Must NOT pollute humanBones with a placeholder.
+        let humanoid = doc["extensions"]["VRMC_vrm_animation"].get("humanoid");
+        if let Some(h) = humanoid {
+            if let Some(bones) = h.get("humanBones") {
+                let bone_names: Vec<&String> = bones.as_object().unwrap().keys().collect();
+                assert!(
+                    !bone_names.iter().any(|n| n.contains("look_at") || n.contains("placeholder")),
+                    "lookAt must not pollute humanBones, got {bone_names:?}"
+                );
+            }
+        }
+
+        // A rotation channel must exist for the lookAt node.
+        let anim = &doc["animations"][0];
+        let channels = anim["channels"].as_array().unwrap();
+        let has_rotation_for_node_0 = channels.iter().any(|c| {
+            c["target"]["node"] == 0 && c["target"]["path"] == "rotation"
+        });
+        assert!(has_rotation_for_node_0, "expected rotation channel on node 0 for lookAt");
     }
 }
