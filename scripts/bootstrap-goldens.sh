@@ -285,14 +285,27 @@ if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
         UNIVRM_OUT="$GOLDENS_DIR/univrm"
         mkdir -p "$UNIVRM_OUT"
 
-        # Stage both asset dirs into one plans dir so a single batch covers
-        # all 80 test_ids and writes a single local-manifest.json.
+        # Stage every _assets* sweep dir into one plans dir so a single
+        # batch covers the full corpus and writes a single
+        # local-manifest.json. Includes .vrma files for VRMA test plans
+        # (the runner absolutizes animation.vrma.path against the .vrm
+        # asset's parent dir, so symlinks here resolve correctly).
         UNIVRM_STAGE="$GOLDENS_DIR/_univrm_stage"
         rm -rf "$UNIVRM_STAGE" && mkdir -p "$UNIVRM_STAGE"
-        for src in "$ASSETS_DIR" "${SWING_DIR:-}"; do
+        for src in \
+            "$ASSETS_DIR" \
+            "${SWING_DIR:-}" \
+            "${COLLIDER_DIR:-}" \
+            "${EXTENDED_DIR:-}" \
+            "${GRAVITY_DIR:-}" \
+            "${TAPER_DIR:-}" \
+            "${MULTICHAIN_DIR:-}" \
+            "${VRMA_HUMANOID_DIR:-}" \
+            "${VRMA_EXPRESSION_DIR:-}" \
+            "${VRMA_LOOKAT_DIR:-}"; do
             [ -z "$src" ] && continue
             [ ! -d "$src" ] && continue
-            for f in "$src"/*.test.yaml "$src"/*.vrm; do
+            for f in "$src"/*.test.yaml "$src"/*.vrm "$src"/*.vrma; do
                 [ ! -f "$f" ] && continue
                 ln -sf "$f" "$UNIVRM_STAGE/$(basename "$f")"
             done
