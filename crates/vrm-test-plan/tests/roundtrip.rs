@@ -171,6 +171,7 @@ fn plan_without_physics_serializes_without_field() {
             threshold: 0.985,
             reference_renderer: "x".into(),
             conformance_status: Default::default(),
+            pose_tolerance: None,
         },
         ignore_renderers: Vec::new(),
         properties: Vec::new(),

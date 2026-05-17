@@ -49,6 +49,12 @@ impl Default for PhysicsConfig {
 pub struct AnimationConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_transform: Option<RootTransformAnimation>,
+    /// VRMA animation source. Independent of `root_transform`: a plan
+    /// can use either or both — `root_transform` drives root translation
+    /// in world space; `vrma` drives internal humanoid pose, expressions,
+    /// and lookAt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vrma: Option<VrmaAnimation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,6 +68,32 @@ pub struct RootTransformAnimation {
 
 fn default_animation_fps() -> u32 {
     60
+}
+
+/// VRMA (VRMC_vrm_animation) animation block. When present, the runner
+/// loads the .vrma, calls `apply_vrma_at_time(t)` between
+/// `set_post_processing` and `reset_physics`/`render`, then dumps
+/// humanoid pose + expression weights + lookAt state for pose-vector
+/// diff against the consortium reference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VrmaAnimation {
+    /// Path to the `.vrma` file (filesystem path or BLAKE3 ref).
+    pub path: String,
+    /// Sample time in seconds for `apply_vrma_at_time`.
+    pub apply_at_time: f32,
+}
+
+/// Per-channel tolerances for the pose_diff signal. Mirrors
+/// `vrm_diff_engine::pose_diff::PoseTolerances`. Optional — if absent,
+/// the runner uses the diff-engine defaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PoseTolerance {
+    pub per_bone_quaternion_radians: f32,
+    pub hips_translation_m: f32,
+    pub per_preset_expression: f32,
+    pub per_custom_expression: f32,
+    pub look_at_yaw_pitch_degrees: f32,
+    pub offset_from_head_bone_m: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -160,6 +192,10 @@ pub struct Diff {
     /// anti-aliasing on a frame with no other signal.
     #[serde(default)]
     pub conformance_status: ConformanceStatus,
+    /// Per-channel pose-diff tolerances when `animation.vrma` is set.
+    /// If absent, the runner uses `PoseTolerances::default()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pose_tolerance: Option<PoseTolerance>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -250,5 +286,73 @@ coupling_threshold_m: 0.01
 "#;
         let m: CouplingMatrix = serde_yml::from_str(raw).unwrap();
         assert!(m.perturbations[0].description.is_none());
+    }
+}
+
+#[cfg(test)]
+mod vrma_schema_tests {
+    use super::*;
+
+    #[test]
+    fn animation_config_with_vrma_roundtrips() {
+        let raw = r#"
+root_transform:
+  translation_start: [0.0, 0.0, 0.0]
+  translation_end: [0.2, 0.0, 0.0]
+  duration_seconds: 0.5
+vrma:
+  path: /tmp/x.vrma
+  apply_at_time: 0.5
+"#;
+        let ac: AnimationConfig = serde_yml::from_str(raw).unwrap();
+        let vrma = ac.vrma.as_ref().expect("vrma block");
+        assert_eq!(vrma.path, "/tmp/x.vrma");
+        assert!((vrma.apply_at_time - 0.5).abs() < 1e-6);
+        assert!(ac.root_transform.is_some());
+    }
+
+    #[test]
+    fn animation_config_without_vrma_still_parses() {
+        let raw = r#"
+root_transform:
+  translation_start: [0.0, 0.0, 0.0]
+  translation_end: [0.2, 0.0, 0.0]
+  duration_seconds: 0.5
+"#;
+        let ac: AnimationConfig = serde_yml::from_str(raw).unwrap();
+        assert!(ac.vrma.is_none());
+        assert!(ac.root_transform.is_some());
+    }
+
+    #[test]
+    fn diff_with_pose_tolerance_roundtrips() {
+        let raw = r#"
+mode: ssim
+threshold: 0.95
+reference_renderer: univrm
+pose_tolerance:
+  per_bone_quaternion_radians: 0.020
+  hips_translation_m: 0.010
+  per_preset_expression: 0.010
+  per_custom_expression: 0.010
+  look_at_yaw_pitch_degrees: 2.0
+  offset_from_head_bone_m: 0.002
+"#;
+        let d: Diff = serde_yml::from_str(raw).unwrap();
+        let tol = d.pose_tolerance.as_ref().expect("pose_tolerance");
+        assert!((tol.per_bone_quaternion_radians - 0.020).abs() < 1e-6);
+        assert!((tol.look_at_yaw_pitch_degrees - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn diff_without_pose_tolerance_still_parses() {
+        let raw = r#"
+mode: ssim
+threshold: 0.95
+reference_renderer: univrm
+"#;
+        let d: Diff = serde_yml::from_str(raw).unwrap();
+        assert!(d.pose_tolerance.is_none());
+        assert_eq!(d.reference_renderer, "univrm");
     }
 }

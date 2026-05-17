@@ -84,6 +84,7 @@ pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> Tes
             threshold: conformance_threshold_for(&params.id),
             reference_renderer: "univrm".into(),
             conformance_status: conformance_status_for(&params.id),
+            pose_tolerance: None,
         },
         ignore_renderers: Vec::new(),
         properties: default_properties(params),
@@ -159,6 +160,7 @@ pub fn build_spring_bone_swing_test_plan(params: &MToonParams, asset_relpath: &s
             duration_seconds: 0.25,
             fps: 60,
         }),
+        vrma: None,
     });
     plan.spec_section = "VRMC_materials_mtoon + VRMC_springBone (swing)".into();
     plan
@@ -197,6 +199,7 @@ pub fn build_spring_bone_collider_swing_test_plan(
             duration_seconds: 0.25,
             fps: 60,
         }),
+        vrma: None,
     });
     plan.spec_section = "VRMC_springBone + colliders (swing)".into();
     plan
@@ -233,6 +236,7 @@ pub fn build_spring_bone_extended_swing_test_plan(
             duration_seconds: 0.25,
             fps: 60,
         }),
+        vrma: None,
     });
     plan.spec_section = "VRMC_springBone + VRMC_springBone_extended_collider (swing)".into();
     plan
@@ -267,6 +271,7 @@ pub fn build_spring_bone_multichain_swing_test_plan(
             duration_seconds: 0.25,
             fps: 60,
         }),
+        vrma: None,
     });
     plan.spec_section = "VRMC_springBone multi-chain (swing)".into();
     plan
