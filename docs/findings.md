@@ -1340,7 +1340,7 @@ The new signal warrants follow-up issue-filing once we have a clean reproduction
 |---|---|---|---|
 | three-vrm | **37/37** (full corpus) | — | — |
 | UniVRM | **15/37** (humanoid sweep only) | expression + lookAt assets fail UniVRM load; bugs in our .vrma emission — see "Emission bugs surfaced" below | self-filed in this findings entry |
-| godot-vrm | 0/37 | Unimplemented; `addons/vrm/1.0/VRMC_vrm_animation.gd` is an empty stub | upstream issue (to be filed) |
+| godot-vrm | 0/37 | Unimplemented; `addons/vrm/1.0/VRMC_vrm_animation.gd` is an empty stub | [V-Sekai/godot-vrm#142](https://github.com/V-Sekai/godot-vrm/issues/142) |
 | VRMMetalKit | 0/37 | Unimplemented; VMK#165 open since 2026-05-10 | [VMK#165](https://github.com/arkavo-org/VRMMetalKit/issues/165) |
 
 ### Cross-renderer headline (15 humanoid plans, three-vrm vs UniVRM)
