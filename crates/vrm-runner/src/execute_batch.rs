@@ -62,7 +62,7 @@ pub fn build_manifest(
         .collect();
 
     BatchManifest {
-        manifest_version: 1,
+        manifest_version: 2,
         output_dir: absolutize(&output_dir),
         renderer_name,
         renderer_version: None,
@@ -213,7 +213,7 @@ pub fn write_local_manifest(path: &Path, entries: &[LocalManifestEntry]) -> anyh
         materialized.push(e);
     }
     let envelope = LocalManifestEnvelope {
-        manifest_version: 1,
+        manifest_version: 2,
         entries: &materialized,
     };
     let bytes = serde_json::to_vec_pretty(&envelope)?;
