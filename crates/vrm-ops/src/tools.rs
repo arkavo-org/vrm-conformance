@@ -257,6 +257,26 @@ pub struct DumpHumanoidPoseResult {
     pub bones_missing: Vec<String>,
 }
 
+/// Dump current expression weights (preset + custom). Per the VRMA spec,
+/// weights are encoded as the X-component of bound-node translation
+/// animation, clamped to [0, 1]; this op returns the clamped values the
+/// renderer actually applies.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DumpExpressionWeightsParams {
+    pub session_id: String,
+}
+
+/// Preset and custom expressions kept structurally separate per spec.
+/// Preset name set per VRMA spec: happy, angry, sad, relaxed, surprised,
+/// aa, ih, ou, ee, oh, blink, blinkLeft, blinkRight, neutral.
+/// `lookUp/lookDown/lookLeft/lookRight` are NOT VRMA presets — driven by
+/// LookAt and reported via `dump_look_at_state` instead.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DumpExpressionWeightsResult {
+    pub presets: std::collections::BTreeMap<String, f32>,
+    pub custom: std::collections::BTreeMap<String, f32>,
+}
+
 /// Empty result type for ops that return no payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitResult {}

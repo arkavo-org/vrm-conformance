@@ -142,3 +142,17 @@ fn dump_humanoid_pose_result_roundtrip() {
     assert_eq!(back.hips_translation[1], 0.05);
     assert_eq!(back.bones_missing[0], "leftThumbDistal");
 }
+
+#[test]
+fn dump_expression_weights_result_roundtrip() {
+    let mut presets = std::collections::BTreeMap::new();
+    presets.insert("happy".to_string(), 0.83_f32);
+    presets.insert("blink".to_string(), 0.02_f32);
+    let mut custom = std::collections::BTreeMap::new();
+    custom.insert("smug".to_string(), 0.5_f32);
+    let r = DumpExpressionWeightsResult { presets, custom };
+    let s = serde_json::to_string(&r).unwrap();
+    let back: DumpExpressionWeightsResult = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.presets.get("happy"), Some(&0.83));
+    assert_eq!(back.custom.get("smug"), Some(&0.5));
+}
