@@ -9,7 +9,7 @@ use serde_json::json;
 use vrm_test_plan::{
     AmbientLight, AnimationConfig, BboxRegion, Camera, ColorSpace, ConformanceStatus, Diff,
     DiffMode, DirectionalLight, Lighting, Output, PhysicsConfig, PostProcessing, PropertyAssertion,
-    RootTransformAnimation, TestPlan, ToneMapping,
+    RootTransformAnimation, TestPlan, ToneMapping, VrmaAnimation,
 };
 
 pub fn write_meta_json(
@@ -274,6 +274,42 @@ pub fn build_spring_bone_multichain_swing_test_plan(
         vrma: None,
     });
     plan.spec_section = "VRMC_springBone multi-chain (swing)".into();
+    plan
+}
+
+/// Build a test plan for a VRMA humanoid sweep triplet.
+///
+/// Starts from the default camera/lighting/output settings (same as all
+/// MToon conformance tests) and overlays:
+/// - `spec_section`: names VRMC_vrm_animation and the specific bone axis
+/// - `animation.vrma`: path to the `.vrma` file + `apply_at_time`
+/// - `diff.pose_tolerance`: tight per-bone quaternion tolerance
+pub fn build_vrma_humanoid_test_plan(
+    params: &crate::vrma_params::VrmaHumanoidParams,
+    vrm_relpath: &str,
+    vrma_relpath: &str,
+) -> TestPlan {
+    let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
+    let mut plan = build_default_test_plan(&mtoon_defaults, vrm_relpath);
+    plan.spec_section = format!(
+        "VRMC_vrm_animation (humanoid sweep: {} {:+.0}\u{00b0})",
+        params.bone_name, params.angle_deg
+    );
+    plan.animation = Some(AnimationConfig {
+        root_transform: None,
+        vrma: Some(VrmaAnimation {
+            path: vrma_relpath.into(),
+            apply_at_time: params.duration_s,
+        }),
+    });
+    plan.diff.pose_tolerance = Some(vrm_test_plan::PoseTolerance {
+        per_bone_quaternion_radians: 0.010,
+        hips_translation_m: 0.005,
+        per_preset_expression: 0.005,
+        per_custom_expression: 0.005,
+        look_at_yaw_pitch_degrees: 1.0,
+        offset_from_head_bone_m: 0.001,
+    });
     plan
 }
 

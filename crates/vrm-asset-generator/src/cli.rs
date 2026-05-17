@@ -136,6 +136,15 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the VRMA humanoid bone sweep (~15 plans). Each variant
+    /// rotates one humanoid bone through a single axis arc over 1 s.
+    EmitVrmaHumanoidSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -828,6 +837,30 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitVrmaHumanoidSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_vrma_humanoid_triplet;
+            use crate::sweep::vrma_humanoid_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let sweep = vrma_humanoid_sweep();
+            let total = sweep.len();
+            for (i, params) in sweep.iter().enumerate() {
+                emit_vrma_humanoid_triplet(&output_dir, params)?;
+                if emit_json {
+                    eprintln!(
+                        r#"{{"event":"progress","op":"emit-vrma-humanoid-sweep","index":{i},"total":{total},"id":"{id}"}}"#,
+                        id = params.id,
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, params.id);
+                }
+            }
+            println!("emitted {total} VRMA humanoid sweep plans to {output_dir}");
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -1089,6 +1122,28 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "count": { "type": "integer" },
                                 "output_dir": { "type": "string" },
                                 "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-vrma-humanoid-sweep": {
+                        "summary": "VRMA humanoid bone sweep (15 plans). Each variant rotates one humanoid bone through a single axis arc over 1 s. Bones: hips, spine, head (3 axes), leftUpperArm (3 axes), rightUpperArm (3 axes), leftUpperLeg (2 axes), leftLowerLeg, neck. Each plan emits a .vrm + .vrma + .test.yaml triplet.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" }
                             }
                         }
                     }

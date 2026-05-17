@@ -977,6 +977,73 @@ pub fn emit_with_sidecars_spring_bone_multichain_swing(
     Ok(())
 }
 
+/// Emit a humanoid-sweep triplet: .vrm + .vrma + .test.yaml.
+///
+/// The .vrm is the canonical minimal humanoid rig (same as emit_default).
+/// The .vrma carries a single-bone rotation animation; the .test.yaml
+/// declares `animation.vrma` so the runner drives the VRMA op sequence
+/// against any adapter.
+pub fn emit_vrma_humanoid_triplet(
+    output_dir: &Utf8Path,
+    params: &crate::vrma_params::VrmaHumanoidParams,
+) -> Result<()> {
+    use crate::vrma_emit::{add_humanoid_bone_rotation_channel, build_empty_vrma, write_vrma_glb};
+    use crate::vrma_params::RotationAxis;
+
+    std::fs::create_dir_all(output_dir)?;
+
+    // 1. Emit the .vrm (canonical default avatar — the .vrma carries the test signal).
+    let vrm_relpath = format!("{}.vrm", params.id);
+    let vrm_path = output_dir.join(&vrm_relpath);
+    let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
+    emit_vrm(&mtoon_defaults, &vrm_path)?;
+
+    // 2. Emit the .vrma.
+    let skel = crate::humanoid::minimal_skeleton();
+    let node_idx = *skel
+        .bone_to_node
+        .get(&params.bone_name)
+        .unwrap_or_else(|| panic!("bone {} not in canonical skeleton", params.bone_name));
+
+    let mut doc = build_empty_vrma();
+    // Populate doc.nodes with the canonical skeleton's nodes (so node
+    // indices in humanBones resolve).
+    doc["nodes"] = skel.nodes_json.clone();
+
+    let mut buffer = Vec::<u8>::new();
+    let half_rad = params.angle_deg.to_radians() / 2.0;
+    let sin_h = half_rad.sin();
+    let target_quat = match params.axis {
+        RotationAxis::X => [sin_h, 0.0, 0.0, half_rad.cos()],
+        RotationAxis::Y => [0.0, sin_h, 0.0, half_rad.cos()],
+        RotationAxis::Z => [0.0, 0.0, sin_h, half_rad.cos()],
+    };
+    let keyframes = [
+        (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
+        (params.duration_s, target_quat),
+    ];
+    add_humanoid_bone_rotation_channel(
+        &mut doc,
+        &mut buffer,
+        node_idx,
+        &params.bone_name,
+        &keyframes,
+    );
+
+    let vrma_relpath = format!("{}.vrma", params.id);
+    let vrma_path = output_dir.join(&vrma_relpath);
+    let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
+    std::fs::write(&vrma_path, &vrma_bytes)?;
+
+    // 3. Emit the .test.yaml.
+    let plan =
+        crate::sidecar::build_vrma_humanoid_test_plan(params, &vrm_relpath, &vrma_relpath);
+    let yaml_path = output_dir.join(format!("{}.test.yaml", params.id));
+    crate::sidecar::write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod multichain_emit_integration_tests {
     use super::*;

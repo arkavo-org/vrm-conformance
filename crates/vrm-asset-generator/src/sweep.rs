@@ -442,6 +442,89 @@ fn build_multichain_scene(id: &str, chain_count: u32, sharing_mode: &str) -> Spr
     }
 }
 
+pub fn vrma_humanoid_sweep() -> Vec<crate::vrma_params::VrmaHumanoidParams> {
+    use crate::vrma_params::{RotationAxis, VrmaHumanoidParams};
+
+    let entries: Vec<(&str, &str, RotationAxis, f32)> = vec![
+        ("vrma_humanoid_hips_yaw_15", "hips", RotationAxis::Y, 15.0),
+        ("vrma_humanoid_spine_yaw_30", "spine", RotationAxis::Y, 30.0),
+        ("vrma_humanoid_head_yaw_45", "head", RotationAxis::Y, 45.0),
+        ("vrma_humanoid_head_pitch_20", "head", RotationAxis::X, 20.0),
+        ("vrma_humanoid_head_roll_15", "head", RotationAxis::Z, 15.0),
+        (
+            "vrma_humanoid_l_upperarm_yaw",
+            "leftUpperArm",
+            RotationAxis::Y,
+            60.0,
+        ),
+        (
+            "vrma_humanoid_l_upperarm_pitch",
+            "leftUpperArm",
+            RotationAxis::X,
+            60.0,
+        ),
+        (
+            "vrma_humanoid_l_upperarm_roll",
+            "leftUpperArm",
+            RotationAxis::Z,
+            30.0,
+        ),
+        (
+            "vrma_humanoid_r_upperarm_yaw",
+            "rightUpperArm",
+            RotationAxis::Y,
+            -60.0,
+        ),
+        (
+            "vrma_humanoid_r_upperarm_pitch",
+            "rightUpperArm",
+            RotationAxis::X,
+            60.0,
+        ),
+        (
+            "vrma_humanoid_r_upperarm_roll",
+            "rightUpperArm",
+            RotationAxis::Z,
+            30.0,
+        ),
+        (
+            "vrma_humanoid_l_upperleg_pitch",
+            "leftUpperLeg",
+            RotationAxis::X,
+            45.0,
+        ),
+        (
+            "vrma_humanoid_l_upperleg_yaw",
+            "leftUpperLeg",
+            RotationAxis::Y,
+            15.0,
+        ),
+        (
+            "vrma_humanoid_l_lowerleg_pitch",
+            "leftLowerLeg",
+            RotationAxis::X,
+            60.0,
+        ),
+        (
+            "vrma_humanoid_neck_yaw_30",
+            "neck",
+            RotationAxis::Y,
+            30.0,
+        ),
+    ];
+
+    entries
+        .into_iter()
+        .map(|(id, bone, axis, angle)| VrmaHumanoidParams {
+            id: id.into(),
+            bone_name: bone.into(),
+            axis,
+            angle_deg: angle,
+            duration_s: 1.0,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod taper_sweep_tests {
     use super::*;
