@@ -106,5 +106,21 @@ namespace Conformance.Tests
             Assert.AreEqual("None", pp.tone_mapping);
             Assert.AreEqual(1f, pp.exposure, 1e-6);
         }
+
+        [Test]
+        public void AnimationDtoRoundtripsVrma()
+        {
+            var input = new Manifest.AnimationDto
+            {
+                root_transform = null,
+                vrma = new Manifest.VrmaDto { path = "/tmp/x.vrma", apply_at_time = 0.5f },
+            };
+            var json = JsonUtility.ToJson(input);
+            var back = JsonUtility.FromJson<Manifest.AnimationDto>(json);
+            Assert.AreEqual("/tmp/x.vrma", back.vrma.path);
+            Assert.AreEqual(0.5f, back.vrma.apply_at_time);
+            Assert.IsNull(back.root_transform);
+            StringAssert.Contains("\"vrma\":", json);
+        }
     }
 }

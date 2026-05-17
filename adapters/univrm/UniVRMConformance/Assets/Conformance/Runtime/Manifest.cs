@@ -100,6 +100,14 @@ namespace Conformance
         public class AnimationDto
         {
             public RootTransformDto root_transform;
+            public VrmaDto vrma;
+        }
+
+        [Serializable]
+        public class VrmaDto
+        {
+            public string path;
+            public float apply_at_time;
         }
 
         [Serializable]
