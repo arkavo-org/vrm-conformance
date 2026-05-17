@@ -21,6 +21,61 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
+        // 0.15.0 (commit 5378ade) closes (all four were filed by this suite):
+        //   - VMK#236 (VRMC_springBone collider parse silent-zero, scalar root
+        //          cause): `parseVector3` returned nil for spec-typical mixed
+        //          `[Double, Double, Int]` JSON arrays (e.g. `[0.02, -0.10, 0.0]`
+        //          where the trailing whole-number `0.0` decodes as `Int(0)`).
+        //          The nil fed the `?? SIMD3<Float>(0,0,0)` fallback at every
+        //          collider site, so every VRMC_springBone collider sat at its
+        //          owning bone's origin regardless of authored offset — which
+        //          made the entire 24-variant collider sweep produce one
+        //          byte-identical PNG (SHA prefix `f02fb44e3d2a`). 0.14.0 had
+        //          fixed `[Double]`-vs-`[Float]` for *uniformly-double* arrays;
+        //          this generalizes the fix to mixed Int/Double arrays.
+        //          PR #258.
+        //   - VMK#238 (MToon rimLightingMix=0 ≡ rimLightingMix=1, same root
+        //          cause class): scalar `Float` factors were silently treated
+        //          as Int by `AnyCodable`, so 0/1 boundary values funneled to
+        //          a default. PR #254 generalizes the fix to every scalar
+        //          factor parser site; PR #255 sweeps residual sites in
+        //          `VRMExtensionParser`.
+        //   - VMK#240 (spring-bone stiffness collapse under animation, root
+        //          cause was at the warmup boundary, not the PBD math): the
+        //          shader's `settlingStiffnessScale = 1 - smoothstep(0, 60,
+        //          settlingFrames)` zeroes the stiffness contribution for any
+        //          frame where `settlingFrames > 60`, and `warmupPhysics`
+        //          never decremented the counter. Our 0.25 s animated swing
+        //          window fell entirely inside that band, collapsing the
+        //          `{0, 0.2, 0.8, 1}` stiffness sweep to one PNG hash. Fix
+        //          consumes the counter inside `warmupPhysics`. PR #261.
+        //   - VMK#213 (residual MToon shading-curve divergence after 0.13.5):
+        //          PR #235 adds `LightNormalizationMode.radiometric` for
+        //          spec-correct brightness on the shading-curve sweep.
+        //   - VMK#228 (MToon front-face rim contribution regression lock):
+        //          PR #234 regression test landed alongside #235.
+        //   Behavioural change recorded in 0.15.0 release notes:
+        //   - Spring-bone `warmupPhysics` now consumes `settlingFrames` —
+        //     code that relied on the prior "warmup didn't tick the counter"
+        //     behavior will see ~60 fewer frames of soft-start damping. Our
+        //     test plans authored explicit `reset_physics(settle_steps=30)`
+        //     so the behavioral change *unblocks* the stiffness sweep
+        //     instead of regressing it. No conformance-plan edits needed.
+        //   - GLTFMetalKit is a new sibling package; we do not depend on it.
+        //   - `BoneParams` stride changed in the spring-bone uniform; only
+        //     callers reaching directly into the uniform layout need updates,
+        //     which we don't.
+        //   Status going in (VMK tracker):
+        //   - VMK#237 (extended_collider applied inconsistently) still open;
+        //     PR #260 + #262 land phases 1-3 (plane, sphere, capsule parse
+        //     and apply), but VMK#237 itself remains open pending end-to-end
+        //     swing verification on capsule/sphere variants.
+        //   - VMK#239 (shadingShift / shadingToony boundary collapse) still
+        //     open in the VMK tracker; the boundary collapse pattern was
+        //     partially addressed by the Int-vs-Double generalization, but
+        //     #239 specifically (1.0/0.0 cast through `shadingShift` /
+        //     `shadingToony` paths) hasn't been confirmed closed upstream.
+        //     Re-render to verify.
         // 0.14.0 (commit f25a947) closes:
         //   - VMK#233 (spring-bone "zero settle": authored bind-direction is
         //          seeded into the kinematic reset instead of world -Y, and
@@ -115,7 +170,7 @@ let package = Package(
         // All nine were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "f25a94799f139b4f2cbfc5349e771887aaddd9b8"
+            revision: "5378ade7e7d454e2c80ac5cd1821f2ce6feb1df6"
         ),
     ],
     targets: [

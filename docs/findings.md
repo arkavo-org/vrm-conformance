@@ -1185,3 +1185,30 @@ When `Some(v)`, `v.len() == joint_count` is required; the per-joint vector overr
 - Phase 7: 1 example coupling matrix YAML (calibration matrix)
 
 Next: bootstrap-goldens on the new corpus and update `goldens/manifest.json`.
+
+## VMK 0.15.0 verification — four filed issues confirmed closed
+
+**Trigger:** VMK 0.15.0 (commit `5378ade`) shipped with release notes citing four vrm-conformance findings as the QA regression sweep that drove the release: [#236](https://github.com/arkavo-org/VRMMetalKit/issues/236) (collider parse), [#238](https://github.com/arkavo-org/VRMMetalKit/issues/238) (rimLightingMix), [#239](https://github.com/arkavo-org/VRMMetalKit/issues/239) (shadingShift/Toony), [#240](https://github.com/arkavo-org/VRMMetalKit/issues/240) (stiffness collapse). The release attributes all four to two root causes: (a) `AnyCodable` decoding numeric JSON as Int/Double inconsistently, and (b) `warmupPhysics` failing to decrement `settlingFrames`.
+
+**Method:** bumped `adapters/vrm-metal-kit/Package.swift` from 0.14.0 (`f25a947`) to 0.15.0 (`5378ade`), ran `SKIP_THREE_VRM=1 SKIP_GODOT_VRM=1 scripts/bootstrap-goldens.sh` to re-render only vrm-metal-kit against the unchanged 302-plan corpus. Compared post-0.15.0 PNG SHA prefixes against the captured pre-0.15.0 baseline at `/tmp/vmk_pre_0_15_0_shas.txt`.
+
+**Distinct-SHA counts (pre → post):**
+
+| family | issue | pre | post | verdict |
+|---|---|---|---|---|
+| `mtoon_rimLightingMix_*` (6 variants) | VMK#238 | 5/6 (`_0` and `_1` shared SHA `ccbaa146…`) | **6/6** | closed |
+| `mtoon_shadingShift_*` (9 variants) | VMK#239 (shift) | 7/9 (`_0`, `_1`, `_neg1` shared `5d8cf178…`) | **9/9** | closed |
+| `mtoon_shadingToony_*` (8 variants) | VMK#239 (toony) | 6/8 (`_0`, `_0p9`, `_1` shared `5d8cf178…`) | **8/8** | closed |
+| `springbone_collider_sphere_*` (12 settle variants) | VMK#236 | 1/12 (all `f02fb44e…`) | **11/12** | closed |
+| `springbone_collider_capsule_*` (12 settle variants) | VMK#236 | 1/12 (all `f02fb44e…`) | **11/12** | closed |
+| `swing_springbone_collider_sphere_*` (12 swing variants) | VMK#236 | 1/12 | **12/12** | closed |
+| `swing_springbone_collider_capsule_*` (12 swing variants) | VMK#236 | 1/12 | **12/12** | closed |
+| `swing_springbone_stiffness_*` (4 swing variants) | VMK#240 | 2/4 (`_0`, `_0p8`, `_1` shared `0c9ecdad…`) | **4/4** | closed |
+
+The 1/12 residual collisions in settle collider sphere/capsule are the symmetric `x=±0.05, r=0.03` configurations matching `f02fb44e3d2a…` — these are physically correct: a 3 cm-radius collider offset 5 cm laterally cannot contact bust-chain joints sitting near `x≈0`, so the settle pose equals the no-collision baseline. The swing variants confirm this — under animated excitation the chain reaches the colliders and 12/12 produce distinct SHAs.
+
+**Cross-cutting hypothesis confirmed.** The Int-vs-Double pattern logged in the prior `VMK issue hunt` entry was named explicitly in VMK's PR #258 body: "`AnyCodable` decodes whole-number `0.0` as `Int(0)` and `as? [Double]` fails on the mixed `[Double, Double, Int]` array." PR #254 generalizes the fix to MToon scalar factors; PR #255 sweeps residual `VRMExtensionParser` sites. The boundary-collapse fingerprint identified in our findings (`0`, `1`, `-1` collapsing to default while intermediate values worked) was the correct diagnostic signal — same root cause, same fix shape, across all four issues.
+
+**VMK tracker discrepancy:** [VMK#239](https://github.com/arkavo-org/VRMMetalKit/issues/239) is still marked `state=OPEN` on GitHub at the time of this verification, but the 0.15.0 release notes name it as a closure and our re-render confirms the symptom is gone (all 17 shadingShift+shadingToony variants now produce distinct SHAs). Likely a missed `Fixes #239` link in the merge commit; VMK should auto-close on their next pass. [VMK#237](https://github.com/arkavo-org/VRMMetalKit/issues/237) (extended_collider chaotic clustering) also remains open — release notes mention "phases 1–3" landed via PR #260/#262 but the upstream issue stays open pending end-to-end swing verification on capsule/sphere extended_collider variants. Both are tracked here for the next bump cycle.
+
+**Forward:** the next re-bootstrap should run all four renderers so the consensus-report can quantify SSIM movement against the three-vrm/godot-vrm/UniVRM baselines. Expected direction: VMK pairwise SSIM with the consortium-reference cluster (currently `0.6313..0.9665`, mean `~0.74`) should improve materially on the four families that previously collapsed to default-bucket renders. That measurement is the value-add of this closure — distinct SHAs prove the parameter is now being read; cross-renderer SSIM proves the parameter is now being read *correctly*.
