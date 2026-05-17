@@ -143,6 +143,9 @@ fn run_one_capture_positions(
         emit_progress_ndjson: opts.emit_progress_ndjson,
         reference: None,
         reference_positions: None,
+        vrma_path: None,
+        apply_at_time: 0.0,
+        reference_pose_json: None,
     };
     execute_plan_capturing_positions(&plan, &exec_opts)
 }

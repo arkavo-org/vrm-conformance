@@ -22,6 +22,16 @@ pub struct ExecuteOptions {
     /// If provided, dump bone positions after render and diff against
     /// this JSON reference file (same shape as `DumpBonePositionsResult`).
     pub reference_positions: Option<Utf8PathBuf>,
+    /// If provided, the runner loads this `.vrma` and calls
+    /// `apply_vrma_at_time(t)` before render. None disables VRMA.
+    pub vrma_path: Option<Utf8PathBuf>,
+    /// Sample time for `apply_vrma_at_time`. Ignored when `vrma_path` is
+    /// None. Defaults to 0.0 when VRMA is set but no time is specified.
+    pub apply_at_time: f32,
+    /// JSON fixture path with reference humanoid pose + expressions +
+    /// lookAt state. When set, the runner runs pose_diff against this
+    /// reference and includes the report in `ExecuteResult::pose_diff`.
+    pub reference_pose_json: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +44,8 @@ pub struct ExecuteResult {
     pub diff: Option<vrm_diff_engine::result::DiffResult>,
     /// Populated only when `ExecuteOptions::reference_positions` was set.
     pub position_diff: Option<vrm_diff_engine::positions::PositionDiffReport>,
+    /// Populated only when `ExecuteOptions::reference_pose_json` was set.
+    pub pose_diff: Option<vrm_diff_engine::pose_diff::PoseDiffReport>,
 }
 
 pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteResult> {
@@ -186,6 +198,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         actual_color_space: render.actual_color_space,
         diff,
         position_diff,
+        pose_diff: None,
     })
 }
 
@@ -343,6 +356,10 @@ mod reference_positions_tests {
         fn _structural(opts: &ExecuteOptions, r: &ExecuteResult) {
             let _: &Option<Utf8PathBuf> = &opts.reference_positions;
             let _: &Option<vrm_diff_engine::positions::PositionDiffReport> = &r.position_diff;
+            let _: &Option<Utf8PathBuf> = &opts.vrma_path;
+            let _: f32 = opts.apply_at_time;
+            let _: &Option<Utf8PathBuf> = &opts.reference_pose_json;
+            let _: &Option<vrm_diff_engine::pose_diff::PoseDiffReport> = &r.pose_diff;
         }
     }
 }

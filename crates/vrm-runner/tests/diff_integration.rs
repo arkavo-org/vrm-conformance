@@ -53,6 +53,7 @@ fn synthetic_plan(id: &str, threshold: f32) -> TestPlan {
             threshold,
             reference_renderer: "test-renderer".into(),
             conformance_status: Default::default(),
+            pose_tolerance: None,
         },
         ignore_renderers: Vec::new(),
         properties: Vec::new(),

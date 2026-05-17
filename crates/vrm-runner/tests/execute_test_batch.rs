@@ -91,6 +91,7 @@ fn synthetic_plan(id: &str) -> TestPlan {
             threshold: 0.985,
             reference_renderer: "vrm-metal-kit".into(),
             conformance_status: Default::default(),
+            pose_tolerance: None,
         },
         ignore_renderers: Vec::new(),
         properties: Vec::new(),

@@ -65,6 +65,7 @@ fn execute_plan_with_animation_against_mock_succeeds() {
             duration_seconds: 0.167,
             fps: 60,
         }),
+        vrma: None,
     });
 
     let renderer_name = "mock-anim";
@@ -77,6 +78,9 @@ fn execute_plan_with_animation_against_mock_succeeds() {
         emit_progress_ndjson: false,
         reference: None,
         reference_positions: None,
+        vrma_path: None,
+        apply_at_time: 0.0,
+        reference_pose_json: None,
     };
 
     let result = execute_plan(&plan, &opts).expect("execute_plan must succeed");
@@ -101,6 +105,7 @@ fn yaml_round_trip_preserves_animation_block() {
             duration_seconds: 0.25,
             fps: 60,
         }),
+        vrma: None,
     });
 
     let yaml = serde_yml::to_string(&plan).unwrap();

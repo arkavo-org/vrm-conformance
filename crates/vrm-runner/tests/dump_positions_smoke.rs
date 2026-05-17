@@ -71,6 +71,9 @@ fn execute_plan_with_reference_positions_against_mock_passes() {
         emit_progress_ndjson: false,
         reference: None,
         reference_positions: Some(ref_path),
+        vrma_path: None,
+        apply_at_time: 0.0,
+        reference_pose_json: None,
     };
 
     let result = execute_plan(&plan, &opts).expect("execute_plan should succeed");

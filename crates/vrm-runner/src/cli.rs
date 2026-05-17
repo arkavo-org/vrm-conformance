@@ -184,6 +184,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 emit_progress_ndjson: emit_json,
                 reference,
                 reference_positions,
+                vrma_path: None,
+                apply_at_time: 0.0,
+                reference_pose_json: None,
             };
             let result = execute_plan(&plan_value, &opts)?;
             if emit_json {
