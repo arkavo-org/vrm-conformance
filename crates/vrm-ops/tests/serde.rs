@@ -89,3 +89,32 @@ fn load_vrma_result_roundtrip() {
     assert_eq!(back.channel_summary.humanoid_bones, 15);
     assert!(back.channel_summary.has_look_at);
 }
+
+#[test]
+fn apply_vrma_at_time_params_roundtrip() {
+    let p = ApplyVrmaAtTimeParams {
+        session_id: "sess-vrma".into(),
+        vrma_handle: 7,
+        vrm_handle: 3,
+        time_seconds: 0.5,
+    };
+    let s = serde_json::to_string(&p).unwrap();
+    let back: ApplyVrmaAtTimeParams = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.vrma_handle, 7);
+    assert_eq!(back.time_seconds, 0.5);
+}
+
+#[test]
+fn apply_vrma_at_time_result_roundtrip() {
+    let r = ApplyVrmaAtTimeResult {
+        channels_applied: VrmaChannelsApplied {
+            humanoid_bones: 12,
+            expressions: 2,
+            look_at: false,
+        },
+    };
+    let s = serde_json::to_string(&r).unwrap();
+    let back: ApplyVrmaAtTimeResult = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.channels_applied.humanoid_bones, 12);
+    assert!(!back.channels_applied.look_at);
+}

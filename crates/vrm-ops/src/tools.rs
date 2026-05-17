@@ -201,6 +201,33 @@ pub struct LoadVrmaResult {
     pub channel_summary: VrmaChannelSummary,
 }
 
+/// Sample the loaded `.vrma` at `time_seconds` and write the resulting pose
+/// onto the avatar identified by `vrm_handle`. Linear interpolation is the
+/// spec-mandated default. State-advancing — the subsequent `dump_*` ops
+/// capture this op's effect.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplyVrmaAtTimeParams {
+    pub session_id: String,
+    pub vrma_handle: u32,
+    pub vrm_handle: u32,
+    pub time_seconds: f32,
+}
+
+/// Per-channel application counts. Lets callers verify that each channel
+/// in the loaded `.vrma` was actually applied (zero counts surface
+/// silent-skip bugs).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VrmaChannelsApplied {
+    pub humanoid_bones: u32,
+    pub expressions: u32,
+    pub look_at: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplyVrmaAtTimeResult {
+    pub channels_applied: VrmaChannelsApplied,
+}
+
 /// Empty result type for ops that return no payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitResult {}
