@@ -129,6 +129,80 @@ pub fn dump_bone_positions(
     })
 }
 
+pub fn load_vrma(
+    _registry: &mut SessionRegistry,
+    _params: ops::LoadVrmaParams,
+) -> Result<ops::LoadVrmaResult, RpcError> {
+    // Deterministic: every load yields the same handle + summary.
+    Ok(ops::LoadVrmaResult {
+        vrma_handle: 1,
+        channel_summary: ops::VrmaChannelSummary {
+            humanoid_bones: 15,
+            expressions: 1,
+            has_look_at: true,
+            duration_seconds: 1.0,
+        },
+    })
+}
+
+pub fn apply_vrma_at_time(
+    _registry: &mut SessionRegistry,
+    _params: ops::ApplyVrmaAtTimeParams,
+) -> Result<ops::ApplyVrmaAtTimeResult, RpcError> {
+    Ok(ops::ApplyVrmaAtTimeResult {
+        channels_applied: ops::VrmaChannelsApplied {
+            humanoid_bones: 15,
+            expressions: 1,
+            look_at: true,
+        },
+    })
+}
+
+pub fn dump_humanoid_pose(
+    _registry: &mut SessionRegistry,
+    _params: ops::DumpHumanoidPoseParams,
+) -> Result<ops::DumpHumanoidPoseResult, RpcError> {
+    Ok(ops::DumpHumanoidPoseResult {
+        bones: vec![
+            ops::HumanoidBoneRotation {
+                name: "head".into(),
+                local_rotation_quat: [0.0, 0.0, 0.0, 1.0],
+            },
+            ops::HumanoidBoneRotation {
+                name: "leftUpperArm".into(),
+                local_rotation_quat: [0.0, 0.0, 0.0, 1.0],
+            },
+        ],
+        hips_translation: [0.0, 0.0, 0.0],
+        bones_missing: vec![],
+    })
+}
+
+pub fn dump_expression_weights(
+    _registry: &mut SessionRegistry,
+    _params: ops::DumpExpressionWeightsParams,
+) -> Result<ops::DumpExpressionWeightsResult, RpcError> {
+    let mut presets = std::collections::BTreeMap::new();
+    presets.insert("happy".into(), 0.0_f32);
+    Ok(ops::DumpExpressionWeightsResult {
+        presets,
+        custom: std::collections::BTreeMap::new(),
+    })
+}
+
+pub fn dump_look_at_state(
+    _registry: &mut SessionRegistry,
+    _params: ops::DumpLookAtStateParams,
+) -> Result<ops::DumpLookAtStateResult, RpcError> {
+    Ok(ops::DumpLookAtStateResult {
+        gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
+        yaw_deg: 0.0,
+        pitch_deg: 0.0,
+        applied_via: ops::LookAtAppliedVia::Off,
+        offset_from_head_bone: [0.0, 0.0, 0.0],
+    })
+}
+
 fn invalid_session(id: &str) -> RpcError {
     RpcError {
         code: -32602,

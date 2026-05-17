@@ -1,0 +1,61 @@
+id: synthetic_vrma_smoke
+spec_section: VRMC_vrm_animation (smoke; mock renderer fixtures)
+asset: synthetic_smoke.vrm
+animation:
+  vrma:
+    path: synthetic_smoke.vrma
+    apply_at_time: 0.5
+camera:
+  position:
+  - 0.0
+  - 1.5
+  - 1.2
+  target:
+  - 0.0
+  - 1.5
+  - 0.0
+  up:
+  - 0.0
+  - 1.0
+  - 0.0
+  fov_degrees: 30.0
+lighting:
+  directional:
+    dir:
+    - 0.0
+    - -1.0
+    - 0.0
+    color:
+    - 1.0
+    - 1.0
+    - 1.0
+    intensity: 1.0
+  ambient:
+    color:
+    - 1.0
+    - 1.0
+    - 1.0
+    intensity: 0.2
+  cast_shadows: false
+  receive_shadows: false
+post_processing:
+  tone_mapping: none
+  exposure: 1.0
+output:
+  width: 256
+  height: 256
+  color_space: srgb
+  msaa: 1
+diff:
+  mode: ssim
+  threshold: 0.95
+  reference_renderer: vrm-mock-renderer
+  pose_tolerance:
+    per_bone_quaternion_radians: 0.010
+    hips_translation_m: 0.005
+    per_preset_expression: 0.005
+    per_custom_expression: 0.005
+    look_at_yaw_pitch_degrees: 1.0
+    offset_from_head_bone_m: 0.001
+  conformance_status:
+    kind: included
