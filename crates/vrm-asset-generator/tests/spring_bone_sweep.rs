@@ -54,8 +54,11 @@ fn sweep_cells_carry_expected_param_values() {
     assert_eq!(find("springbone_stiffness_1").stiffness, 1.0);
     assert_eq!(find("springbone_drag_0").drag_force, 0.0);
     assert_eq!(find("springbone_drag_1").drag_force, 1.0);
+    // Gravity magnitude sweep retuned for post-VMK-0.15.1 spec-correct
+    // gravity scale (~12× stronger than 0.14.0). New range: {0.0, 0.02,
+    // 0.05, 0.10, 0.20}.
     assert_eq!(find("springbone_gravity_0").gravity_power, 0.0);
-    assert_eq!(find("springbone_gravity_2").gravity_power, 2.0);
+    assert!((find("springbone_gravity_0p2").gravity_power - 0.20).abs() < 1e-6);
 }
 
 #[test]

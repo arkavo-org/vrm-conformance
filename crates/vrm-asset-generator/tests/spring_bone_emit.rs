@@ -86,7 +86,7 @@ fn sweep_edge_cells_validate_clean() {
         "springbone_drag_0",
         "springbone_drag_1",
         "springbone_gravity_0",
-        "springbone_gravity_2",
+        "springbone_gravity_0p2",
     ];
 
     let dir = tempfile::tempdir().unwrap();

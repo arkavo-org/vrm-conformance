@@ -180,7 +180,17 @@ namespace Conformance.Tests.Play
             // rendered PNG. Only runs when the test plan declares animation.vrma.
             // Yielding the coroutine requires being outside a try-with-catch block
             // (C# iterator restriction), hence the split from the setup phase above.
-            if (t.animation != null && t.animation.vrma != null)
+            // JsonUtility deserializes absent JSON sub-objects as default-
+            // constructed instances rather than null (Unity quirk). So a plan
+            // with `animation: { root_transform: {...} }` and no `vrma` field
+            // still produces a non-null `t.animation.vrma` instance with an
+            // empty `path`. Guard on both null AND empty-path so non-VRMA
+            // test plans (e.g. the spring-bone swing sweep) skip the VRMA
+            // branch cleanly instead of trying to load "" and reporting
+            // VrmaApplyFailed on tests that aren't VRMA tests at all.
+            if (t.animation != null
+                && t.animation.vrma != null
+                && !string.IsNullOrEmpty(t.animation.vrma.path))
             {
                 VrmaDriver.ApplyResult vrmaResult = null;
                 yield return VrmaDriver.LoadAndApply(
