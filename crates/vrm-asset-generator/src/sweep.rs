@@ -442,6 +442,32 @@ fn build_multichain_scene(id: &str, chain_count: u32, sharing_mode: &str) -> Spr
     }
 }
 
+pub fn vrma_expression_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> {
+    use crate::vrma_params::VrmaExpressionParams;
+
+    let presets = [
+        "happy", "angry", "sad", "relaxed", "surprised",
+        "aa", "ih", "ou", "ee", "blink",
+    ];
+    let custom = ["smug", "drowsy"];
+
+    presets
+        .iter()
+        .map(|n| VrmaExpressionParams {
+            id: format!("vrma_expression_preset_{n}"),
+            expression_name: (*n).into(),
+            is_preset: true,
+            duration_s: 1.0,
+        })
+        .chain(custom.iter().map(|n| VrmaExpressionParams {
+            id: format!("vrma_expression_custom_{n}"),
+            expression_name: (*n).into(),
+            is_preset: false,
+            duration_s: 1.0,
+        }))
+        .collect()
+}
+
 pub fn vrma_humanoid_sweep() -> Vec<crate::vrma_params::VrmaHumanoidParams> {
     use crate::vrma_params::{RotationAxis, VrmaHumanoidParams};
 
@@ -523,6 +549,44 @@ pub fn vrma_humanoid_sweep() -> Vec<crate::vrma_params::VrmaHumanoidParams> {
             duration_s: 1.0,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod vrma_expression_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn expression_sweep_produces_12_variants() {
+        let variants = vrma_expression_sweep();
+        assert_eq!(variants.len(), 12, "10 presets + 2 custom = 12");
+    }
+
+    #[test]
+    fn expression_sweep_unique_ids() {
+        let variants = vrma_expression_sweep();
+        let ids: std::collections::HashSet<_> = variants.iter().map(|p| p.id.clone()).collect();
+        assert_eq!(ids.len(), 12);
+    }
+
+    #[test]
+    fn expression_sweep_preset_flag_correct() {
+        let variants = vrma_expression_sweep();
+        for v in &variants {
+            if v.id.contains("_preset_") {
+                assert!(v.is_preset, "{} should be preset", v.id);
+            } else {
+                assert!(!v.is_preset, "{} should be custom", v.id);
+            }
+        }
+    }
+
+    #[test]
+    fn expression_sweep_all_duration_1s() {
+        let variants = vrma_expression_sweep();
+        for v in &variants {
+            assert!((v.duration_s - 1.0).abs() < 1e-6, "{}: duration should be 1.0", v.id);
+        }
+    }
 }
 
 #[cfg(test)]

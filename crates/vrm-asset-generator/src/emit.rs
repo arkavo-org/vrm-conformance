@@ -1044,6 +1044,61 @@ pub fn emit_vrma_humanoid_triplet(
     Ok(())
 }
 
+/// Emit a VRMA expression sweep triplet: .vrm + .vrma + .test.yaml.
+///
+/// The .vrm is the canonical minimal humanoid rig.
+/// The .vrma carries a single-expression weight ramp: 0 → 1 → 0 over `duration_s`.
+/// The .test.yaml declares `animation.vrma` with `apply_at_time = duration_s / 2`
+/// so the runner samples at peak weight.
+pub fn emit_vrma_expression_triplet(
+    output_dir: &Utf8Path,
+    params: &crate::vrma_params::VrmaExpressionParams,
+) -> Result<()> {
+    use crate::vrma_emit::{add_expression_weight_channel, build_empty_vrma, write_vrma_glb, ExpressionKind};
+
+    std::fs::create_dir_all(output_dir)?;
+
+    // 1. .vrm (canonical default avatar — same as humanoid sweep).
+    let vrm_relpath = format!("{}.vrm", params.id);
+    let vrm_path = output_dir.join(&vrm_relpath);
+    let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
+    emit_vrm(&mtoon_defaults, &vrm_path)?;
+
+    // 2. .vrma: one node for the expression target + a 0→1→0 ramp.
+    let mut doc = build_empty_vrma();
+    let nodes = doc["nodes"].as_array_mut().unwrap();
+    nodes.push(serde_json::json!({
+        "name": format!("{}_expr_target", params.expression_name)
+    }));
+    let node_idx = nodes.len() - 1;
+
+    let kind = if params.is_preset {
+        ExpressionKind::Preset(&params.expression_name)
+    } else {
+        ExpressionKind::Custom(&params.expression_name)
+    };
+    let keyframes = [
+        (0.0_f32, 0.0_f32),
+        (params.duration_s / 2.0, 1.0),
+        (params.duration_s, 0.0),
+    ];
+
+    let mut buffer = Vec::<u8>::new();
+    add_expression_weight_channel(&mut doc, &mut buffer, node_idx, kind, &keyframes);
+
+    let vrma_relpath = format!("{}.vrma", params.id);
+    let vrma_path = output_dir.join(&vrma_relpath);
+    let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
+    std::fs::write(&vrma_path, &vrma_bytes)?;
+
+    // 3. .test.yaml.
+    let plan = crate::sidecar::build_vrma_expression_test_plan(params, &vrm_relpath, &vrma_relpath);
+    let yaml_path = output_dir.join(format!("{}.test.yaml", params.id));
+    crate::sidecar::write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod multichain_emit_integration_tests {
     use super::*;

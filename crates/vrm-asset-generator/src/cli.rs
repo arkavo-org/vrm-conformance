@@ -145,6 +145,17 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the VRMA expression sweep (12 plans). Each variant animates a
+    /// single expression 0 → 1 → 0 over 1 s; test plans sample at peak
+    /// (t=0.5). Presets: happy, angry, sad, relaxed, surprised, aa, ih, ou,
+    /// ee, blink. Custom: smug, drowsy.
+    EmitVrmaExpressionSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -861,6 +872,39 @@ pub fn run(cli: Cli) -> Result<()> {
             println!("emitted {total} VRMA humanoid sweep plans to {output_dir}");
             Ok(())
         }
+        Cmd::EmitVrmaExpressionSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_vrma_expression_triplet;
+            use crate::sweep::vrma_expression_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let sweep = vrma_expression_sweep();
+            let total = sweep.len();
+            for (i, params) in sweep.iter().enumerate() {
+                emit_vrma_expression_triplet(&output_dir, params)?;
+                if emit_json {
+                    eprintln!(
+                        r#"{{"event":"progress","op":"emit-vrma-expression-sweep","index":{i},"total":{total},"id":"{id}"}}"#,
+                        id = params.id,
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, params.id);
+                }
+            }
+            if emit_json {
+                let summary = serde_json::json!({
+                    "ok": true,
+                    "count": total,
+                    "output_dir": output_dir,
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!("emitted {total} VRMA expression sweep plans to {output_dir}");
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -1135,6 +1179,28 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "json": {
                                     "type": "boolean",
                                     "description": "Emit NDJSON progress on stderr"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" }
+                            }
+                        }
+                    },
+                    "emit-vrma-expression-sweep": {
+                        "summary": "VRMA expression sweep (12 plans). Each variant animates a single expression 0 → 1 → 0 over 1 s; test plans sample at peak (t=0.5). Presets: happy, angry, sad, relaxed, surprised, aa, ih, ou, ee, blink. Custom: smug, drowsy. Each plan emits a .vrm + .vrma + .test.yaml triplet.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
                                 }
                             }
                         },
