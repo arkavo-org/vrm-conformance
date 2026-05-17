@@ -1267,3 +1267,63 @@ This is a substantive shift in attribution. Pre-0.15.0 the natural read was "VMK
 ### Bottom line
 
 VMK has moved from the **97% conformance band** (with named outstanding clusters on rim lighting and shadingToony) to the **99% conformance band** against the consortium reference, with the four "boundary collapse" findings cited as direct contributors to the release. The remaining 1 miss is a universal methodology hazard, not a VMK-specific defect. Cross-renderer SSIM movement is modest at the corpus mean (∆ ≤ +0.003) but the structural change is in *attribution* — VMK is now a member of the spec-tight cluster, and the next round of upstream fingerpointing should be directed at the godot-vrm + UniVRM minority on shadingToony.
+
+## MToon alpha sweep landed — new conformance signal (VMK#264 surface area)
+
+**Trigger:** Prior to VRMA phase 2 work, added 5 new sweep variants to `mtoon_basic_sweep` to exercise the MToon alpha-routing surface ([VMK#264](https://github.com/arkavo-org/VRMMetalKit/issues/264) territory). The generator gained an `alpha_cutoff: f32` field on `MToonParams` and now emits glTF-spec-correct `alphaCutoff` (only when `alphaMode == MASK`).
+
+**New corpus additions:**
+
+| test_id | alphaMode | baseColorFactor.a | alphaCutoff | transparentWithZWrite |
+|---|---|---|---|---|
+| `mtoon_alpha_mask_cutoff_0p25` | MASK | 0.25 | 0.25 | false |
+| `mtoon_alpha_mask_cutoff_0p5` | MASK | 0.50 | 0.50 | false |
+| `mtoon_alpha_mask_cutoff_0p75` | MASK | 0.75 | 0.75 | false |
+| `mtoon_alpha_blend_zwrite_false` | BLEND | 0.50 | — | false |
+| `mtoon_alpha_blend_zwrite_true` | BLEND | 0.50 | — | true |
+
+(The default `mtoon_default` already covers the OPAQUE baseline so we don't re-emit it.)
+
+### Method
+
+`scripts/bootstrap-goldens.sh` rendered the new 5 plans through VMK + three-vrm + godot-vrm on Apple M4 Max (UniVRM has no entries for these test_ids yet — the existing UniVRM batch only covers the pre-phase-2 80-test corpus). `scripts/consensus-report.sh` produced pairwise SSIM. Manifest now carries 725 entries vs. the prior 710.
+
+### Per-test-id SHA distinctness (across 3 cutoff values)
+
+| renderer | distinct SHAs across 3 MASK cutoffs |
+|---|---|
+| **vrm-metal-kit** | **3 of 3** (`0559d7…`, `cedc33…`, `29ea50…`) — distinguishes every cutoff |
+| three-vrm | 1 of 3 (single SHA `6ff1f5…` for all cutoffs) — **alphaCutoff variations invisible in output** |
+| godot-vrm | 1 of 3 (single SHA `51c60e…` for all cutoffs) — **alphaCutoff variations invisible in output** |
+
+For BLEND variants (`zwrite_false` vs `zwrite_true`), all three renderers produce byte-identical pairs (1 SHA per renderer covering both zwrite states). This is the expected null result for a single-mesh scene — `transparentWithZWrite` only affects depth interactions between multiple transparent surfaces, which we don't author.
+
+### Per-test pairwise SSIM (MASK variants)
+
+| test_id | VMK vs three-vrm | VMK vs godot-vrm | three-vrm vs godot-vrm | consensus |
+|---|---:|---:|---:|---|
+| `mtoon_alpha_mask_cutoff_0p25` | 0.9463 | **0.9994** | 0.9466 | passed |
+| `mtoon_alpha_mask_cutoff_0p5` | 0.9469 | **0.9996** | 0.9466 | passed |
+| `mtoon_alpha_mask_cutoff_0p75` | **0.9912** | 0.9503 | 0.9466 | passed |
+
+The pattern is notable: **VMK's pairwise SSIM with each reference renderer shifts as `alphaCutoff` changes**. At low cutoff (0.25, 0.5) VMK matches godot-vrm to ≥0.9994. At high cutoff (0.75) VMK matches three-vrm to 0.9912. The two reference renderers each produce a single invariant output across cutoffs, and those two outputs disagree — three-vrm vs godot-vrm sits at 0.9466 regardless of cutoff value.
+
+### Interpretation
+
+This corpus *does not directly verify* [VMK#264](https://github.com/arkavo-org/VRMMetalKit/issues/264) (`discard_fragment()` defeats hardware A2C). #264 predicts that VMK's MASK output should look the same as OPAQUE — no smooth coverage variation across cutoff values — since the shader discards before A2C can act. But we observe VMK responding visibly to cutoff value (3 distinct SHAs), which is the opposite of what #264's description would predict. Two possibilities:
+
+1. VMK is varying its output via some non-A2C code path (e.g. baseColorFactor.a modulating the rendered color outside the discard branch), which gives the cutoff parameter visible effect but not the spec-correct subsample-coverage shape. #264's bug is real but is being *masked* by an upstream incorrect behavior.
+2. The discard-before-A2C path described in #264 has not landed in the 0.15.0 release we're pinned to, and partial A2C is currently working. The pipeline routing fix referenced in #264's framing is independent of this rendering output.
+
+Either way the data is unambiguous on a more basic point: **`alphaCutoff` does not produce visible variation in three-vrm or godot-vrm**. Both reference renderers ignore the swept parameter entirely — which is the inverse of the VMK-vs-references attribution pattern we usually see (VMK ignores, references vary). This is the corpus producing a *new* shape of conformance finding.
+
+### Out of scope for this entry
+
+- **[VMK#265](https://github.com/arkavo-org/VRMMetalKit/issues/265)** (VRM 0.x `_BlendMode=3` → `transparentWithZWrite` conversion). The generator emits VRM 1.0 only; we have no VRM 0.x source asset that could carry `_BlendMode`. Filed as a follow-up corpus extension (generator gains a `--emit-vrm0` flag, or hand-author one VRM 0.x reference asset).
+- **[VMK#266](https://github.com/arkavo-org/VRMMetalKit/issues/266)** (MSAAAlphaToCoverageTests pass when A2C is dead code). Meta-issue inside VMK's own test suite; not addressable from this corpus.
+
+### Forward
+
+The new signal warrants follow-up issue-filing once we have a clean reproduction story:
+- File three-vrm + godot-vrm issues that `alphaCutoff` parameter has no visible effect in their MToon paths (or confirm via the spec that the observation is spec-compliant — MASK with uniform `baseColorFactor.a == alphaCutoff` is a degenerate case where pass/fail is the only spec-prescribed behavior).
+- Comment on VMK#264 with this corpus's observation: "VMK distinguishes cutoff values at the PNG level; the discard-before-A2C bug described in #264 may not be the root cause of three-vrm/godot-vrm divergence on these test_ids."
