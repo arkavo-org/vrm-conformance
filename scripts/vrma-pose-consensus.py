@@ -36,8 +36,15 @@ def main():
     reference_dir = goldens_dir / reference
 
     # Enumerate test_ids that have pose.json from BOTH renderers.
-    actual_poses = {p.stem.removesuffix(".pose"): p for p in actual_dir.glob("vrma_*.pose.json")}
-    reference_poses = {p.stem.removesuffix(".pose"): p for p in reference_dir.glob("vrma_*.pose.json")}
+    # Filenames are `<test_id>_<renderer>.pose.json` — strip both the
+    # `.pose` extension stem AND the trailing `_<renderer>` suffix to
+    # recover the bare test_id used by the runner / asset generator.
+    def stem_test_id(p, renderer):
+        s = p.stem.removesuffix(".pose")
+        return s.removesuffix("_" + renderer)
+
+    actual_poses = {stem_test_id(p, actual): p for p in actual_dir.glob("vrma_*.pose.json")}
+    reference_poses = {stem_test_id(p, reference): p for p in reference_dir.glob("vrma_*.pose.json")}
     common = sorted(set(actual_poses) & set(reference_poses))
 
     print(f"==> {actual}: {len(actual_poses)} pose.json files", file=sys.stderr)
@@ -72,9 +79,12 @@ def main():
 
     results = []
     for test_id in common:
-        with open(actual_poses[test_id]) as f:
+        # UniVRM (Unity JsonUtility.ToJson + File.WriteAllText) writes
+        # UTF-8 BOM on some hosts; three-vrm/Node writes plain UTF-8.
+        # utf-8-sig handles both.
+        with open(actual_poses[test_id], encoding="utf-8-sig") as f:
             a = json.load(f)
-        with open(reference_poses[test_id]) as f:
+        with open(reference_poses[test_id], encoding="utf-8-sig") as f:
             r = json.load(f)
 
         # Per-bone rotation: max geodesic over bones present in both.
