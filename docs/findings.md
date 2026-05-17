@@ -1472,3 +1472,25 @@ A VMK tester evaluated a static T-pose render of a VRM 1.0 asset on the **unrele
 This means: **VMK#263 appears already fixed in 0.15.1**, not "asset-conditional in 0.15.0" as the prior framing suggested. The 0.15.0 → 0.15.1 delta contains the closure work. (My first comment on VMK#263 proposed a material-JSON bisect on the wrong assumption that both releases were the same code; corrected at [VMK#263 #issuecomment-4472442300](https://github.com/arkavo-org/VRMMetalKit/issues/263#issuecomment-4472442300).)
 
 **Implication for the corpus pin:** vrm-conformance currently pins VMK at 0.15.0 (`adapters/vrm-metal-kit/Package.swift`, commit `6c90240`). When 0.15.1 releases, bump the pin + re-run the cross-renderer bootstrap to verify VMK#263 closure with the same signal that surfaced it. The single-mesh alpha sweep we have today will already detect a closure on its 5 variants; the layered-transparency fixture from [vrm-conformance#11](https://github.com/arkavo-org/vrm-conformance/issues/11) would catch broader render-queue regressions without depending on a specific asset's full material block.
+
+### T-pose spec primer for VRMA implementers
+
+The VMK team reported confusion about the T-pose spec while planning VMK#165 (VRMA implementation). The spec covers it in two complementary documents — both are mandatory reading for anyone implementing VRMA application math:
+
+- [`VRMC_vrm-1.0/tpose.md`](https://github.com/vrm-c/vrm-specification/blob/master/specification/VRMC_vrm-1.0/tpose.md) defines T-pose as **two simultaneous criteria**: appearance (8 visual rules, 1.1–1.8) and numerical (uniform-scale transforms, 2.1).
+- [`VRMC_vrm_animation-1.0/how_to_transform_human_pose.md`](https://github.com/vrm-c/vrm-specification/blob/master/specification/VRMC_vrm_animation-1.0/how_to_transform_human_pose.md) defines the **rest rotation math** that VRMA application requires.
+
+**The load-bearing fact** that trips up VRMA implementers: VRM 1.0 removed the VRM 0.x restriction forcing rest rotations to identity. A spec-correct VRM 1.0 model can have **non-zero local rest rotations on humanoid bones** while still visually being in T-pose. This means a VRMA's `local_rotation_quat` field **cannot be applied directly to `bone.localRotation`** — it must be normalized through the model's rest rotation pair `(W, L)` first.
+
+The spec provides explicit formulas:
+
+- `PoseForA → NormalizedLocalRotation`: `W · L⁻¹ · A.LocalRotation · W⁻¹`
+- `NormalizedLocalRotation → PoseForB`: `L · W⁻¹ · NormalizedLocalRotation · W`
+
+UniVRM bundles this as runtime "ControlRig" machinery; `target.Runtime.Process(sourcePose, sourceTPose)` applies the math automatically. VMK#165's implementation needs equivalent surface area.
+
+Full primer forwarded to VMK at [VMK#165 #issuecomment-4472458466](https://github.com/arkavo-org/VRMMetalKit/issues/165#issuecomment-4472458466). The downstream-user "arms twist inside out during walking" symptom is the textbook failure mode when the normalization math is skipped — the vrm-conformance 15-plan humanoid sweep will surface this directly via the runner's pose-diff op.
+
+**Methodology note** (record for future):
+
+T-pose conformance has a precedent for being audited as a one-time check per avatar (the methodology hazard #1 the VRMA design spec already calls out). The suite's `avatarA_1_0.vrm` should be audited against the 8 appearance criteria + the rest-rotation-is-non-identity reality before manual humanoid clips (issue [#10](https://github.com/arkavo-org/vrm-conformance/issues/10)) ship. A T-pose audit isn't currently a runner op — it's a one-time check at corpus-curation time.
