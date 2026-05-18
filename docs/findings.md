@@ -1692,3 +1692,14 @@ Until one of these lands, the conformance suite confirms the upstream fix indire
 ### Forward
 
 When VMK ships either `set_expression` or `load_vrma`, re-run this corpus through VMK and compute SSIM against three-vrm's existing viseme PNGs. Expected outcome if the 0.15.2 parse fix landed correctly: VMK + three-vrm viseme renders agree (SSIM in the standard cross-renderer high-agreement band, ≳ 0.85 like the rest of the corpus). Falsifies otherwise.
+
+### Correction (same day): attribution
+
+The "What we CANNOT directly verify yet" section above implies VMK lacks the runtime expression-application API surface. That's wrong. A post-hoc audit of `adapters/vrm-metal-kit/.build/checkouts/VRMMetalKit/Sources/VRMMetalKit/` against the 0.15.2 pin confirms VMK already exposes:
+
+- `VRMAnimationLoader.loadVRMA(from:model:) throws -> AnimationClip` (`Animation/VRMAnimationLoader.swift:129`)
+- `AnimationPlayer.play() / seek(to:) / update(deltaTime:model:)` (`Animation/AnimationPlayer.swift:135-167`)
+- `VRMExpressionManager.setExpressionWeight(_:weight:)` (`Animation/VRMMorphTargets.swift:520`)
+- `VRMExpressionPreset` with all five visemes including `oh` (`Core/VRMTypes.swift:152-209`)
+
+The actual blocker is our **adapter wrapper**: `adapters/vrm-metal-kit/Sources/VRMMetalKitAdapter/Operations.swift:48-58` declares `set_expression`, `load_vrma`, `apply_vrma_at_time`, and `dump_expression_weights` as `Unimplemented` with a stale comment ("pending VMK#165 closure" — VMK#165 has been closed for months). The fix is wiring these four ops through to VMK's existing APIs, not an upstream change. Tracked at [vrm-conformance#13](https://github.com/arkavo-org/vrm-conformance/issues/13). The end-to-end pixel verification of VMK 0.15.2's viseme parse-fix is gated on closing that adapter-side issue.
