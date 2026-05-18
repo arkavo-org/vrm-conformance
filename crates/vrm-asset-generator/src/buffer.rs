@@ -157,6 +157,94 @@ pub fn pack_mesh(mesh: &MeshData) -> PackedMesh {
     PackedMesh { binary: bin, json }
 }
 
+/// Pack a mesh plus N POSITION-only morph targets into a single binary
+/// buffer + glTF JSON fragment.
+///
+/// Each entry in `morphs` is a per-vertex POSITION delta array; its length
+/// must equal `mesh.positions.len()`. Output extends the base layout
+/// (pos/nrm/uv/idx at accessor indices 0..4) with one VEC3 FLOAT accessor
+/// per morph target at indices 4..4+N. Returns the morph accessor indices
+/// so callers can wire `primitives[].targets[]` without hard-coding the
+/// layout.
+pub fn pack_mesh_with_morphs(
+    mesh: &MeshData,
+    morphs: &[Vec<[f32; 3]>],
+) -> (PackedMesh, Vec<usize>) {
+    let vert_count = mesh.positions.len();
+    for (i, m) in morphs.iter().enumerate() {
+        assert_eq!(
+            m.len(),
+            vert_count,
+            "morph target {} length {} must match vertex count {}",
+            i,
+            m.len(),
+            vert_count
+        );
+    }
+
+    let mut bin: Vec<u8> = Vec::new();
+
+    let (pos_off, pos_len) = write_vec3_array(&mut bin, &mesh.positions);
+    align_to(&mut bin, 4);
+    let (nrm_off, nrm_len) = write_vec3_array(&mut bin, &mesh.normals);
+    align_to(&mut bin, 4);
+    let (uv_off, uv_len) = write_vec2_array(&mut bin, &mesh.uvs);
+    align_to(&mut bin, 4);
+    let (idx_off, idx_len) = write_u32_array(&mut bin, &mesh.indices);
+    align_to(&mut bin, 4);
+
+    let mut morph_offsets: Vec<(usize, usize, [f32; 3], [f32; 3])> =
+        Vec::with_capacity(morphs.len());
+    for deltas in morphs {
+        let (off, len) = write_vec3_array(&mut bin, deltas);
+        align_to(&mut bin, 4);
+        let (min, max) = min_max_vec3(deltas);
+        morph_offsets.push((off, len, min, max));
+    }
+
+    let (pos_min, pos_max) = min_max_vec3(&mesh.positions);
+
+    let mut buffer_views: Vec<Value> = vec![
+        json!({ "buffer": 0, "byteOffset": pos_off, "byteLength": pos_len, "target": TARGET_ARRAY_BUFFER }),
+        json!({ "buffer": 0, "byteOffset": nrm_off, "byteLength": nrm_len, "target": TARGET_ARRAY_BUFFER }),
+        json!({ "buffer": 0, "byteOffset": uv_off,  "byteLength": uv_len,  "target": TARGET_ARRAY_BUFFER }),
+        json!({ "buffer": 0, "byteOffset": idx_off, "byteLength": idx_len, "target": TARGET_ELEMENT_ARRAY_BUFFER }),
+    ];
+    let mut accessors: Vec<Value> = vec![
+        json!({
+            "bufferView": 0, "componentType": GL_FLOAT,
+            "count": mesh.positions.len(), "type": "VEC3",
+            "min": pos_min, "max": pos_max
+        }),
+        json!({ "bufferView": 1, "componentType": GL_FLOAT, "count": mesh.normals.len(), "type": "VEC3" }),
+        json!({ "bufferView": 2, "componentType": GL_FLOAT, "count": mesh.uvs.len(), "type": "VEC2" }),
+        json!({ "bufferView": 3, "componentType": GL_UNSIGNED_INT, "count": mesh.indices.len(), "type": "SCALAR" }),
+    ];
+
+    let mut morph_indices: Vec<usize> = Vec::with_capacity(morphs.len());
+    for (off, len, min, max) in morph_offsets {
+        let bv_idx = buffer_views.len();
+        buffer_views.push(json!({
+            "buffer": 0, "byteOffset": off, "byteLength": len, "target": TARGET_ARRAY_BUFFER
+        }));
+        let acc_idx = accessors.len();
+        accessors.push(json!({
+            "bufferView": bv_idx, "componentType": GL_FLOAT,
+            "count": vert_count, "type": "VEC3",
+            "min": min, "max": max
+        }));
+        morph_indices.push(acc_idx);
+    }
+
+    let json = json!({
+        "buffers": [{ "byteLength": bin.len() }],
+        "bufferViews": buffer_views,
+        "accessors": accessors,
+    });
+
+    (PackedMesh { binary: bin, json }, morph_indices)
+}
+
 /// Pack BOTH the head-mounted sphere AND the spring-bone chain cylinder
 /// (with its skin's inverse-bind matrices) into a single binary buffer
 /// + JSON fragment.
@@ -379,6 +467,55 @@ mod tests {
     use super::*;
     use crate::chain_mesh::build_chain_cylinder;
     use crate::mesh::sphere;
+
+    #[test]
+    fn pack_mesh_with_morphs_appends_one_accessor_per_morph_target() {
+        let s = sphere(0.3, 8, 16);
+        let vert_count = s.positions.len();
+
+        // Five POSITION-delta arrays, one per viseme. Use uniform +X for aa,
+        // -Y for ih, +Z for ou, -X for ee, radial expand for oh. Magnitudes
+        // don't matter for this structural test — only counts and types.
+        let aa: Vec<[f32; 3]> = (0..vert_count).map(|_| [0.04, 0.0, 0.0]).collect();
+        let ih: Vec<[f32; 3]> = (0..vert_count).map(|_| [0.0, -0.04, 0.0]).collect();
+        let ou: Vec<[f32; 3]> = (0..vert_count).map(|_| [0.0, 0.0, 0.04]).collect();
+        let ee: Vec<[f32; 3]> = (0..vert_count).map(|_| [-0.04, 0.0, 0.0]).collect();
+        let oh: Vec<[f32; 3]> = s
+            .positions
+            .iter()
+            .map(|p| [p[0] * 0.1, p[1] * 0.1, p[2] * 0.1])
+            .collect();
+        let morphs: Vec<Vec<[f32; 3]>> = vec![aa, ih, ou, ee, oh];
+
+        let (packed, morph_indices) = pack_mesh_with_morphs(&s, &morphs);
+
+        // Base mesh contributes 4 accessors (pos/nrm/uv/idx). Each morph adds 1.
+        let accessors = packed.json["accessors"].as_array().unwrap();
+        assert_eq!(accessors.len(), 4 + 5, "4 base + 5 morph accessors");
+
+        // Caller learns morph accessor indices from the returned vector.
+        assert_eq!(morph_indices.len(), 5);
+        assert_eq!(morph_indices, vec![4, 5, 6, 7, 8]);
+
+        // Each morph accessor is VEC3 FLOAT with count == base vertex count.
+        for &idx in &morph_indices {
+            let a = &accessors[idx];
+            assert_eq!(a["type"], "VEC3", "morph accessor {idx} should be VEC3");
+            assert_eq!(
+                a["componentType"], GL_FLOAT,
+                "morph accessor {idx} should be FLOAT"
+            );
+            assert_eq!(
+                a["count"].as_u64().unwrap() as usize,
+                vert_count,
+                "morph accessor {idx} count should match base vertex count"
+            );
+        }
+
+        // Binary buffer length matches the declared length.
+        let declared = packed.json["buffers"][0]["byteLength"].as_u64().unwrap();
+        assert_eq!(packed.binary.len() as u64, declared);
+    }
 
     #[test]
     fn pack_sphere_and_chain_emits_11_accessors() {

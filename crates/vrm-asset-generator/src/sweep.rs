@@ -486,6 +486,7 @@ pub fn vrma_expression_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> 
         "ih",
         "ou",
         "ee",
+        "oh",
         "blink",
     ];
     let custom = ["smug", "drowsy"];
@@ -590,16 +591,29 @@ mod vrma_expression_sweep_tests {
     use super::*;
 
     #[test]
-    fn expression_sweep_produces_12_variants() {
+    fn expression_sweep_produces_13_variants() {
         let variants = vrma_expression_sweep();
-        assert_eq!(variants.len(), 12, "10 presets + 2 custom = 12");
+        assert_eq!(variants.len(), 13, "11 presets + 2 custom = 13");
     }
 
     #[test]
     fn expression_sweep_unique_ids() {
         let variants = vrma_expression_sweep();
         let ids: std::collections::HashSet<_> = variants.iter().map(|p| p.id.clone()).collect();
-        assert_eq!(ids.len(), 12);
+        assert_eq!(ids.len(), 13);
+    }
+
+    #[test]
+    fn expression_sweep_includes_all_five_visemes() {
+        let variants = vrma_expression_sweep();
+        let names: std::collections::HashSet<_> =
+            variants.iter().map(|p| p.expression_name.clone()).collect();
+        for v in ["aa", "ih", "ou", "ee", "oh"] {
+            assert!(
+                names.contains(v),
+                "viseme preset {v} must appear in vrma_expression_sweep()"
+            );
+        }
     }
 
     #[test]

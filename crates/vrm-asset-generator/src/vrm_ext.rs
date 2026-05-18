@@ -35,6 +35,31 @@ fn lookat_block(lookat_type: LookAtType) -> Value {
     })
 }
 
+/// Canonical viseme order for the synthetic VRM. Index in this slice =
+/// morph target index on the primitive. Five presets are bound so
+/// VRM 1.0's standard viseme set (aa/ih/ou/ee/oh) is exercisable
+/// end-to-end through the VRMA expression sweep.
+pub const VISEME_PRESETS: [&str; 5] = ["aa", "ih", "ou", "ee", "oh"];
+
+/// Build the `expressions.preset` JSON map binding each viseme preset to
+/// the corresponding morph target on `mesh_node`. The morph target indices
+/// (0..5) must match the order positions in [`VISEME_PRESETS`] and the
+/// order the morph deltas were passed to `pack_mesh_with_morphs`.
+pub fn viseme_preset_binds(mesh_node: usize) -> Value {
+    let mut presets = serde_json::Map::new();
+    for (i, name) in VISEME_PRESETS.iter().enumerate() {
+        presets.insert(
+            (*name).into(),
+            json!({
+                "morphTargetBinds": [
+                    { "node": mesh_node, "index": i, "weight": 1.0 }
+                ]
+            }),
+        );
+    }
+    Value::Object(presets)
+}
+
 /// Like `vrmc_vrm` but takes the avatar's lookAt.type.
 pub fn vrmc_vrm_with_lookat_type(
     meta_name: &str,

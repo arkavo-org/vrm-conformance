@@ -1,20 +1,25 @@
 //! Top-level VRM 1.0 asset emission. Combines mesh, buffer, humanoid stub,
 //! and VRM extensions into a single `.vrm` GLB on disk.
 
-use crate::buffer::{pack_mesh, pack_sphere_and_multichains};
+use crate::buffer::{pack_mesh, pack_mesh_with_morphs, pack_sphere_and_multichains};
 use crate::glb::{write_glb, GlbDocument};
 use crate::humanoid::minimal_skeleton;
 use crate::mesh::sphere;
 use crate::params::MToonParams;
-use crate::vrm_ext::{base_material, vrmc_vrm};
+use crate::vrm_ext::{base_material, viseme_preset_binds, vrmc_vrm};
 use anyhow::Result;
 use camino::Utf8Path;
 use serde_json::{json, Value};
 
 pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
-    // 1) Mesh + buffer
+    // 1) Mesh + buffer + five POSITION-only morph targets for visemes
+    //    (aa, ih, ou, ee, oh). Each delta produces a visually distinct
+    //    deformation pattern when the corresponding expression weight is
+    //    driven to 1.0, so cross-renderer SSIM can falsify "weight accepted
+    //    but mesh not deformed". Order MUST match `VISEME_PRESETS`.
     let mesh = sphere(0.3, 24, 48); // small radius so the sphere fits at avatar chest height
-    let packed = pack_mesh(&mesh);
+    let morphs = viseme_morph_deltas(&mesh.positions);
+    let (packed, morph_accessors) = pack_mesh_with_morphs(&mesh, &morphs);
 
     // 2) Humanoid skeleton
     let skeleton = minimal_skeleton();
@@ -33,6 +38,11 @@ pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
     let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
     head_children.push(json!(mesh_node_index));
     head["children"] = Value::Array(head_children);
+
+    let targets: Vec<Value> = morph_accessors
+        .iter()
+        .map(|&idx| json!({ "POSITION": idx }))
+        .collect();
 
     // 4) Build the glTF JSON document
     let mut doc = json!({
@@ -59,7 +69,8 @@ pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
                         },
                         "indices": 3,
                         "material": 0,
-                        "mode": 4
+                        "mode": 4,
+                        "targets": targets
                     }
                 ]
             }
@@ -69,6 +80,8 @@ pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
             "VRMC_vrm": vrmc_vrm(&params.id, &skeleton.bone_to_node, mesh_node_index)
         }
     });
+
+    doc["extensions"]["VRMC_vrm"]["expressions"]["preset"] = viseme_preset_binds(mesh_node_index);
 
     // Splice in buffers/bufferViews/accessors from the packed mesh.
     for key in ["buffers", "bufferViews", "accessors"] {
@@ -87,6 +100,25 @@ pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
     }
     std::fs::write(output, glb)?;
     Ok(())
+}
+
+/// POSITION-only morph deltas for the five viseme presets in
+/// [`crate::vrm_ext::VISEME_PRESETS`] order. Each delta yields a visually
+/// distinct deformation of the head-mounted sphere so the rendered images
+/// disambiguate per viseme. NORMAL is omitted by design — shading on the
+/// deformed sphere will be approximate but the silhouette change is the
+/// signal the SSIM diff measures.
+fn viseme_morph_deltas(positions: &[[f32; 3]]) -> Vec<Vec<[f32; 3]>> {
+    let n = positions.len();
+    let aa: Vec<[f32; 3]> = (0..n).map(|_| [0.04, 0.0, 0.0]).collect();
+    let ih: Vec<[f32; 3]> = (0..n).map(|_| [0.0, -0.04, 0.0]).collect();
+    let ou: Vec<[f32; 3]> = (0..n).map(|_| [0.0, 0.0, 0.04]).collect();
+    let ee: Vec<[f32; 3]> = (0..n).map(|_| [-0.04, 0.0, 0.0]).collect();
+    let oh: Vec<[f32; 3]> = positions
+        .iter()
+        .map(|p| [p[0] * 0.1, p[1] * 0.1, p[2] * 0.1])
+        .collect();
+    vec![aa, ih, ou, ee, oh]
 }
 
 use crate::sidecar::{build_default_test_plan, write_meta_json, write_test_yaml};
