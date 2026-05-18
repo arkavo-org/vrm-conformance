@@ -21,6 +21,35 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
+        // 0.15.2 (commit de87578, released 2026-05-17) closes (PR #272):
+        //   - **VRM 1.0 viseme weight coercion**: the expression parser cast
+        //          `bind["weight"] as? Float` directly, but `JSONSerialization`
+        //          decodes JSON numbers as `NSNumber` bridging to `Double`
+        //          (or `Int` for whole-number literals like `1` / `0`). The
+        //          `as? Float` cast silently failed for almost every bind,
+        //          which hit `continue` and dropped the entry. Net effect:
+        //          VRM 1.0 models loaded with `expressions.preset[.aa]` etc.
+        //          populated but **empty `morphTargetBinds` arrays** —
+        //          `setExpressionWeight(.aa, ...)` had nothing to deform.
+        //          Visemes, blink, and emotion presets were all silently
+        //          dead. This is the exact bug class as VMK#236 (collider
+        //          parse silent-zero) and #238 (rim factor coercion), now
+        //          applied to the expression-bind parser site.
+        //   - **VRM 0.x `_ShadeTexture == _MainTex` washout**:
+        //          `VRM0MaterialProperty.toMToonMaterial()` skipped
+        //          `shadeMultiplyTexture` when `_ShadeTexture` and `_MainTex`
+        //          pointed at the same texture index. Unity MToon and
+        //          three-vrm's VRM0CompatPlugin always bind it — the 0.x
+        //          export silently lost the shade input, leaving
+        //          `shadeColorFactor=[1,1,1]` white as the only contribution.
+        //          Fix binds unconditionally when `_ShadeTexture` is present.
+        //   The viseme fix is the upstream landing of the bug class our
+        //   newly-added viseme conformance coverage was built to surface:
+        //   synthetic VRMs now carry POSITION morph targets bound to
+        //   `aa/ih/ou/ee/oh`, and the VRMA expression sweep includes all
+        //   five visemes. Re-render through VMK at this revision should
+        //   produce visibly-deformed viseme outputs (SSIM divergence from
+        //   any non-deforming baseline).
         // 0.15.1 (commit db5b90b, released 2026-05-17) closes:
         //   - VMK#269 (VRMA retargeting "zombie pose"): VRMAnimationLoader's
         //          makeRotationSampler used `L_B · L_A⁻¹ · A` which assumes
@@ -209,7 +238,7 @@ let package = Package(
         // All nine were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "db5b90bff439bf5e64f2401d3a0b50ba5aeff800"
+            revision: "de87578ef998e89adad01d971db9946d7c62970c"
         ),
     ],
     targets: [

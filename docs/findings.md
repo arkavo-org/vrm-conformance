@@ -1628,3 +1628,67 @@ Same playbook applies. The gravity-power sweep is now a real cross-renderer sign
 - The suite continues to produce falsifiable signal driving upstream closure
 
 The retune is a one-time methodology adjustment, not a recurring concern. Future renderer regressions on the gravity axis will surface as a renderer dropping out of the 5/5 distinct band — same mechanism as the spring-bone closure findings from prior phases.
+
+## VMK 0.15.2 verification — viseme weight coercion + new viseme conformance coverage
+
+**Date:** 2026-05-17. **Trigger:** Two events landed in the same window:
+
+1. **Downstream observation.** A menu-host swapping to AvatarSample_U_1.0.vrm.glb (VRM 1.0, `VRMC_vrm` expression presets `aa/ih/ou/ee/oh`) noticed the mesh rendered fine but visemes did not deform during TTS. VMK reported back expression weights from `setExpressionWeight(.aa, ...)` as if accepted, but no visible mouth movement.
+2. **Conformance coverage gap audit.** The suite was checked for viseme coverage and found three load-bearing pieces missing: synthetic VRMs had no morph targets and no preset-to-morph bindings (`crates/vrm-asset-generator/src/vrm_ext.rs:101-103` emitted `"expressions": { "preset": {} }`); the VRMA expression sweep omitted `oh`; and no pixel-level "mesh actually moved" signal existed.
+
+These converged on the same root cause class. Upstream, [VMK PR #272](https://github.com/arkavo-org/VRMMetalKit/pull/272) (shipped in [VMK 0.15.2](https://github.com/arkavo-org/VRMMetalKit/releases/tag/0.15.2), commit `de87578`) fixes the parse path: `bind["weight"] as? Float` was silently dropping every bind because `JSONSerialization` decodes JSON numbers as `NSNumber` bridging to `Double` (or `Int` for `1`/`0`), and the `as? Float` cast failed. Net effect pre-fix: VRM 1.0 models loaded with `expressions.preset[.aa]` etc. **populated but empty `morphTargetBinds` arrays** — `setExpressionWeight(.aa, ...)` had nothing to deform. Same bug class as [VMK#236](https://github.com/arkavo-org/VRMMetalKit/issues/236) (collider parse silent-zero) and [VMK#238](https://github.com/arkavo-org/VRMMetalKit/issues/238) (rim factor coercion) — now applied at the expression-bind parser site. PR #272 also fixes a separate VRM 0.x `_ShadeTexture == _MainTex` washout (Unity MToon / three-vrm V0CompatPlugin both bind shadeMultiplyTexture unconditionally; VMK's 0.x converter was dropping the binding when the texture indices matched).
+
+### Method
+
+Three concurrent changes, two on the conformance side (preconditions for any future verification of the upstream fix), one on the adapter side:
+
+1. **Conformance suite — viseme coverage** (concurrent commit): `crates/vrm-asset-generator/src/buffer.rs` gained `pack_mesh_with_morphs()` (4 base accessors + N appended VEC3 FLOAT morph accessors); `crates/vrm-asset-generator/src/emit.rs` builds five POSITION morph deltas per VRM (aa=+X 4 cm, ih=−Y 4 cm, ou=+Z 4 cm, ee=−X 4 cm, oh=radial expand 10%); `crates/vrm-asset-generator/src/vrm_ext.rs` exposes `VISEME_PRESETS` and `viseme_preset_binds(mesh_node)`. The `vrma_expression_sweep()` adds `"oh"` to bring it to 13 variants (11 presets + 2 custom). New tests assert each emitted VRM carries 5 morph targets and `expressions.preset.{aa,ih,ou,ee,oh}.morphTargetBinds[0]` points at the right node + index.
+2. **VMK adapter pin** bumped from `db5b90b` (0.15.1) to `de87578` (0.15.2) in `adapters/vrm-metal-kit/Package.swift`. `swift build --configuration release` succeeded (5.6 s; 84 modules).
+3. **Validator gating.** `mrxz/vrm-validator-cli` confirms the new VRMs are spec-clean: `numErrors: 0, numWarnings: 0, hasMorphTargets: true` on the morph-target-bearing synthetic VRM (`info.totalVertexCount: 1225`, `info.maxAttributes: 3`).
+
+### Direct verification of three-vrm's deforming pipeline (the suite's reference)
+
+Rendered all 5 viseme triplets through three-vrm 3.5.0 via the VRMA expression sweep (VRMA drives expression weight 0 → 1 → 0 over 1 s, applied at `t=0.5`):
+
+```
+pairwise SSIM across three-vrm viseme renders (10 unique pairs):
+
+  aa vs ih: 0.8676    ih vs ou: 0.8815    ou vs ee: 0.8988
+  aa vs ou: 0.9045    ih vs ee: 0.8913    ou vs oh: 0.9025
+  aa vs ee: 0.8712    ih vs oh: 0.8540    ee vs oh: 0.8765
+  aa vs oh: 0.9060
+```
+
+Range: [0.854, 0.906]. **Every cross-viseme pair is meaningfully below 1.0**, confirming three-vrm's `expressionManager → morph target` pipeline applies the VRMA-driven weights and that the five distinct morph deltas in the asset emitter produce distinct screen-space outputs. This is the suite's deforming reference: any other renderer that reports `aa=1.0` via `dump_expression_weights` but produces SSIM-1.0 across the 5 viseme renders is exhibiting the VMK 0.15.1 bug class.
+
+### Indirect verification of VMK 0.15.2's parse-fix (load path only)
+
+`swift build --configuration release` cleanly against 0.15.2 (no API breakage). Loaded the morph-target-bearing synthetic VRM (`smoke.vrm` with 5 morph targets + 5 `morphTargetBinds`) through `execute-test-plan` with the static MToon plan: `load_vrm → set_camera → set_lighting → set_post_processing → render → dispose`. Result: `ok: true, overall_passed: true`; PNG written. The new VRM structure parses through VMK without rejection.
+
+### What we CANNOT directly verify yet (and why this matters)
+
+The VMK runtime expression-application path is not yet wired:
+
+| op | VMK status (Operations.swift:48-58) |
+|---|---|
+| `load_vrma`             | `Unimplemented`, reserved as `vrma-v1` |
+| `apply_vrma_at_time`    | `Unimplemented`, reserved as `vrma-v1` |
+| `dump_expression_weights` | `Unimplemented`, reserved as `vrma-v1` |
+| `set_expression`        | `Unimplemented`, reserved as `Phase 3` |
+
+End-to-end falsification of "VMK accepts the weight but does not deform" requires either:
+
+1. **`set_expression` Phase 3** on VMK to drive `aa=1.0` directly at render time and compare to three-vrm's `aa` PNG via SSIM, or
+2. **`load_vrma` + `apply_vrma_at_time`** on VMK so the same VRMA path that drives three-vrm can drive VMK.
+
+Until one of these lands, the conformance suite confirms the upstream fix indirectly (parse code path now runs without dropping binds; load succeeds; bind survives in-memory) but cannot compare deformed pixels cross-renderer. The user's original downstream observation (visemes silently dead on AvatarSample_U_1.0) is **structurally identical** to what the suite would surface once one of the runtime ops lands.
+
+### Tracking
+
+- **Filed downstream**: this finding documents the suite-side precondition (viseme conformance infrastructure is now in place — 5 viseme triplets, morph-bound synthetic VRMs, validator-clean).
+- **Filed upstream**: VMK 0.15.2's fix is verified at the load path. The remaining gate is VMK runtime expression-application. Adding a VMK issue ("implement set_expression and/or load_vrma so the parse fix can be verified end-to-end through arkavo-org/vrm-conformance") is the next step on the VMK side — to be tracked in the next bump cycle.
+- **Cross-finding-doc consistency**: this is the same shape as the recent UniVRM swing-path gravity finding (asset support present, runtime application missing → suite sees status=ok but no pixel signal). The pattern matters because conformance signal depends on a complete adapter contract, not just spec parsing.
+
+### Forward
+
+When VMK ships either `set_expression` or `load_vrma`, re-run this corpus through VMK and compute SSIM against three-vrm's existing viseme PNGs. Expected outcome if the 0.15.2 parse fix landed correctly: VMK + three-vrm viseme renders agree (SSIM in the standard cross-renderer high-agreement band, ≳ 0.85 like the rest of the corpus). Falsifies otherwise.
