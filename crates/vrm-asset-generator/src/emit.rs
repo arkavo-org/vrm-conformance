@@ -492,6 +492,32 @@ pub fn emit_with_sidecars_spring_bone_swing(
     Ok(())
 }
 
+/// Same VRM body as `emit_with_sidecars_spring_bone_swing`, but the
+/// `.test.yaml` carries a `render_sequence:` block (sequence-mode) instead
+/// of `animation: { root_transform }` (single-frame mode). Used by the
+/// `emit-sequence-sweep` CLI subcommand.
+pub fn emit_with_sidecars_spring_bone_swing_sequence(
+    mtoon: &MToonParams,
+    spring_bone: &SpringBoneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone(mtoon, spring_bone, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(mtoon, Some(spring_bone), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan = crate::sidecar::build_spring_bone_swing_sequence_test_plan(mtoon, &asset_relpath);
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 /// Emit a `.vrm` GLB identical in structure to `emit_vrm_with_spring_bone`
 /// but with VRMC_springBone colliders declared in the extension.
 ///
