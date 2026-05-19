@@ -77,6 +77,46 @@ pub fn render_params(session_id: &str, p: &plan::Output, output_path: String) ->
     }
 }
 
+pub fn render_sequence_params(
+    session_id: &str,
+    output: &plan::Output,
+    block: &plan::RenderSequenceBlock,
+    output_dir: String,
+) -> ops::RenderSequenceParams {
+    let color_space = match output.color_space {
+        plan::ColorSpace::Linear => ops::ColorSpace::Linear,
+        plan::ColorSpace::Srgb => ops::ColorSpace::Srgb,
+    };
+    let output_format = match block.output_format {
+        plan::SequenceFormat::PngSequence => ops::SequenceFormat::PngSequence,
+        plan::SequenceFormat::Mp4 => ops::SequenceFormat::Mp4,
+        plan::SequenceFormat::Mov => ops::SequenceFormat::Mov,
+    };
+    ops::RenderSequenceParams {
+        session_id: session_id.into(),
+        width: output.width,
+        height: output.height,
+        output_dir,
+        frame_count: block.frame_count,
+        frame_hz: block.frame_hz,
+        physics_dt_seconds: block.physics_dt_seconds,
+        color_space,
+        msaa: output.msaa,
+        output_type: ops::OutputType::Color,
+        output_format,
+        animate_root_transform: block.animate_root_transform.as_ref().map(|a| {
+            ops::RootTransformAnimation {
+                translation_start: a.translation_start,
+                translation_end: a.translation_end,
+            }
+        }),
+        apply_vrma: block.apply_vrma.as_ref().map(|v| ops::VrmaPlaybackSpec {
+            vrma_handle: v.vrma_handle,
+            start_seconds: v.start_seconds,
+        }),
+    }
+}
+
 pub fn load_vrma_params(
     asset_dir: &camino::Utf8Path,
     v: &plan::VrmaAnimation,
