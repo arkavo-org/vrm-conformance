@@ -338,16 +338,18 @@ pub enum SequenceFormat {
     Mov,
 }
 
-/// Linear root-transform animation interpolated across `frame_count` frames
+/// Linear root-transform animation interpolated across the captured frames
 /// of a `render_sequence` call. The adapter samples translation at
-/// `t = i / (frame_count - 1)` for each captured frame i ∈ [0, frame_count).
-/// Duration is implicit: `frame_count / frame_hz` seconds.
+/// `t = i / (frame_count - 1)` for each captured frame i ∈ [0, frame_count),
+/// where `frame_count` is taken from the owning `RenderSequenceParams`.
+/// Duration is implicit: `frame_count / frame_hz` seconds (both fields on
+/// `RenderSequenceParams`).
 ///
 /// Distinct from the v0.1 `AnimateRootTransformParams` because that op
 /// carries its own `duration_seconds` + `fps` (single-shot animation, then
 /// one render). For sequence-driven animation, those fields are redundant
 /// with the sequence's own `frame_count` + `frame_hz`, so they're omitted.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RootTransformAnimation {
     pub translation_start: [f32; 3],
     pub translation_end: [f32; 3],
@@ -356,7 +358,7 @@ pub struct RootTransformAnimation {
 /// VRMA playback spec for `render_sequence`. Samples the loaded `.vrma` at
 /// `t = start_seconds + (i / frame_hz)` for each captured frame i.
 /// Display clock drives sampling; physics clock is internal to the adapter.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VrmaPlaybackSpec {
     pub vrma_handle: u32,
     /// Offset into the .vrma clip where capture begins. Use 0.0 to start

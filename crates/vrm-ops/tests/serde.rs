@@ -218,8 +218,7 @@ fn root_transform_animation_roundtrip() {
     };
     let s = serde_json::to_string(&r).unwrap();
     let back: RootTransformAnimation = serde_json::from_str(&s).unwrap();
-    assert_eq!(back.translation_start[0], 0.0);
-    assert_eq!(back.translation_end[0], 1.0);
+    assert_eq!(back, r);
 }
 
 #[test]
@@ -230,8 +229,7 @@ fn vrma_playback_spec_roundtrip() {
     };
     let s = serde_json::to_string(&v).unwrap();
     let back: VrmaPlaybackSpec = serde_json::from_str(&s).unwrap();
-    assert_eq!(back.vrma_handle, 7);
-    assert_eq!(back.start_seconds, 0.25);
+    assert_eq!(back, v);
 }
 
 #[test]
@@ -244,7 +242,5 @@ fn sequence_frame_roundtrip() {
     };
     let s = serde_json::to_string(&f).unwrap();
     let back: SequenceFrame = serde_json::from_str(&s).unwrap();
-    assert_eq!(back.index, 12);
-    assert_eq!(back.path, "/tmp/seq/0012.png");
-    assert!(back.blake3.starts_with("blake3:"));
+    assert_eq!(back, f);
 }
