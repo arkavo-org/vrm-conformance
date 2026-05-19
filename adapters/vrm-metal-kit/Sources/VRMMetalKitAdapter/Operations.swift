@@ -46,6 +46,8 @@ final class Operations: @unchecked Sendable {
     /// three Phase 2 physics ops out of the deferral block; they now have
     /// real handlers backed by VRMMetalKit's spring-bone GPU system.
     /// VRMA ops are deferred to a future phase pending VMK#165 closure.
+    /// `render_sequence` is deferred to the render-sequence phase; VMK is
+    /// the first real adapter in the rollout plan.
     static let reservedPhases: [String: String] = [
         "set_environment":         "v1.x",
         "set_expression":          "Phase 3",
@@ -56,6 +58,7 @@ final class Operations: @unchecked Sendable {
         "dump_humanoid_pose":      "vrma-v1",
         "dump_expression_weights": "vrma-v1",
         "dump_look_at_state":      "vrma-v1",
+        "render_sequence":         "v1.x-sequence",
     ]
 
     /// Phase label for the still-deferred Phase 2 ops.
