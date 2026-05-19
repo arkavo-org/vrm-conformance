@@ -24,6 +24,8 @@ pub struct TestPlan {
     pub physics: Option<PhysicsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<AnimationConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_sequence: Option<RenderSequenceBlock>,
 }
 
 /// Optional physics-stepping config for spring-bone / collider tests.
@@ -94,6 +96,55 @@ pub struct PoseTolerance {
     pub per_custom_expression: f32,
     pub look_at_yaw_pitch_degrees: f32,
     pub offset_from_head_bone_m: f32,
+}
+
+/// Optional sequence-capture config. When present, the runner dispatches
+/// `render_sequence` instead of (or in addition to) the single-frame
+/// `render` op. Field names mirror `vrm_ops::tools::RenderSequenceParams`
+/// for direct projection in `plan_to_ops`.
+///
+/// `output.width` / `output.height` / `output.color_space` / `output.msaa`
+/// are reused — sequence plans share the `Output` block with single-frame
+/// plans rather than carrying duplicate geometry fields.
+///
+/// Mutual exclusion: a plan with both `animation` and `render_sequence`
+/// set is ambiguous (the existing `animation.root_transform` block is
+/// the single-frame counterpart to `render_sequence.animate_root_transform`,
+/// and `animation.vrma` overlaps with `render_sequence.apply_vrma`).
+/// `TestPlan::validate` (added in the next task) rejects such plans.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RenderSequenceBlock {
+    pub frame_count: u32,
+    pub frame_hz: f32,
+    pub physics_dt_seconds: f32,
+    pub output_format: SequenceFormat,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animate_root_transform: Option<SequenceRootTransformAnimation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_vrma: Option<VrmaPlaybackSpec>,
+    /// Optional override of the RFC-0004 default temporal_ssim_threshold (0.90).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporal_ssim_threshold: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SequenceFormat {
+    PngSequence,
+    Mp4,
+    Mov,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SequenceRootTransformAnimation {
+    pub translation_start: [f32; 3],
+    pub translation_end: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct VrmaPlaybackSpec {
+    pub vrma_handle: u32,
+    pub start_seconds: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -354,5 +405,142 @@ reference_renderer: univrm
         let d: Diff = serde_yml::from_str(raw).unwrap();
         assert!(d.pose_tolerance.is_none());
         assert_eq!(d.reference_renderer, "univrm");
+    }
+}
+
+#[cfg(test)]
+mod render_sequence_tests {
+    use super::*;
+
+    #[test]
+    fn render_sequence_block_minimal_roundtrips() {
+        let raw = r#"
+frame_count: 60
+frame_hz: 30.0
+physics_dt_seconds: 0.01666
+output_format: png_sequence
+"#;
+        let b: RenderSequenceBlock = serde_yml::from_str(raw).unwrap();
+        assert_eq!(b.frame_count, 60);
+        assert!((b.frame_hz - 30.0).abs() < 1e-6);
+        assert!(matches!(b.output_format, SequenceFormat::PngSequence));
+        assert!(b.animate_root_transform.is_none());
+        assert!(b.apply_vrma.is_none());
+        assert!(b.temporal_ssim_threshold.is_none());
+    }
+
+    #[test]
+    fn render_sequence_block_with_root_animation_roundtrips() {
+        let raw = r#"
+frame_count: 30
+frame_hz: 30.0
+physics_dt_seconds: 0.01666
+output_format: mp4
+animate_root_transform:
+  translation_start: [0.0, 0.0, 0.0]
+  translation_end: [1.0, 0.0, 0.0]
+temporal_ssim_threshold: 0.92
+"#;
+        let b: RenderSequenceBlock = serde_yml::from_str(raw).unwrap();
+        let anim = b.animate_root_transform.unwrap();
+        assert_eq!(anim.translation_end, [1.0, 0.0, 0.0]);
+        assert!(matches!(b.output_format, SequenceFormat::Mp4));
+        assert_eq!(b.temporal_ssim_threshold, Some(0.92));
+    }
+
+    #[test]
+    fn render_sequence_block_with_vrma_roundtrips() {
+        let raw = r#"
+frame_count: 60
+frame_hz: 30.0
+physics_dt_seconds: 0.01666
+output_format: mov
+apply_vrma:
+  vrma_handle: 3
+  start_seconds: 0.5
+"#;
+        let b: RenderSequenceBlock = serde_yml::from_str(raw).unwrap();
+        let v = b.apply_vrma.unwrap();
+        assert_eq!(v.vrma_handle, 3);
+        assert!((v.start_seconds - 0.5).abs() < 1e-6);
+        assert!(matches!(b.output_format, SequenceFormat::Mov));
+    }
+
+    #[test]
+    fn test_plan_without_render_sequence_still_parses() {
+        // Sanity check: existing plans (no render_sequence field) must
+        // continue to deserialize cleanly.
+        let raw = r#"
+id: smoke
+spec_section: vrm-1.0/methodology
+asset: smoke.vrm
+camera:
+  position: [0.0, 1.2, 1.5]
+  target: [0.0, 1.0, 0.0]
+  up: [0.0, 1.0, 0.0]
+  fov_degrees: 30.0
+lighting:
+  directional:
+    dir: [0.0, -1.0, 0.0]
+    color: [1.0, 1.0, 1.0]
+    intensity: 1.0
+  ambient:
+    color: [1.0, 1.0, 1.0]
+    intensity: 0.3
+output:
+  width: 512
+  height: 512
+  color_space: linear
+  msaa: 4
+diff:
+  mode: ssim
+  threshold: 0.90
+  reference_renderer: vrm-metal-kit
+"#;
+        let plan: TestPlan = serde_yml::from_str(raw).unwrap();
+        assert!(plan.render_sequence.is_none(), "absent field must default to None");
+    }
+
+    #[test]
+    fn test_plan_with_render_sequence_parses() {
+        let raw = r#"
+id: swing_seq
+spec_section: vrm-1.0/methodology
+asset: swing.vrm
+camera:
+  position: [0.0, 1.2, 1.5]
+  target: [0.0, 1.0, 0.0]
+  up: [0.0, 1.0, 0.0]
+  fov_degrees: 30.0
+lighting:
+  directional:
+    dir: [0.0, -1.0, 0.0]
+    color: [1.0, 1.0, 1.0]
+    intensity: 1.0
+  ambient:
+    color: [1.0, 1.0, 1.0]
+    intensity: 0.3
+output:
+  width: 512
+  height: 512
+  color_space: linear
+  msaa: 4
+diff:
+  mode: ssim
+  threshold: 0.90
+  reference_renderer: vrm-metal-kit
+render_sequence:
+  frame_count: 60
+  frame_hz: 30.0
+  physics_dt_seconds: 0.01666
+  output_format: png_sequence
+  animate_root_transform:
+    translation_start: [0.0, 0.0, 0.0]
+    translation_end: [1.0, 0.0, 0.0]
+"#;
+        let plan: TestPlan = serde_yml::from_str(raw).unwrap();
+        let seq = plan.render_sequence.expect("render_sequence should parse");
+        assert_eq!(seq.frame_count, 60);
+        assert!(seq.animate_root_transform.is_some());
     }
 }

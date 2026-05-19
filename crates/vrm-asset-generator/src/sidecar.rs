@@ -90,6 +90,7 @@ pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> Tes
         properties: default_properties(params),
         physics: None,
         animation: None,
+        render_sequence: None,
     }
 }
 

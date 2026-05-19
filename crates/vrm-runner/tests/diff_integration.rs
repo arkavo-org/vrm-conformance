@@ -59,6 +59,7 @@ fn synthetic_plan(id: &str, threshold: f32) -> TestPlan {
         properties: Vec::new(),
         physics: None,
         animation: None,
+        render_sequence: None,
     }
 }
 

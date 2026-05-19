@@ -97,6 +97,7 @@ fn synthetic_plan(id: &str) -> TestPlan {
         properties: Vec::new(),
         physics: None,
         animation: None,
+        render_sequence: None,
     }
 }
 
