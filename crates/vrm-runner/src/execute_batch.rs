@@ -8,8 +8,8 @@
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use vrm_test_plan::{
-    AnimationConfig, Camera, Lighting, Output, PhysicsConfig, PostProcessing,
-    RenderSequenceBlock, TestPlan,
+    AnimationConfig, Camera, Lighting, Output, PhysicsConfig, PostProcessing, RenderSequenceBlock,
+    TestPlan,
 };
 
 /// Top-level JSON document the Rust runner writes for the adapter to

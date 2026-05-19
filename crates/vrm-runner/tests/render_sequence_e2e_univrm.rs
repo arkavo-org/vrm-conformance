@@ -98,16 +98,10 @@ fn univrm_render_sequence_with_animate_root_transform_produces_frames() {
     // Verify the per-frame PNGs landed in the expected directory layout:
     //   <output_dir>/<test_id>_<renderer>_frames/<NNNN>.png
     let frames_dir = output_dir.join(format!("{id}_univrm_frames"));
-    assert!(
-        frames_dir.exists(),
-        "frames dir not created: {frames_dir}"
-    );
+    assert!(frames_dir.exists(), "frames dir not created: {frames_dir}");
     for i in 0..2u32 {
         let frame_path = frames_dir.join(format!("{i:04}.png"));
-        assert!(
-            frame_path.exists(),
-            "frame {i} not on disk: {frame_path}"
-        );
+        assert!(frame_path.exists(), "frame {i} not on disk: {frame_path}");
         let bytes = std::fs::metadata(frame_path.as_std_path())
             .map(|m| m.len())
             .unwrap_or(0);
