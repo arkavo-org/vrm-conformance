@@ -829,7 +829,12 @@ final class Operations: @unchecked Sendable {
         }
 
         // 60 Hz physics floor (methodology pin, RFC-0004 failure-modes).
-        if physicsDt > 1.0 / 60.0 + 1e-9 {
+        // Tolerance 1e-6 absorbs f32 round-trip noise: runners send the
+        // value as f32, so 1.0_f32 / 60.0_f32 = 0.016666668 lands on the
+        // wire and parses to a Double slightly above the true 1/60. Real
+        // overages (e.g. 0.02) are still rejected — the tolerance is far
+        // below any meaningful rate change.
+        if physicsDt > 1.0 / 60.0 + 1e-6 {
             return invalidParams("physics_dt_seconds \(physicsDt) exceeds 60 Hz floor (1/60 ≈ 0.01667)")
         }
 
