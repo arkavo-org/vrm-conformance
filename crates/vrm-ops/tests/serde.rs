@@ -326,3 +326,53 @@ fn render_sequence_params_with_vrma_roundtrip() {
     assert_eq!(v.vrma_handle, 3);
     assert_eq!(v.start_seconds, 0.5);
 }
+
+#[test]
+fn render_sequence_result_png_only_roundtrip() {
+    let r = RenderSequenceResult {
+        frames: vec![
+            SequenceFrame {
+                index: 0,
+                timestamp_seconds: 0.0,
+                path: "/tmp/seq/0000.png".into(),
+                blake3: "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            },
+            SequenceFrame {
+                index: 1,
+                timestamp_seconds: 0.0333,
+                path: "/tmp/seq/0001.png".into(),
+                blake3: "blake3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            },
+        ],
+        duration_seconds: 2.0,
+        actual_color_space: ColorSpace::Linear,
+        frame_hz_achieved: 30.0,
+        muxed_path: None,
+    };
+    let s = serde_json::to_string(&r).unwrap();
+    let back: RenderSequenceResult = serde_json::from_str(&s).unwrap();
+    assert_eq!(back, r);
+    assert_eq!(back.frames.len(), 2);
+    assert_eq!(back.frames[1].timestamp_seconds, 0.0333);
+    assert_eq!(back.duration_seconds, 2.0);
+    assert!(back.muxed_path.is_none());
+    // None muxed_path must skip serialization
+    assert!(!s.contains("muxed_path"));
+}
+
+#[test]
+fn render_sequence_result_with_mux_roundtrip() {
+    let r = RenderSequenceResult {
+        frames: vec![],  // empty intentional — checks Vec serialization on the wire
+        duration_seconds: 2.0,
+        actual_color_space: ColorSpace::Srgb,
+        frame_hz_achieved: 29.97,
+        muxed_path: Some("/tmp/seq/sequence.mp4".into()),
+    };
+    let s = serde_json::to_string(&r).unwrap();
+    let back: RenderSequenceResult = serde_json::from_str(&s).unwrap();
+    assert_eq!(back, r);
+    assert_eq!(back.muxed_path.as_deref(), Some("/tmp/seq/sequence.mp4"));
+    assert_eq!(back.frame_hz_achieved, 29.97);
+    assert!(s.contains(r#""muxed_path":"/tmp/seq/sequence.mp4""#));
+}

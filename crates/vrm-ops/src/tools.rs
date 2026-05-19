@@ -379,6 +379,22 @@ pub struct SequenceFrame {
     pub blake3: String,
 }
 
+/// Result of `render_sequence`. `frames` lists every captured frame in
+/// order; `frame_hz_achieved` may differ slightly from the requested
+/// `frame_hz` if the adapter had to quantize (e.g. UniVRM coroutine timing
+/// under -batchmode). `muxed_path` is `Some` when `output_format` was
+/// `Mp4` or `Mov`; the diff engine ignores it — it consumes the per-frame
+/// PNGs canonically.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RenderSequenceResult {
+    pub frames: Vec<SequenceFrame>,
+    pub duration_seconds: f32,
+    pub actual_color_space: ColorSpace,
+    pub frame_hz_achieved: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muxed_path: Option<String>,
+}
+
 /// Capture N frames at a fixed display Hz while advancing physics (and
 /// optionally a .vrma clip or root-transform animation) between samples.
 /// The adapter steps physics by `physics_dt_seconds` between each captured
