@@ -217,6 +217,23 @@ namespace Conformance.Tests.Play
                 VrmaDriver.WritePoseJson(posePath, poseJson);
             }
 
+            // Sequence-mode dispatch (RFC-0004 render_sequence). If the test plan
+            // declares render_sequence, run a per-frame loop instead of the
+            // single-frame render. Coroutine yields require splitting cleanup
+            // from the loop (C# iterator restriction on try/finally across yield).
+            if (t.render_sequence != null)
+            {
+                Manifest.EntryDto sequenceResult = null;
+                yield return RenderSequenceCo(outputDir, rendererName, t, cam, vrm, e => sequenceResult = e);
+
+                // Manual cleanup matching the single-frame finally block.
+                if (cameraGo != null) UnityEngine.Object.DestroyImmediate(cameraGo);
+                if (lightGo != null) UnityEngine.Object.DestroyImmediate(lightGo);
+                if (vrmGo != null) UnityEngine.Object.DestroyImmediate(vrmGo);
+                setEntry(sequenceResult);
+                yield break;
+            }
+
             // Render phase — has finally for guaranteed cleanup.
             try
             {
@@ -244,6 +261,130 @@ namespace Conformance.Tests.Play
             }
 
             setEntry(result);
+        }
+
+        private IEnumerator RenderSequenceCo(
+            string outputDir,
+            string rendererName,
+            Manifest.TestEntryDto t,
+            Camera cam,
+            UniVRM10.Vrm10Instance vrm,
+            Action<Manifest.EntryDto> setEntry)
+        {
+            var rs = t.render_sequence;
+
+            // ---- RFC-0004 validation ----
+            if (rs.physics_dt_seconds > 1.0f / 60.0f + 1e-6f)
+            {
+                setEntry(ErrorEntry(t.test_id, -32602, "InvalidParams", "L4-sequence",
+                    $"physics_dt_seconds {rs.physics_dt_seconds} exceeds 60 Hz floor"));
+                yield break;
+            }
+            if (rs.animate_root_transform != null && rs.apply_vrma != null)
+            {
+                setEntry(ErrorEntry(t.test_id, -32602, "InvalidParams", "L4-sequence",
+                    "animate_root_transform and apply_vrma are mutually exclusive"));
+                yield break;
+            }
+            if (rs.apply_vrma != null)
+            {
+                setEntry(ErrorEntry(t.test_id, -32602, "InvalidParams", "L4-sequence",
+                    "apply_vrma not yet implemented in UniVRM (Phase 7 deferral)"));
+                yield break;
+            }
+            if (!string.IsNullOrEmpty(rs.output_format) && rs.output_format != "png_sequence")
+            {
+                setEntry(ErrorEntry(t.test_id, -32602, "InvalidParams", "L4-sequence",
+                    $"output_format \"{rs.output_format}\" is not yet supported by UniVRM; only png_sequence"));
+                yield break;
+            }
+            if (rs.frame_count < 1)
+            {
+                setEntry(ErrorEntry(t.test_id, -32602, "InvalidParams", "L4-sequence",
+                    "frame_count must be >= 1"));
+                yield break;
+            }
+
+            // ---- Frames dir per the runner's convention:
+            //   <output_dir>/<test_id>_<renderer>_frames/<NNNN>.png ----
+            var framesDir = Path.Combine(outputDir, $"{t.test_id}_{rendererName}_frames");
+            Exception dirErr = null;
+            try { Directory.CreateDirectory(framesDir); }
+            catch (Exception e) { dirErr = e; }
+            if (dirErr != null)
+            {
+                setEntry(ErrorEntry(t.test_id, -32002, "RenderFailed", "L4-sequence",
+                    $"create frames dir: {dirErr}"));
+                yield break;
+            }
+
+            // ---- Snapshot origin + parse translations ----
+            var origPosition = vrm.transform.position;
+            Vector3 startV = Vector3.zero, endV = Vector3.zero;
+            if (rs.animate_root_transform != null
+                && rs.animate_root_transform.translation_start != null
+                && rs.animate_root_transform.translation_end != null)
+            {
+                startV = SceneSetup.GltfToUnity(rs.animate_root_transform.translation_start);
+                endV = SceneSetup.GltfToUnity(rs.animate_root_transform.translation_end);
+            }
+
+            var runtime = vrm.Runtime;
+            var zeroHash = "blake3:" + new string('0', 64);
+            var framesOut = new List<Manifest.RenderSequenceFrameOutputDto>(rs.frame_count);
+
+            // ---- Frame loop ----
+            for (int i = 0; i < rs.frame_count; i++)
+            {
+                // Interpolate root translation. For frame_count==1, ti=0.
+                float ti = rs.frame_count > 1 ? (float)i / (rs.frame_count - 1) : 0f;
+                vrm.transform.position = origPosition + Vector3.Lerp(startV, endV, ti);
+
+                // Step spring-bone physics one tick (matches AnimateRootTransform).
+                if (runtime != null && runtime.SpringBone != null)
+                {
+                    runtime.SpringBone.Process(rs.physics_dt_seconds);
+                }
+
+                // Yield so Unity actually renders this frame.
+                yield return null;
+
+                // Capture to <i:04>.png. try/catch is safe here — no yield inside.
+                var framePath = Path.Combine(framesDir, $"{i:D4}.png");
+                Capture.Result captureResult;
+                try
+                {
+                    captureResult = Capture.Render(cam, t.output, framePath);
+                }
+                catch (Exception e)
+                {
+                    vrm.transform.position = origPosition;
+                    setEntry(ErrorEntry(t.test_id, -32002, "RenderFailed", "L4-sequence",
+                        $"frame {i}: {e}"));
+                    yield break;
+                }
+
+                framesOut.Add(new Manifest.RenderSequenceFrameOutputDto
+                {
+                    index = i,
+                    timestamp_seconds = (float)i / rs.frame_hz,
+                    path = captureResult.outputPath,
+                    blake3 = zeroHash,
+                });
+            }
+
+            // Restore original root.
+            vrm.transform.position = origPosition;
+
+            setEntry(new Manifest.EntryDto
+            {
+                test_id = t.test_id,
+                status = "ok",
+                frames = framesOut.ToArray(),
+                duration_seconds = (float)rs.frame_count / rs.frame_hz,
+                frame_hz_achieved = rs.frame_hz,
+                actual_color_space = "Srgb",
+            });
         }
 
         private static Manifest.EntryDto ErrorEntry(string test_id, int code, string label, string phase, string detail)

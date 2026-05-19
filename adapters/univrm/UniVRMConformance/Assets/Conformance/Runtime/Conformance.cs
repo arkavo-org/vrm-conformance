@@ -154,6 +154,30 @@ namespace Conformance
                 };
             }
 
+            // render_sequence tests require PlayMode batch — they need the per-
+            // frame physics + render loop that's only available with
+            // Application.isPlaying == true. EditMode -executeMethod has no
+            // frame ticks. Mirror the VRMA rejection above.
+            if (t.render_sequence != null)
+            {
+                return new Manifest.EntryDto
+                {
+                    test_id = t.test_id,
+                    status = "error",
+                    error = new Manifest.ErrorDto
+                    {
+                        code = -32000,
+                        message = "render_sequence tests require PlayMode batch",
+                        data = new Manifest.ErrorDataDto
+                        {
+                            feature = "render_sequence",
+                            value = $"frame_count={t.render_sequence.frame_count}",
+                            supported = new[] { "default PlayMode launcher (omit L3_EDITMODE)" },
+                        },
+                    },
+                };
+            }
+
             GameObject vrmGo = null;
             GameObject lightGo = null;
             GameObject cameraGo = null;
