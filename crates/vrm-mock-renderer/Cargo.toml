@@ -19,6 +19,7 @@ vrm-asset-generator = { path = "../vrm-asset-generator" }
 
 [dev-dependencies]
 tempfile.workspace = true
+vrm-diff-engine = { path = "../vrm-diff-engine" }
 
 [lib]
 path = "src/lib.rs"
