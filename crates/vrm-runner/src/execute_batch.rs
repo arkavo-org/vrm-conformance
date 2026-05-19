@@ -8,7 +8,8 @@
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use vrm_test_plan::{
-    AnimationConfig, Camera, Lighting, Output, PhysicsConfig, PostProcessing, TestPlan,
+    AnimationConfig, Camera, Lighting, Output, PhysicsConfig, PostProcessing,
+    RenderSequenceBlock, TestPlan,
 };
 
 /// Top-level JSON document the Rust runner writes for the adapter to
@@ -36,6 +37,8 @@ pub struct BatchTestEntry {
     pub physics: Option<PhysicsConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub animation: Option<AnimationConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub render_sequence: Option<RenderSequenceBlock>,
 }
 
 /// Build the manifest from a slice of `(plan, vrm_path)` pairs.
@@ -65,6 +68,7 @@ pub fn build_manifest(
                 output: plan.output,
                 physics: plan.physics.clone(),
                 animation,
+                render_sequence: plan.render_sequence.clone(),
             }
         })
         .collect();
@@ -141,6 +145,15 @@ pub struct BatchResultsMeta {
     pub total_tests: usize,
 }
 
+/// One rendered frame inside a sequence result entry.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct SequenceFrameEntry {
+    pub index: u32,
+    pub timestamp_seconds: f32,
+    pub path: String,
+    pub blake3: String,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ResultEntry {
     pub test_id: String,
@@ -155,6 +168,12 @@ pub struct ResultEntry {
     pub render_seconds: Option<f32>,
     #[serde(default)]
     pub error: Option<ResultError>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frames: Option<Vec<SequenceFrameEntry>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_hz_achieved: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -344,6 +363,30 @@ pub fn run(opts: &RunOptions) -> anyhow::Result<RunSummary> {
     // to surface as per-test errors. Future scope: surface the exit
     // code in the summary so callers can choose to gate on it.
     let _ = status;
+
+    // Re-hash per-frame BLAKE3 from on-disk PNG bytes when the result entry
+    // carries a frames list. The runner is the authority for the manifest's
+    // content-addressed column (Phase 5 Task 2 contract); adapter-returned
+    // hashes are advisory and may be placeholder values.
+    let mut parsed = parsed;
+    for entry in parsed.entries.iter_mut() {
+        if let Some(frames) = entry.frames.as_mut() {
+            for frame in frames.iter_mut() {
+                match std::fs::read(&frame.path) {
+                    Ok(bytes) => {
+                        let hash = blake3::hash(&bytes);
+                        frame.blake3 = format!("blake3:{}", hash.to_hex());
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "sequence frame re-hash: cannot read {}: {e}; hash unchanged",
+                            frame.path
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     // Build local-manifest entries from the parsed results, padding
     // missing test_ids (declared in _meta but not present in entries)
