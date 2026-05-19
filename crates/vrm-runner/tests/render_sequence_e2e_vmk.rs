@@ -92,8 +92,8 @@ fn vmk_render_sequence_with_animate_root_transform_produces_frames() {
         reference_pose_json: None,
     };
 
-    let result = execute_plan(&plan, &opts)
-        .expect("execute_plan against VMK in sequence mode must succeed");
+    let result =
+        execute_plan(&plan, &opts).expect("execute_plan against VMK in sequence mode must succeed");
 
     let seq = result
         .sequence
@@ -106,7 +106,9 @@ fn vmk_render_sequence_with_animate_root_transform_produces_frames() {
         seq.status, seq.error_message, seq.unimplemented_phase
     );
 
-    let seq_result = seq.result.expect("RenderSequenceResult should be populated");
+    let seq_result = seq
+        .result
+        .expect("RenderSequenceResult should be populated");
     assert_eq!(seq_result.frames.len(), 2, "frame_count was 2");
 
     // The zero-hash sentinel from the adapter, after the runner's re-hash.

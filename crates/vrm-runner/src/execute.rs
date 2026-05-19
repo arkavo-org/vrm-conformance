@@ -575,8 +575,7 @@ pub fn load_plan(path: &Utf8Path) -> Result<TestPlan> {
 /// deterministic.
 fn rehash_frames(result: &mut ops::RenderSequenceResult) -> Result<(), String> {
     for frame in result.frames.iter_mut() {
-        let bytes = std::fs::read(&frame.path)
-            .map_err(|e| format!("read {}: {e}", frame.path))?;
+        let bytes = std::fs::read(&frame.path).map_err(|e| format!("read {}: {e}", frame.path))?;
         let hash = blake3::hash(&bytes);
         frame.blake3 = format!("blake3:{}", hash.to_hex());
     }
