@@ -203,7 +203,11 @@ fn sequence_format_serializes_snake_case() {
     assert_eq!(serde_json::to_string(&mov).unwrap(), r#""mov""#);
 
     // Round-trip
-    for fmt in [SequenceFormat::PngSequence, SequenceFormat::Mp4, SequenceFormat::Mov] {
+    for fmt in [
+        SequenceFormat::PngSequence,
+        SequenceFormat::Mp4,
+        SequenceFormat::Mov,
+    ] {
         let s = serde_json::to_string(&fmt).unwrap();
         let back: SequenceFormat = serde_json::from_str(&s).unwrap();
         assert_eq!(back, fmt);
@@ -214,7 +218,7 @@ fn sequence_format_serializes_snake_case() {
 fn root_transform_animation_roundtrip() {
     let r = RootTransformAnimation {
         translation_start: [0.0, 0.0, 0.0],
-        translation_end:   [1.0, 0.0, 0.0],
+        translation_end: [1.0, 0.0, 0.0],
     };
     let s = serde_json::to_string(&r).unwrap();
     let back: RootTransformAnimation = serde_json::from_str(&s).unwrap();
@@ -335,13 +339,15 @@ fn render_sequence_result_png_only_roundtrip() {
                 index: 0,
                 timestamp_seconds: 0.0,
                 path: "/tmp/seq/0000.png".into(),
-                blake3: "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                blake3: "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .into(),
             },
             SequenceFrame {
                 index: 1,
                 timestamp_seconds: 0.0333,
                 path: "/tmp/seq/0001.png".into(),
-                blake3: "blake3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                blake3: "blake3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    .into(),
             },
         ],
         duration_seconds: 2.0,
@@ -363,7 +369,7 @@ fn render_sequence_result_png_only_roundtrip() {
 #[test]
 fn render_sequence_result_with_mux_roundtrip() {
     let r = RenderSequenceResult {
-        frames: vec![],  // empty intentional — checks Vec serialization on the wire
+        frames: vec![], // empty intentional — checks Vec serialization on the wire
         duration_seconds: 2.0,
         actual_color_space: ColorSpace::Srgb,
         frame_hz_achieved: 29.97,
