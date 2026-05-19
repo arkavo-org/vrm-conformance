@@ -131,10 +131,15 @@ Adapters that have not implemented sequences return the standard Unimplemented e
 - Params: `RenderSequenceParams { session_id, width, height, output_dir, frame_count, frame_hz, physics_dt_seconds, color_space, msaa, output_type, output_format, animate_root_transform?, apply_vrma? }`
 - Result: `RenderSequenceResult { frames: [{ index, timestamp_seconds, path, blake3 }], duration_seconds, actual_color_space, frame_hz_achieved, muxed_path? }`
 
-**Validation rules adapters MUST enforce:**
+**Validation rules:**
+
+Adapters MUST enforce:
 
 - `animate_root_transform` and `apply_vrma` are mutually exclusive. Both set ⇒ `-32602 invalid params`.
-- `physics_dt_seconds > 1/60` violates the spring-bone determinism methodology pin ⇒ `-32602 invalid params`.
+
+Adapters SHOULD enforce (methodology pin):
+
+- `physics_dt_seconds > 1/60` violates the spring-bone determinism methodology pin ⇒ `-32602 invalid params`. The runner SHOULD pre-validate before dispatch.
 
 **Output layout:**
 
