@@ -483,7 +483,10 @@
         if (!state.vrm) {
           throw new Error("__renderSequence: no VRM loaded");
         }
-        ensureRenderer(state.canvas?.width ?? 1024, state.canvas?.height ?? 1024);
+        const width = typeof params.width === "number" ? params.width : 512;
+        const height = typeof params.height === "number" ? params.height : 512;
+        const colorSpace = typeof params.color_space === "string" ? params.color_space : "Srgb";
+        ensureRenderer(width, height);
 
         const frameCount = typeof params.frame_count === "number" ? params.frame_count : 1;
         const dt = typeof params.physics_dt_seconds === "number" ? params.physics_dt_seconds : 1 / 60;
@@ -514,9 +517,9 @@
 
           // Render and collect data URL.
           const dataUrl = await window.__render({
-            width: state.canvas.width,
-            height: state.canvas.height,
-            color_space: "Srgb",
+            width: width,
+            height: height,
+            color_space: colorSpace,
           });
           results.push(dataUrl);
         }

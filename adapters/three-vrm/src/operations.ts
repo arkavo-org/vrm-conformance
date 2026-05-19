@@ -107,35 +107,48 @@ export async function dispatch(
       case "render_sequence": {
         const p = params as {
           output_dir?: string;
+          width?: number;
+          height?: number;
+          color_space?: string;
           frame_count?: number;
+          frame_hz?: number;
           output_format?: string;
           physics_dt_seconds?: number;
           animate_root_transform?: unknown;
           apply_vrma?: unknown;
         };
-        if (!p?.output_dir) return badParams("missing output_dir");
-        if (!p?.frame_count || p.frame_count < 1)
-          return badParams("frame_count must be >= 1");
-        const outputFormat = p.output_format ?? "png_sequence";
-        if (outputFormat !== "png_sequence")
-          return badParams(`unsupported output_format: ${outputFormat}`);
-        if (p.animate_root_transform != null && p.apply_vrma != null)
+        // Validation order: more-specific rejections first so callers
+        // get the most relevant error (mutual exclusion / physics_dt
+        // floor) before generic "missing X" messages.
+        if (p?.animate_root_transform != null && p?.apply_vrma != null)
           return badParams(
             "animate_root_transform and apply_vrma are mutually exclusive",
           );
-        if (p.apply_vrma != null)
+        if (p?.apply_vrma != null)
           return badParams("apply_vrma not yet implemented in three-vrm");
         const physicsDt =
-          typeof p.physics_dt_seconds === "number"
+          typeof p?.physics_dt_seconds === "number"
             ? p.physics_dt_seconds
             : 1 / 60;
         if (physicsDt > 1 / 60 + 1e-6)
           return badParams(
             `physics_dt_seconds ${physicsDt} exceeds 60 Hz floor (max ~0.01667)`,
           );
+        const outputFormat = p?.output_format ?? "png_sequence";
+        if (outputFormat !== "png_sequence")
+          return badParams(`unsupported output_format: ${outputFormat}`);
+        if (!p?.output_dir) return badParams("missing output_dir");
+        if (!p?.frame_count || p.frame_count < 1)
+          return badParams("frame_count must be >= 1");
+        const frameHz =
+          typeof p.frame_hz === "number" ? p.frame_hz : 30.0;
         const result = await ctx.session.renderSequence({
           output_dir: p.output_dir,
+          width: p.width ?? 512,
+          height: p.height ?? 512,
+          color_space: p.color_space ?? "Srgb",
           frame_count: p.frame_count,
+          frame_hz: frameHz,
           physics_dt_seconds: physicsDt,
           animate_root_transform: p.animate_root_transform ?? null,
         });

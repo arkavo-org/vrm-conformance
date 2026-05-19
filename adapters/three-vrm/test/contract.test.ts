@@ -149,7 +149,12 @@ test(
 
       const seqResp = await rpc(h, 5, "render_sequence", {
         output_dir: outDir,
+        width: 64,
+        height: 64,
+        color_space: "Srgb",
         frame_count: 2,
+        frame_hz: 30.0,
+        physics_dt_seconds: 1.0 / 60.0,
         output_format: "png_sequence",
       });
 

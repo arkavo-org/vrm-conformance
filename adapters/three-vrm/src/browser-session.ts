@@ -265,11 +265,23 @@ export class BrowserSession {
 
   async renderSequence(params: {
     output_dir: string;
+    width: number;
+    height: number;
+    color_space: string;
     frame_count: number;
+    frame_hz: number;
     physics_dt_seconds: number;
     animate_root_transform: unknown;
   }): Promise<{
-    frames: Array<{ path: string; blake3: string }>;
+    frames: Array<{
+      index: number;
+      timestamp_seconds: number;
+      path: string;
+      blake3: string;
+    }>;
+    duration_seconds: number;
+    actual_color_space: string;
+    frame_hz_achieved: number;
   }> {
     if (!this.page) throw new Error("BrowserSession not started");
     await fs.mkdir(params.output_dir, { recursive: true });
@@ -278,6 +290,9 @@ export class BrowserSession {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (p) => (window as any).__renderSequence(p),
       {
+        width: params.width,
+        height: params.height,
+        color_space: params.color_space,
         frame_count: params.frame_count,
         physics_dt_seconds: params.physics_dt_seconds,
         animate_root_transform: params.animate_root_transform,
@@ -285,7 +300,12 @@ export class BrowserSession {
     );
 
     const ZERO_BLAKE3 = `blake3:${"0".repeat(64)}`;
-    const frames: Array<{ path: string; blake3: string }> = [];
+    const frames: Array<{
+      index: number;
+      timestamp_seconds: number;
+      path: string;
+      blake3: string;
+    }> = [];
     for (let i = 0; i < dataUrls.length; i++) {
       const dataUrl = dataUrls[i];
       const comma = dataUrl.indexOf(",");
@@ -295,10 +315,20 @@ export class BrowserSession {
       const frameIndex = String(i).padStart(4, "0");
       const framePath = path.join(params.output_dir, `${frameIndex}.png`);
       await fs.writeFile(framePath, png);
-      frames.push({ path: framePath, blake3: ZERO_BLAKE3 });
+      frames.push({
+        index: i,
+        timestamp_seconds: i / params.frame_hz,
+        path: framePath,
+        blake3: ZERO_BLAKE3,
+      });
     }
 
-    return { frames };
+    return {
+      frames,
+      duration_seconds: params.frame_count / params.frame_hz,
+      actual_color_space: params.color_space,
+      frame_hz_achieved: params.frame_hz,
+    };
   }
 
   async render(params: {
