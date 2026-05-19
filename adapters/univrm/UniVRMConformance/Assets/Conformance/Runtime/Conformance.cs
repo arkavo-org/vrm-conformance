@@ -18,6 +18,15 @@
 // process them; the runner-side handling for that case lands in
 // vrma-phase2 (runner integration).
 //
+// render_sequence (multi-frame capture, RFC-0004): same shape as VRMA.
+// UniVRM is the consortium reference; full impl is bundled with the
+// deferred L4-PlayMode follow-up (FastSpringBone gates on
+// Application.isPlaying, so the per-frame loop needs PlayMode anyway).
+// Detect-and-error for test plans declaring a `render_sequence:` block
+// lands alongside the test-plan schema change in render-sequence
+// phase 4. The phase-1 op surface (Rust types, methodology pins) is
+// complete on the runner side; UniVRM has no per-op stub to add.
+//
 // Unlike VMK/three-vrm/godot-vrm, UniVRM has no per-op JSON-RPC
 // dispatcher to stub — RunBatch is a batched filesystem contract per
 // RFC-0003. This is why there's no Unimplemented stub here.
