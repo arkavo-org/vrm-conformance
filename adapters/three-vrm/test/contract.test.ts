@@ -104,6 +104,25 @@ test("reserved phase-3 op (set_expression) returns phase Phase 3", async () => {
   }
 });
 
+test("reserved sequence op (render_sequence) returns phase v1.x-sequence", async () => {
+  const h = spawnAdapter();
+  try {
+    const resp = await rpc(h, 6, "render_sequence", {
+      output_dir: "/tmp/seq",
+      fps: 30,
+      duration_seconds: 1.0,
+    });
+    assert.equal(resp.error?.code, -32000);
+    assert.equal(
+      (resp.error?.data as { phase?: string } | undefined)?.phase,
+      "v1.x-sequence",
+    );
+  } finally {
+    h.stdin.end();
+    await new Promise((r) => h.child.on("exit", r));
+  }
+});
+
 test("knownMethods() catalog includes all 5 VRMA ops", () => {
   const methods = new Set(knownMethods());
   for (const op of [

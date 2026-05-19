@@ -23,6 +23,7 @@ const PHASE_BY_RESERVED_METHOD: Record<string, string> = {
   set_expression: "Phase 3",
   set_humanoid_pose: "Phase 2",
   set_root_transform: "Phase 2",
+  render_sequence: "v1.x-sequence",
 };
 
 export interface DispatchSuccess<T = unknown> {
