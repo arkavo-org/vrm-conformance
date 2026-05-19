@@ -88,9 +88,7 @@ pub fn temporal_diff(
 
     let (mean_ssim, p95_ssim, min_ssim, worst_frame_index) = aggregate(&per_frame);
 
-    let passed = frame_count_match
-        && mean_ssim >= threshold
-        && min_ssim >= threshold - 0.05;
+    let passed = frame_count_match && mean_ssim >= threshold && min_ssim >= threshold - 0.05;
 
     Ok(TemporalDiffResult {
         frame_count: candidate_count,

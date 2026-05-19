@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use vrm_diff_engine::consensus::{sequence_consensus_diff, RendererSequence};
 use vrm_diff_engine::temporal::{temporal_diff, FrameDiff, TemporalDiffResult};
 
 #[test]
@@ -7,9 +8,21 @@ fn temporal_diff_result_roundtrip() {
         frame_count: 3,
         frame_count_compared: 3,
         per_frame: vec![
-            FrameDiff { index: 0, ssim: 1.0, identity_match: true },
-            FrameDiff { index: 1, ssim: 0.97, identity_match: false },
-            FrameDiff { index: 2, ssim: 0.95, identity_match: false },
+            FrameDiff {
+                index: 0,
+                ssim: 1.0,
+                identity_match: true,
+            },
+            FrameDiff {
+                index: 1,
+                ssim: 0.97,
+                identity_match: false,
+            },
+            FrameDiff {
+                index: 2,
+                ssim: 0.95,
+                identity_match: false,
+            },
         ],
         mean_ssim: 0.973,
         p95_ssim: 0.95,
@@ -33,7 +46,11 @@ fn temporal_diff_result_roundtrip() {
 
 #[test]
 fn frame_diff_roundtrip() {
-    let f = FrameDiff { index: 42, ssim: 0.876, identity_match: false };
+    let f = FrameDiff {
+        index: 42,
+        ssim: 0.876,
+        identity_match: false,
+    };
     let s = serde_json::to_string(&f).unwrap();
     let back: FrameDiff = serde_json::from_str(&s).unwrap();
     assert_eq!(back, f);
@@ -46,7 +63,12 @@ fn make_solid_color(w: u32, h: u32, rgb: [u8; 3]) -> image::RgbImage {
 /// Write `n` solid-color PNGs to a temp dir, return their paths.
 /// Each frame gets a slightly different color so SSIM <1 if compared
 /// against a different sequence.
-fn write_solid_sequence(dir: &std::path::Path, prefix: &str, n: usize, rgb: [u8; 3]) -> Vec<PathBuf> {
+fn write_solid_sequence(
+    dir: &std::path::Path,
+    prefix: &str,
+    n: usize,
+    rgb: [u8; 3],
+) -> Vec<PathBuf> {
     (0..n)
         .map(|i| {
             let p = dir.join(format!("{prefix}_{i:04}.png"));
@@ -97,7 +119,11 @@ fn temporal_diff_single_bad_frame_min_relaxation() {
     let refr_paths: Vec<PathBuf> = (0..6)
         .map(|i| {
             let p = dir.path().join(format!("refr_{i:04}.png"));
-            let rgb = if i == 3 { [255u8, 255, 255] } else { [128, 64, 200] };
+            let rgb = if i == 3 {
+                [255u8, 255, 255]
+            } else {
+                [128, 64, 200]
+            };
             make_solid_color(64, 64, rgb).save(&p).unwrap();
             p
         })
@@ -112,7 +138,10 @@ fn temporal_diff_single_bad_frame_min_relaxation() {
     // Min: bad frame ≈ 0. Threshold 0.50 ⇒ min must be ≥ 0.45 to pass.
     // 0 < 0.45 so min relaxation fails.
     assert!(result.min_ssim < 0.5, "min = {}", result.min_ssim);
-    assert!(!result.passed, "single bad frame should fail min-relaxation");
+    assert!(
+        !result.passed,
+        "single bad frame should fail min-relaxation"
+    );
 }
 
 #[test]
@@ -132,7 +161,9 @@ fn temporal_diff_gradual_drift() {
             let p = dir.path().join(format!("refr_{i:04}.png"));
             // Reference drifts away from candidate over frames
             let shift = (i as u8) * 20;
-            make_solid_color(64, 64, [128 + shift, 128, 128]).save(&p).unwrap();
+            make_solid_color(64, 64, [128 + shift, 128, 128])
+                .save(&p)
+                .unwrap();
             p
         })
         .collect();
@@ -187,13 +218,19 @@ fn temporal_diff_identical_content_different_files_short_circuit() {
 
     // Sanity check: bytes match
     for (a, b) in cand.iter().zip(refr.iter()) {
-        assert_eq!(std::fs::read(a).unwrap(), std::fs::read(b).unwrap(),
-                   "test setup: solid-color PNGs of same color should be byte-identical");
+        assert_eq!(
+            std::fs::read(a).unwrap(),
+            std::fs::read(b).unwrap(),
+            "test setup: solid-color PNGs of same color should be byte-identical"
+        );
     }
 
     let result = temporal_diff(&as_utf8(&cand), &as_utf8(&refr), 0.90).unwrap();
     for fd in &result.per_frame {
-        assert!(fd.identity_match, "byte-identical PNGs should short-circuit");
+        assert!(
+            fd.identity_match,
+            "byte-identical PNGs should short-circuit"
+        );
         assert_eq!(fd.ssim, 1.0);
     }
 }
@@ -209,11 +246,14 @@ fn temporal_diff_length_mismatch_fails_regardless_of_ssim() {
     assert!(!result.frame_count_match);
     assert_eq!(result.frame_count, 5);
     assert_eq!(result.frame_count_compared, 5); // min(5, 8)
-    // All 5 compared frames are identical so mean/min SSIM ≈ 1.0
+                                                // All 5 compared frames are identical so mean/min SSIM ≈ 1.0
     assert!(result.mean_ssim > 0.99);
     assert!(result.min_ssim > 0.99);
     // But length mismatch trumps SSIM
-    assert!(!result.passed, "length mismatch must fail regardless of SSIM");
+    assert!(
+        !result.passed,
+        "length mismatch must fail regardless of SSIM"
+    );
 }
 
 #[test]
@@ -251,6 +291,216 @@ fn temporal_diff_single_frame_sequence() {
     assert_eq!(result.mean_ssim, result.p95_ssim);
     assert_eq!(result.mean_ssim, result.min_ssim);
     assert!(result.passed);
+}
+
+// ─── sequence_consensus_diff tests ──────────────────────────────────────────
+
+fn make_sequence(
+    dir: &std::path::Path,
+    subdir: &str,
+    n: usize,
+    rgb: [u8; 3],
+) -> Vec<camino::Utf8PathBuf> {
+    let sub = dir.join(subdir);
+    std::fs::create_dir_all(&sub).unwrap();
+    (0..n)
+        .map(|i| {
+            let p = sub.join(format!("f_{i:04}.png"));
+            image::RgbImage::from_fn(64, 64, |_, _| image::Rgb(rgb))
+                .save(&p)
+                .unwrap();
+            camino::Utf8PathBuf::try_from(p).unwrap()
+        })
+        .collect()
+}
+
+/// Write frames with a checkerboard pattern so SSIM vs a solid-color
+/// sequence is well below 0.90. Two uniform images compare at ~1.0 by the
+/// SSIM formula regardless of their color values (zero variance ⇒ structural
+/// term = 1.0), so we need real structure for the "outlier" renderer.
+fn make_checkerboard_sequence(
+    dir: &std::path::Path,
+    subdir: &str,
+    n: usize,
+) -> Vec<camino::Utf8PathBuf> {
+    let sub = dir.join(subdir);
+    std::fs::create_dir_all(&sub).unwrap();
+    (0..n)
+        .map(|i| {
+            let p = sub.join(format!("f_{i:04}.png"));
+            image::RgbImage::from_fn(64, 64, |x, y| {
+                if (x + y) % 2 == 0 {
+                    image::Rgb([0u8, 0, 0])
+                } else {
+                    image::Rgb([255u8, 255, 255])
+                }
+            })
+            .save(&p)
+            .unwrap();
+            camino::Utf8PathBuf::try_from(p).unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn sequence_consensus_three_identical_passes() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = make_sequence(dir.path(), "a", 3, [100, 100, 100]);
+    let b = make_sequence(dir.path(), "b", 3, [100, 100, 100]);
+    let c = make_sequence(dir.path(), "c", 3, [100, 100, 100]);
+
+    let result = sequence_consensus_diff(
+        "test",
+        &[
+            RendererSequence {
+                name: "a".into(),
+                frame_paths: a,
+            },
+            RendererSequence {
+                name: "b".into(),
+                frame_paths: b,
+            },
+            RendererSequence {
+                name: "c".into(),
+                frame_paths: c,
+            },
+        ],
+        0.90,
+    )
+    .unwrap();
+
+    assert!(result.consensus_passed);
+    assert!(result.outliers.is_empty());
+    assert_eq!(result.renderers.len(), 3);
+    assert_eq!(result.mean_ssim_matrix.len(), 3);
+    assert_eq!(result.frame_counts, vec![3, 3, 3]);
+    // Diagonal must be exactly 1.0
+    for i in 0..3 {
+        assert!((result.mean_ssim_matrix[i][i] - 1.0).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn sequence_consensus_one_outlier_flagged() {
+    // a and b render a solid grey sequence (structurally identical →
+    // SSIM ~1.0). c renders a checkerboard, which scores well below 0.90
+    // against a uniform solid color.
+    // Note: two *different* solid-color images both score ~1.0 via
+    // rgb_hybrid_compare (zero variance ⇒ structural term = 1.0 regardless
+    // of luminance), so the outlier renderer must have real structure.
+    let dir = tempfile::tempdir().unwrap();
+    let a = make_sequence(dir.path(), "a", 3, [100, 100, 100]);
+    let b = make_sequence(dir.path(), "b", 3, [100, 100, 100]);
+    let c = make_checkerboard_sequence(dir.path(), "c", 3);
+
+    let result = sequence_consensus_diff(
+        "test",
+        &[
+            RendererSequence {
+                name: "a".into(),
+                frame_paths: a,
+            },
+            RendererSequence {
+                name: "b".into(),
+                frame_paths: b,
+            },
+            RendererSequence {
+                name: "c".into(),
+                frame_paths: c,
+            },
+        ],
+        0.90,
+    )
+    .unwrap();
+
+    assert!(!result.consensus_passed);
+    assert!(result.outliers.contains(&"c".to_string()));
+    // a and b agree with each other only (1 out of 2) — below max=2.
+    // c agrees with no one. All three are flagged.
+    assert_eq!(result.outliers.len(), 3);
+}
+
+#[test]
+fn sequence_consensus_length_mismatch_pair_is_hard_disagreement() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = make_sequence(dir.path(), "a", 3, [100, 100, 100]);
+    let b = make_sequence(dir.path(), "b", 3, [100, 100, 100]);
+    let c = make_sequence(dir.path(), "c", 5, [100, 100, 100]); // longer
+
+    let result = sequence_consensus_diff(
+        "test",
+        &[
+            RendererSequence {
+                name: "a".into(),
+                frame_paths: a,
+            },
+            RendererSequence {
+                name: "b".into(),
+                frame_paths: b,
+            },
+            RendererSequence {
+                name: "c".into(),
+                frame_paths: c,
+            },
+        ],
+        0.90,
+    )
+    .unwrap();
+
+    // a-b mean SSIM = ~1.0 (agreement). a-c and b-c are length-mismatched
+    // → 0.0 → no agreement. So a/b each agree with 1 peer (each other);
+    // c agrees with no one. All three are below max_agreement=2.
+    assert_eq!(result.frame_counts, vec![3, 3, 5]);
+    assert!(result.outliers.contains(&"c".to_string()));
+    assert!(!result.consensus_passed);
+}
+
+#[test]
+fn sequence_consensus_two_renderers_minimum() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = make_sequence(dir.path(), "a", 2, [80, 80, 80]);
+    let b = make_sequence(dir.path(), "b", 2, [80, 80, 80]);
+
+    let result = sequence_consensus_diff(
+        "pair",
+        &[
+            RendererSequence {
+                name: "a".into(),
+                frame_paths: a,
+            },
+            RendererSequence {
+                name: "b".into(),
+                frame_paths: b,
+            },
+        ],
+        0.90,
+    )
+    .unwrap();
+
+    assert!(result.consensus_passed);
+    assert_eq!(result.agreement_count, vec![1, 1]);
+}
+
+#[test]
+fn sequence_consensus_single_renderer_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = make_sequence(dir.path(), "a", 2, [80, 80, 80]);
+
+    let err = sequence_consensus_diff(
+        "solo",
+        &[RendererSequence {
+            name: "a".into(),
+            frame_paths: a,
+        }],
+        0.90,
+    )
+    .unwrap_err();
+
+    // Error should be the Ssim variant wrapping the "at least 2" message.
+    assert!(
+        format!("{err}").contains("at least 2"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]

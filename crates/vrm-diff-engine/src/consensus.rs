@@ -127,6 +127,125 @@ pub fn consensus_diff(
     })
 }
 
+/// One renderer's contribution to a sequence consensus diff: name + a
+/// list of frame PNG paths, expected to be in lexicographic / capture
+/// order. Caller resolves the directory and sorts the paths.
+#[derive(Debug, Clone)]
+pub struct RendererSequence {
+    pub name: String,
+    pub frame_paths: Vec<camino::Utf8PathBuf>,
+}
+
+/// Result of an N-way temporal consensus diff across multiple renderers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SequenceConsensusResult {
+    pub test_id: String,
+    pub threshold: f64,
+    pub renderers: Vec<String>,
+    /// Symmetric N×N temporal mean SSIM per renderer pair. Diagonal 1.0.
+    pub mean_ssim_matrix: Vec<Vec<f64>>,
+    /// `agreement_count[i]` = number of other renderers j where
+    /// `mean_ssim_matrix[i][j] >= threshold` AND the pair has
+    /// `frame_count_match`. A length mismatch is a hard disagreement (0.0).
+    pub agreement_count: Vec<u32>,
+    pub outliers: Vec<String>,
+    pub consensus_passed: bool,
+    /// Frame counts each renderer contributed. Used by the site to
+    /// surface "renderer X produced only K frames, expected M".
+    pub frame_counts: Vec<u32>,
+}
+
+impl SequenceConsensusResult {
+    pub fn overall_passed(&self) -> bool {
+        self.consensus_passed
+    }
+}
+
+/// N-way temporal consensus. For every unordered renderer pair, runs
+/// `temporal_diff` and aggregates each pair's `mean_ssim` into the
+/// symmetric matrix. Length mismatch on any pair is treated as 0.0 SSIM
+/// (hard disagreement).
+///
+/// Errors if fewer than 2 renderers are passed.
+pub fn sequence_consensus_diff(
+    test_id: &str,
+    renderers: &[RendererSequence],
+    threshold: f64,
+) -> Result<SequenceConsensusResult, crate::temporal::TemporalDiffError> {
+    if renderers.len() < 2 {
+        return Err(crate::temporal::TemporalDiffError::Ssim(
+            crate::ssim::SsimError::Compute(format!(
+                "consensus needs at least 2 renderers, got {}",
+                renderers.len()
+            )),
+        ));
+    }
+
+    let n = renderers.len();
+    let mut matrix: Vec<Vec<f64>> = vec![vec![1.0_f64; n]; n];
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let cand: Vec<&camino::Utf8Path> = renderers[i]
+                .frame_paths
+                .iter()
+                .map(|p| p.as_path())
+                .collect();
+            let refr: Vec<&camino::Utf8Path> = renderers[j]
+                .frame_paths
+                .iter()
+                .map(|p| p.as_path())
+                .collect();
+            let r = crate::temporal::temporal_diff(&cand, &refr, threshold)?;
+            let s = if r.frame_count_match {
+                r.mean_ssim
+            } else {
+                0.0
+            };
+            matrix[i][j] = s;
+            matrix[j][i] = s;
+        }
+    }
+
+    let agreement_count: Vec<u32> = (0..n)
+        .map(|i| {
+            (0..n)
+                .filter(|&j| j != i && matrix[i][j] >= threshold)
+                .count() as u32
+        })
+        .collect();
+
+    let max_agreement = (n - 1) as u32;
+    let outliers: Vec<String> = renderers
+        .iter()
+        .zip(agreement_count.iter())
+        .filter_map(|(r, &count)| {
+            if count < max_agreement {
+                Some(r.name.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let frame_counts: Vec<u32> = renderers
+        .iter()
+        .map(|r| r.frame_paths.len() as u32)
+        .collect();
+    let consensus_passed = outliers.is_empty();
+
+    Ok(SequenceConsensusResult {
+        test_id: test_id.into(),
+        threshold,
+        renderers: renderers.iter().map(|r| r.name.clone()).collect(),
+        mean_ssim_matrix: matrix,
+        agreement_count,
+        outliers,
+        consensus_passed,
+        frame_counts,
+    })
+}
+
 /// Per-renderer position consensus report.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PositionConsensusReport {

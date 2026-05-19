@@ -101,6 +101,11 @@ pub enum Cmd {
     /// overridden with `--threshold`. Exits non-zero when any renderer
     /// is flagged as an outlier (i.e., disagrees with one or more peers
     /// at the SSIM threshold).
+    ///
+    /// Sequence mode: use `--render-frames <name>=<dir>` instead of
+    /// `--render`. Each directory must contain PNG frames in lexicographic
+    /// order (e.g. `0000.png`, `0001.png`, …). `--render` and
+    /// `--render-frames` are mutually exclusive (enforced at runtime).
     ConsensusDiff {
         #[arg(long)]
         plan: Utf8PathBuf,
@@ -108,7 +113,13 @@ pub enum Cmd {
         /// PNG dimensions are required across all renderers.
         #[arg(long = "render", value_parser = parse_named_path)]
         renders: Vec<(String, Utf8PathBuf)>,
-        /// Override the plan's `diff.threshold`. Optional.
+        /// Sequence mode: one `name=dir` pair per renderer (path = directory
+        /// of PNG frames in lexicographic order). Mutually exclusive with
+        /// `--render` (enforced at runtime, not by clap).
+        #[arg(long = "render-frames", value_parser = parse_named_path)]
+        render_frames: Vec<(String, Utf8PathBuf)>,
+        /// Override the plan's `diff.threshold` (single-frame) or
+        /// `render_sequence.temporal_ssim_threshold` (sequence). Optional.
         #[arg(long)]
         threshold: Option<f32>,
         /// One `name=path` pair per renderer pointing to its
@@ -437,15 +448,81 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::ConsensusDiff {
             plan,
             renders,
+            render_frames,
             threshold,
             render_positions,
             position_outlier_threshold_m,
             json: emit_json,
         } => {
-            use vrm_diff_engine::consensus::{consensus_diff, position_consensus, RendererRender};
+            use vrm_diff_engine::consensus::{
+                consensus_diff, position_consensus, sequence_consensus_diff, RendererRender,
+                RendererSequence,
+            };
             use vrm_ops::tools::DumpBonePositionsResult;
 
+            if !render_frames.is_empty() && !renders.is_empty() {
+                anyhow::bail!(
+                    "consensus-diff: --render and --render-frames are mutually exclusive"
+                );
+            }
+
             let plan_value = load_plan(&plan)?;
+
+            // ── Sequence mode ────────────────────────────────────────────────
+            if !render_frames.is_empty() {
+                let effective_threshold: f64 = threshold
+                    .map(|t| t as f64)
+                    .or_else(|| {
+                        plan_value
+                            .render_sequence
+                            .as_ref()
+                            .and_then(|rs| rs.temporal_ssim_threshold)
+                    })
+                    .unwrap_or(0.90);
+
+                let mut renderer_seqs: Vec<RendererSequence> = Vec::new();
+                for (name, dir) in &render_frames {
+                    let frame_paths = load_frames_dir(dir)?;
+                    renderer_seqs.push(RendererSequence {
+                        name: name.clone(),
+                        frame_paths,
+                    });
+                }
+
+                let result =
+                    sequence_consensus_diff(&plan_value.id, &renderer_seqs, effective_threshold)?;
+                let passed = result.overall_passed();
+
+                if emit_json {
+                    println!("{}", serde_json::to_string(&result)?);
+                } else {
+                    println!(
+                        "{}: temporal consensus {} ({} renderers, {} outliers)",
+                        result.test_id,
+                        if passed { "PASS" } else { "FAIL" },
+                        result.renderers.len(),
+                        result.outliers.len(),
+                    );
+                    for (i, name) in result.renderers.iter().enumerate() {
+                        println!(
+                            "  {name}: agreement={}/{}  frames={}",
+                            result.agreement_count[i],
+                            result.renderers.len() - 1,
+                            result.frame_counts[i],
+                        );
+                    }
+                    if !result.outliers.is_empty() {
+                        println!("  outliers: {:?}", result.outliers);
+                    }
+                }
+
+                if !passed {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+
+            // ── Single-frame mode (unchanged) ────────────────────────────────
             let effective_threshold = threshold.unwrap_or(plan_value.diff.threshold);
 
             let render_refs: Vec<RendererRender<'_>> = renders
@@ -771,7 +848,7 @@ pub fn run(cli: Cli) -> Result<()> {
                         }
                     },
                     "consensus-diff": {
-                        "summary": "N-way cross-renderer consensus diff. Each --render name=path contributes one renderer to the SSIM pool; --render-positions name=path adds per-renderer spring-bone position JSON for position consensus. Outputs the full SSIM matrix, per-renderer agreement counts, outlier names, and (when positions supplied) a position_consensus block. Exit non-zero when any renderer is an outlier.",
+                        "summary": "N-way cross-renderer consensus diff. Single-frame mode: each --render name=path contributes one renderer to the SSIM pool. Sequence mode: each --render-frames name=dir contributes a directory of PNG frames; temporal_diff is run per pair and aggregated to a mean SSIM matrix. --render and --render-frames are mutually exclusive. --render-positions name=path adds per-renderer spring-bone position JSON for position consensus (single-frame mode only). Outputs the full matrix, per-renderer agreement counts, outlier names. Exit non-zero when any renderer is an outlier.",
                         "input_schema": {
                             "type": "object",
                             "required": ["plan"],
@@ -779,14 +856,24 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "plan": { "type": "string" },
                                 "renders": {
                                     "type": "array",
-                                    "items": { "type": "string", "description": "name=path" },
+                                    "items": { "type": "string", "description": "name=path (single PNG)" },
+                                    "description": "Single-frame mode. Mutually exclusive with render_frames.",
                                     "minItems": 2
                                 },
-                                "threshold": { "type": "number" },
+                                "render_frames": {
+                                    "type": "array",
+                                    "items": { "type": "string", "description": "name=dir (directory of PNG frames in lexicographic order)" },
+                                    "description": "Sequence mode. Mutually exclusive with renders.",
+                                    "minItems": 2
+                                },
+                                "threshold": {
+                                    "type": "number",
+                                    "description": "Override plan diff.threshold (single-frame) or render_sequence.temporal_ssim_threshold (sequence). Default 0.90 for sequence mode."
+                                },
                                 "render_positions": {
                                     "type": "array",
                                     "items": { "type": "string", "description": "name=path to DumpBonePositionsResult JSON" },
-                                    "description": "Per-renderer spring-bone position files for N-way position consensus. Phase 1: first spring chain only."
+                                    "description": "Per-renderer spring-bone position files for N-way position consensus (single-frame mode only). Phase 1: first spring chain only."
                                 },
                                 "position_outlier_threshold_m": {
                                     "type": "number",
@@ -796,29 +883,56 @@ pub fn run(cli: Cli) -> Result<()> {
                             }
                         },
                         "output_schema": {
-                            "type": "object",
-                            "properties": {
-                                "test_id": { "type": "string" },
-                                "threshold": { "type": "number" },
-                                "renderers": { "type": "array", "items": { "type": "string" } },
-                                "ssim_matrix": {
-                                    "type": "array",
-                                    "items": { "type": "array", "items": { "type": "number" } }
-                                },
-                                "agreement_count": { "type": "array", "items": { "type": "integer" } },
-                                "outliers": { "type": "array", "items": { "type": "string" } },
-                                "consensus_passed": { "type": "boolean" },
-                                "position_consensus": {
+                            "oneOf": [
+                                {
+                                    "description": "Single-frame mode output (ConsensusResult + optional position_consensus)",
                                     "type": "object",
-                                    "description": "Present only when --render-positions was supplied.",
                                     "properties": {
-                                        "mean_pairwise_drift_m": { "type": "number" },
+                                        "test_id": { "type": "string" },
+                                        "threshold": { "type": "number" },
+                                        "renderers": { "type": "array", "items": { "type": "string" } },
+                                        "ssim_matrix": {
+                                            "type": "array",
+                                            "items": { "type": "array", "items": { "type": "number" } }
+                                        },
+                                        "agreement_count": { "type": "array", "items": { "type": "integer" } },
                                         "outliers": { "type": "array", "items": { "type": "string" } },
-                                        "outlier_threshold_m": { "type": "number" }
+                                        "consensus_passed": { "type": "boolean" },
+                                        "position_consensus": {
+                                            "type": "object",
+                                            "description": "Present only when --render-positions was supplied.",
+                                            "properties": {
+                                                "mean_pairwise_drift_m": { "type": "number" },
+                                                "outliers": { "type": "array", "items": { "type": "string" } },
+                                                "outlier_threshold_m": { "type": "number" }
+                                            }
+                                        },
+                                        "overall_passed": { "type": "boolean" }
                                     }
                                 },
-                                "overall_passed": { "type": "boolean" }
-                            }
+                                {
+                                    "description": "Sequence mode output (SequenceConsensusResult)",
+                                    "type": "object",
+                                    "properties": {
+                                        "test_id": { "type": "string" },
+                                        "threshold": { "type": "number" },
+                                        "renderers": { "type": "array", "items": { "type": "string" } },
+                                        "mean_ssim_matrix": {
+                                            "type": "array",
+                                            "items": { "type": "array", "items": { "type": "number" } },
+                                            "description": "Symmetric N×N temporal mean SSIM per renderer pair. Diagonal 1.0. Length mismatches become 0.0 (hard disagreement)."
+                                        },
+                                        "agreement_count": { "type": "array", "items": { "type": "integer" } },
+                                        "outliers": { "type": "array", "items": { "type": "string" } },
+                                        "consensus_passed": { "type": "boolean" },
+                                        "frame_counts": {
+                                            "type": "array",
+                                            "items": { "type": "integer" },
+                                            "description": "Number of frames each renderer contributed, in renderers[] order."
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "execute-test-batch": {
