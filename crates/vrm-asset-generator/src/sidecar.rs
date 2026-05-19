@@ -9,7 +9,8 @@ use serde_json::json;
 use vrm_test_plan::{
     AmbientLight, AnimationConfig, BboxRegion, Camera, ColorSpace, ConformanceStatus, Diff,
     DiffMode, DirectionalLight, Lighting, Output, PhysicsConfig, PostProcessing, PropertyAssertion,
-    RootTransformAnimation, TestPlan, ToneMapping, VrmaAnimation,
+    RenderSequenceBlock, RootTransformAnimation, SequenceFormat, SequenceRootTransformAnimation,
+    TestPlan, ToneMapping, VrmaAnimation,
 };
 
 pub fn write_meta_json(
@@ -164,6 +165,43 @@ pub fn build_spring_bone_swing_test_plan(params: &MToonParams, asset_relpath: &s
         vrma: None,
     });
     plan.spec_section = "VRMC_materials_mtoon + VRMC_springBone (swing)".into();
+    plan
+}
+
+/// Sequence variant of the swing plan. Emits a `render_sequence:` block
+/// instead of `animation: { root_transform }` so the runner dispatches
+/// `render_sequence` (multi-frame capture) rather than the single-frame
+/// `render` path.
+///
+/// Capture rate: 60 frames @ 30 Hz with `physics_dt_seconds = 1/60`.
+/// Animation: `[0,0,0] → [0.15, 0, 0]` linearly across all 60 frames.
+/// Total animation duration: 2.0 s.
+///
+/// This is slower than the single-frame swing plan's 0.25 s, trading
+/// reduced physics excitation for a much richer temporal signal — 60
+/// frames of captured trajectory vs 1 single end-frame.
+///
+/// Starts from the SETTLE plan (not the swing plan): the swing plan
+/// carries an `animation:` block which is mutually exclusive with
+/// `render_sequence:` per TestPlan::validate.
+pub fn build_spring_bone_swing_sequence_test_plan(
+    params: &MToonParams,
+    asset_relpath: &str,
+) -> TestPlan {
+    let mut plan = build_spring_bone_test_plan(params, asset_relpath);
+    plan.render_sequence = Some(RenderSequenceBlock {
+        frame_count: 60,
+        frame_hz: 30.0,
+        physics_dt_seconds: 1.0 / 60.0,
+        output_format: SequenceFormat::PngSequence,
+        animate_root_transform: Some(SequenceRootTransformAnimation {
+            translation_start: [0.0, 0.0, 0.0],
+            translation_end: [0.15, 0.0, 0.0],
+        }),
+        apply_vrma: None,
+        temporal_ssim_threshold: None,
+    });
+    plan.spec_section = "VRMC_materials_mtoon + VRMC_springBone (sequence)".into();
     plan
 }
 
@@ -427,6 +465,40 @@ mod extended_plan_tests {
             "spec_section should name the extension: {}",
             plan.spec_section
         );
+    }
+}
+
+#[cfg(test)]
+mod render_sequence_tests {
+    use super::*;
+    use vrm_test_plan::SequenceFormat;
+
+    #[test]
+    fn swing_sequence_plan_uses_render_sequence_not_animation() {
+        let params = MToonParams::defaults("swing_seq_test");
+        let plan = build_spring_bone_swing_sequence_test_plan(&params, "swing_seq_test.vrm");
+
+        // Sequence plan must NOT carry animation (validator would reject).
+        assert!(plan.animation.is_none(), "sequence plan must omit animation");
+
+        // Must carry render_sequence.
+        let seq = plan.render_sequence.as_ref().expect("render_sequence required");
+        assert_eq!(seq.frame_count, 60);
+        assert!((seq.frame_hz - 30.0).abs() < 1e-6);
+        assert!((seq.physics_dt_seconds - 1.0 / 60.0).abs() < 1e-9);
+        assert!(matches!(seq.output_format, SequenceFormat::PngSequence));
+        assert!(seq.apply_vrma.is_none());
+        assert!(seq.temporal_ssim_threshold.is_none());
+
+        let anim = seq.animate_root_transform.as_ref().expect("translation required");
+        assert_eq!(anim.translation_start, [0.0, 0.0, 0.0]);
+        assert_eq!(anim.translation_end, [0.15, 0.0, 0.0]);
+
+        // Physics settle preserved from the settle plan.
+        assert_eq!(plan.physics.as_ref().unwrap().settle_steps, 30);
+
+        // Validator accepts (no animation + render_sequence collision).
+        assert!(plan.validate().is_ok(), "plan should validate");
     }
 }
 
