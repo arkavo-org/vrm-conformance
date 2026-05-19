@@ -260,11 +260,19 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         let result: Result<ops::RenderSequenceResult, _> = adapter.call("render_sequence", params);
 
         let seq_result = match result {
-            Ok(r) => SequenceExecuteResult {
-                status: SequenceStatus::Ok,
-                result: Some(r),
-                unimplemented_phase: None,
-                error_message: None,
+            Ok(mut r) => match rehash_frames(&mut r) {
+                Ok(()) => SequenceExecuteResult {
+                    status: SequenceStatus::Ok,
+                    result: Some(r),
+                    unimplemented_phase: None,
+                    error_message: None,
+                },
+                Err(e) => SequenceExecuteResult {
+                    status: SequenceStatus::Error,
+                    result: None,
+                    unimplemented_phase: None,
+                    error_message: Some(format!("frame re-hash failed: {e}")),
+                },
             },
             Err(crate::adapter::AdapterError::Rpc(ref rpc_err)) if rpc_err.code == -32000 => {
                 let phase = rpc_err
@@ -556,6 +564,23 @@ pub fn execute_plan_capturing_positions(
 pub fn load_plan(path: &Utf8Path) -> Result<TestPlan> {
     let s = std::fs::read_to_string(path.as_std_path())?;
     Ok(serde_yml::from_str(&s)?)
+}
+
+/// Recompute BLAKE3 of each frame's on-disk PNG bytes and overwrite
+/// the adapter-returned `blake3` field. Adapter-returned hashes are
+/// treated as advisory only — the runner is the authority for the
+/// manifest's content-addressed column. Lets adapters return placeholder
+/// hashes (e.g., vrm-metal-kit's 64-zero sentinel) without poisoning
+/// the manifest. Mock renderer hashes are unchanged because BLAKE3 is
+/// deterministic.
+fn rehash_frames(result: &mut ops::RenderSequenceResult) -> Result<(), String> {
+    for frame in result.frames.iter_mut() {
+        let bytes = std::fs::read(&frame.path)
+            .map_err(|e| format!("read {}: {e}", frame.path))?;
+        let hash = blake3::hash(&bytes);
+        frame.blake3 = format!("blake3:{}", hash.to_hex());
+    }
+    Ok(())
 }
 
 fn progress(opts: &ExecuteOptions, phase: &str, test_id: &str, extra: serde_json::Value) {
