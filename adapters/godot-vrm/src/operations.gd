@@ -21,7 +21,6 @@ const PHASE_BY_RESERVED_METHOD := {
     "dump_humanoid_pose": "vrma-v1",
     "dump_expression_weights": "vrma-v1",
     "dump_look_at_state": "vrma-v1",
-    "render_sequence": "v1.x-sequence",
 }
 
 # Phase 1 method names. dispatch() routes these to Session.<name>.
@@ -29,7 +28,7 @@ const PHASE1_METHODS := [
     "load_vrm", "set_camera", "set_lighting",
     "set_post_processing", "render", "dispose",
     "step_physics", "reset_physics", "animate_root_transform",
-    "dump_bone_positions",
+    "dump_bone_positions", "render_sequence",
 ]
 
 # Async to support `render` which awaits frames.
@@ -55,6 +54,8 @@ static func dispatch(tree: SceneTree, session: Session, id: Variant, method: Str
                 outcome = session.reset_physics(params if typeof(params) == TYPE_DICTIONARY else {})
             "animate_root_transform":
                 outcome = session.animate_root_transform(params if typeof(params) == TYPE_DICTIONARY else {})
+            "render_sequence":
+                outcome = await session.render_sequence(tree, params if typeof(params) == TYPE_DICTIONARY else {})
             "dump_bone_positions":
                 outcome = session.dump_bone_positions(params if typeof(params) == TYPE_DICTIONARY else {})
             _:

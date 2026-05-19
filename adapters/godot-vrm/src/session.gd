@@ -300,6 +300,122 @@ func animate_root_transform(params: Dictionary) -> Dictionary:
             vrm_secondary.do_process(dt)
     return _ok({})
 
+# Phase 6 — RFC-0004 render_sequence.
+# Loops frame_count times. Per frame: interpolate root translation,
+# drive vrm_secondary.do_process(physics_dt), let the viewport render,
+# save PNG, append SequenceFrame. Restores original root at end.
+#
+# BLAKE3 is populated with the 64-zero sentinel — Rust runner re-hashes
+# (Phase 5 Task 2 contract). apply_vrma + non-PNG output_format +
+# physics_dt > 1/60 all reject (RFC-0004 failure-modes).
+func render_sequence(tree: SceneTree, params: Dictionary) -> Dictionary:
+    if viewport == null:
+        return _err(-32002, "RenderFailed", { "reason": "no session active; call load_vrm first" })
+
+    var output_dir: String = params.get("output_dir", "")
+    if output_dir == "":
+        return _err(-32602, "missing output_dir")
+
+    var frame_count: int = params.get("frame_count", 0)
+    if frame_count < 1:
+        return _err(-32602, "frame_count must be >= 1")
+
+    var frame_hz: float = params.get("frame_hz", 30.0)
+    var physics_dt: float = params.get("physics_dt_seconds", 1.0 / 60.0)
+    if physics_dt > 1.0 / 60.0 + 1e-6:
+        return _err(-32602, "physics_dt_seconds %f exceeds 60 Hz floor (1/60)" % physics_dt)
+
+    var has_anim: bool = params.has("animate_root_transform") and params["animate_root_transform"] != null
+    var has_vrma: bool = params.has("apply_vrma") and params["apply_vrma"] != null
+    if has_anim and has_vrma:
+        return _err(-32602, "animate_root_transform and apply_vrma are mutually exclusive")
+    if has_vrma:
+        return _err(-32602, "apply_vrma is not yet implemented in godot-vrm (Phase 6 deferral)")
+
+    var output_format: String = params.get("output_format", "png_sequence")
+    if output_format != "png_sequence":
+        return _err(-32602, "output_format \"%s\" is not yet supported by godot-vrm; only png_sequence" % output_format)
+
+    var width: int = params.get("width", 512)
+    var height: int = params.get("height", 512)
+    var msaa: int = params.get("msaa", 4)
+    var color_space: String = params.get("color_space", "Srgb")
+
+    # Configure viewport once.
+    viewport.size = Vector2i(width, height)
+    match msaa:
+        0, 1: viewport.msaa_3d = Viewport.MSAA_DISABLED
+        2:    viewport.msaa_3d = Viewport.MSAA_2X
+        4:    viewport.msaa_3d = Viewport.MSAA_4X
+        8:    viewport.msaa_3d = Viewport.MSAA_8X
+        _:    viewport.msaa_3d = Viewport.MSAA_4X
+    viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+
+    var start := Vector3.ZERO
+    var end := Vector3.ZERO
+    if has_anim:
+        var anim: Dictionary = params["animate_root_transform"]
+        var s = anim.get("translation_start", [0.0, 0.0, 0.0])
+        var e = anim.get("translation_end", [0.0, 0.0, 0.0])
+        start = Vector3(s[0], s[1], s[2])
+        end = Vector3(e[0], e[1], e[2])
+
+    DirAccess.make_dir_recursive_absolute(output_dir)
+
+    var original_translation := Vector3.ZERO
+    if scene is Node3D:
+        original_translation = (scene as Node3D).position
+    var zero_hash := "blake3:" + "0".repeat(64)
+    var frames: Array = []
+
+    for i in frame_count:
+        var t: float = 0.0
+        if frame_count > 1:
+            t = float(i) / float(frame_count - 1)
+        if scene is Node3D:
+            (scene as Node3D).position = original_translation + start.lerp(end, t)
+
+        if vrm_secondary != null:
+            vrm_secondary.do_process(physics_dt)
+
+        # Let the viewport render. Two frames so the pipeline catches up
+        # (matches the warm-up in the existing render() handler).
+        await tree.process_frame
+        await tree.process_frame
+        var img: Image = viewport.get_texture().get_image()
+        if img == null:
+            if scene is Node3D:
+                (scene as Node3D).position = original_translation
+            return _err(-32002, "RenderFailed", { "reason": "frame %d: get_image returned null" % i })
+
+        var frame_path := "%s/%04d.png" % [output_dir, i]
+        var save_err := img.save_png(frame_path)
+        if save_err != OK:
+            if scene is Node3D:
+                (scene as Node3D).position = original_translation
+            return _err(-32002, "RenderFailed", { "reason": "frame %d: save_png err %d" % [i, save_err] })
+
+        frames.append({
+            "index": i,
+            "timestamp_seconds": float(i) / frame_hz,
+            "path": frame_path,
+            "blake3": zero_hash,
+        })
+
+    # Restore root.
+    if scene is Node3D:
+        (scene as Node3D).position = original_translation
+
+    # color_space is accepted for protocol compliance; we always write
+    # sRGB-encoded PNGs (same convention as the existing render handler).
+    var _declared = color_space
+    return _ok({
+        "frames": frames,
+        "duration_seconds": float(frame_count) / frame_hz,
+        "actual_color_space": "Srgb",
+        "frame_hz_achieved": frame_hz,
+    })
+
 func _ok(result: Variant) -> Dictionary:
     return { "ok": true, "result": result }
 
