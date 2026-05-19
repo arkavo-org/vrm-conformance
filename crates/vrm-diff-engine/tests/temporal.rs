@@ -215,3 +215,55 @@ fn temporal_diff_length_mismatch_fails_regardless_of_ssim() {
     // But length mismatch trumps SSIM
     assert!(!result.passed, "length mismatch must fail regardless of SSIM");
 }
+
+#[test]
+fn temporal_diff_empty_sequences() {
+    // Both sequences empty. frame_count_match=true (both 0), but no
+    // signal to assert pass — design choice: passed=false (no frames
+    // compared means we can't assert conformance).
+    let result = temporal_diff(&[], &[], 0.90).unwrap();
+
+    assert_eq!(result.frame_count, 0);
+    assert_eq!(result.frame_count_compared, 0);
+    assert!(result.frame_count_match, "0 == 0");
+    assert!(result.per_frame.is_empty());
+    assert_eq!(result.mean_ssim, 0.0);
+    assert_eq!(result.min_ssim, 0.0);
+    assert_eq!(result.worst_frame_index, 0);
+    // mean_ssim 0.0 < threshold 0.90 ⇒ passed=false.
+    // This is the right default: an empty sequence cannot conform.
+    assert!(!result.passed);
+}
+
+#[test]
+fn temporal_diff_single_frame_sequence() {
+    // Single-frame each, identical. mean=p95=min=ssim.
+    let dir = tempfile::tempdir().unwrap();
+    let cand = write_solid_sequence(dir.path(), "cand", 1, [80, 80, 80]);
+    let refr = write_solid_sequence(dir.path(), "refr", 1, [80, 80, 80]);
+
+    let result = temporal_diff(&as_utf8(&cand), &as_utf8(&refr), 0.90).unwrap();
+
+    assert_eq!(result.frame_count, 1);
+    assert_eq!(result.frame_count_compared, 1);
+    assert_eq!(result.per_frame.len(), 1);
+    // mean == p95 == min for a 1-element distribution
+    assert_eq!(result.mean_ssim, result.p95_ssim);
+    assert_eq!(result.mean_ssim, result.min_ssim);
+    assert!(result.passed);
+}
+
+#[test]
+fn temporal_diff_one_empty_one_nonempty_fails_length_mismatch() {
+    // Asymmetric empty: candidate has 0, reference has 3.
+    // frame_count_match=false → passed=false regardless.
+    let dir = tempfile::tempdir().unwrap();
+    let refr = write_solid_sequence(dir.path(), "refr", 3, [80, 80, 80]);
+
+    let result = temporal_diff(&[], &as_utf8(&refr), 0.90).unwrap();
+
+    assert_eq!(result.frame_count, 0);
+    assert_eq!(result.frame_count_compared, 0);
+    assert!(!result.frame_count_match);
+    assert!(!result.passed);
+}
