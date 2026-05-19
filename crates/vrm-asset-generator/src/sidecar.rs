@@ -479,10 +479,16 @@ mod render_sequence_tests {
         let plan = build_spring_bone_swing_sequence_test_plan(&params, "swing_seq_test.vrm");
 
         // Sequence plan must NOT carry animation (validator would reject).
-        assert!(plan.animation.is_none(), "sequence plan must omit animation");
+        assert!(
+            plan.animation.is_none(),
+            "sequence plan must omit animation"
+        );
 
         // Must carry render_sequence.
-        let seq = plan.render_sequence.as_ref().expect("render_sequence required");
+        let seq = plan
+            .render_sequence
+            .as_ref()
+            .expect("render_sequence required");
         assert_eq!(seq.frame_count, 60);
         assert!((seq.frame_hz - 30.0).abs() < 1e-6);
         assert!((seq.physics_dt_seconds - 1.0 / 60.0).abs() < 1e-9);
@@ -490,7 +496,10 @@ mod render_sequence_tests {
         assert!(seq.apply_vrma.is_none());
         assert!(seq.temporal_ssim_threshold.is_none());
 
-        let anim = seq.animate_root_transform.as_ref().expect("translation required");
+        let anim = seq
+            .animate_root_transform
+            .as_ref()
+            .expect("translation required");
         assert_eq!(anim.translation_start, [0.0, 0.0, 0.0]);
         assert_eq!(anim.translation_end, [0.15, 0.0, 0.0]);
 

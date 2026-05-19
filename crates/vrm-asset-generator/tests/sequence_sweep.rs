@@ -80,9 +80,7 @@ fn emit_sequence_sweep_produces_valid_triplets() {
             seq.physics_dt_seconds
         );
         assert!(matches!(seq.output_format, SequenceFormat::PngSequence));
-        let anim = seq
-            .animate_root_transform
-            .expect("translation required");
+        let anim = seq.animate_root_transform.expect("translation required");
         assert_eq!(anim.translation_start, [0.0, 0.0, 0.0]);
         assert_eq!(anim.translation_end, [0.15, 0.0, 0.0]);
     }
