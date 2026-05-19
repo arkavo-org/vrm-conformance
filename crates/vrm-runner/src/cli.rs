@@ -64,14 +64,32 @@ pub enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Diff a render PNG against a reference PNG using a test plan.
+    /// Diff a render against a reference using a test plan.
+    ///
+    /// Single-frame mode (legacy): `--render <png> --reference <png>`.
+    /// Sequence mode: `--render-frames <dir> --reference-frames <dir>` —
+    ///   the dir contains per-frame PNGs (e.g. `0000.png`, `0001.png`, …)
+    ///   in sorted-filename order. Mutually exclusive with single-frame
+    ///   flags. The plan's `render_sequence.temporal_ssim_threshold`
+    ///   (when set) overrides `diff.threshold` for the sequence diff
+    ///   pass criterion.
     Diff {
         #[arg(long)]
         plan: Utf8PathBuf,
-        #[arg(long)]
-        render: Utf8PathBuf,
-        #[arg(long)]
-        reference: Utf8PathBuf,
+        /// Single-frame candidate PNG. Mutually exclusive with --render-frames.
+        #[arg(long, conflicts_with = "render_frames")]
+        render: Option<Utf8PathBuf>,
+        /// Single-frame reference PNG. Mutually exclusive with --reference-frames.
+        #[arg(long, conflicts_with = "reference_frames")]
+        reference: Option<Utf8PathBuf>,
+        /// Sequence-mode candidate frames directory. PNG files inside are
+        /// loaded in lexicographic order (use zero-padded names like
+        /// 0000.png, 0001.png). Mutually exclusive with --render.
+        #[arg(long, requires = "reference_frames")]
+        render_frames: Option<Utf8PathBuf>,
+        /// Sequence-mode reference frames directory.
+        #[arg(long, requires = "render_frames")]
+        reference_frames: Option<Utf8PathBuf>,
         #[arg(long, default_value = "vrm-metal-kit")]
         renderer_name: String,
         #[arg(long)]
@@ -158,6 +176,27 @@ pub enum Cmd {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
         format: DescribeFormat,
     },
+}
+
+/// Load PNG frame paths from a directory in lexicographic order.
+fn load_frames_dir(dir: &camino::Utf8Path) -> anyhow::Result<Vec<camino::Utf8PathBuf>> {
+    let mut frames: Vec<camino::Utf8PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(dir.as_std_path())
+        .map_err(|e| anyhow::anyhow!("failed to read frames dir {dir}: {e}"))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("png") {
+            let utf8 = camino::Utf8PathBuf::try_from(path)
+                .map_err(|e| anyhow::anyhow!("non-utf8 path: {e}"))?;
+            frames.push(utf8);
+        }
+    }
+    frames.sort();
+    if frames.is_empty() {
+        anyhow::bail!("no PNG frames found in {dir}");
+    }
+    Ok(frames)
 }
 
 /// Parse one `name=path` value for the consensus-diff --render flag.
@@ -296,37 +335,104 @@ pub fn run(cli: Cli) -> Result<()> {
             plan,
             render,
             reference,
+            render_frames,
+            reference_frames,
             renderer_name,
             json: emit_json,
         } => {
-            use crate::diff::diff_one;
-
             let plan_value = load_plan(&plan)?;
-            let result = diff_one(&plan_value, &render, &reference, &renderer_name)?;
-            let passed = result.overall_passed();
 
-            if emit_json {
-                println!("{}", serde_json::to_string(&result)?);
+            if let (Some(rf), Some(rfr)) = (render_frames, reference_frames) {
+                // Sequence-mode diff
+                use vrm_diff_engine::temporal::temporal_diff;
+                let cand_frames = load_frames_dir(&rf)?;
+                let refr_frames = load_frames_dir(&rfr)?;
+
+                let threshold = plan_value
+                    .render_sequence
+                    .as_ref()
+                    .and_then(|rs| rs.temporal_ssim_threshold)
+                    .unwrap_or(0.90);
+
+                let cand_refs: Vec<&camino::Utf8Path> =
+                    cand_frames.iter().map(|p| p.as_path()).collect();
+                let refr_refs: Vec<&camino::Utf8Path> =
+                    refr_frames.iter().map(|p| p.as_path()).collect();
+
+                let result = temporal_diff(&cand_refs, &refr_refs, threshold)?;
+
+                // Save fields before moving result into the envelope.
+                let passed = result.passed;
+                let mean_ssim = result.mean_ssim;
+                let min_ssim = result.min_ssim;
+                let temporal_ssim_threshold = result.temporal_ssim_threshold;
+                let frame_count_compared = result.frame_count_compared;
+                let frame_count_match = result.frame_count_match;
+
+                if emit_json {
+                    #[derive(serde::Serialize)]
+                    struct SequenceDiffEnvelope<'a> {
+                        test_id: &'a str,
+                        renderer: &'a str,
+                        temporal_diff: vrm_diff_engine::temporal::TemporalDiffResult,
+                    }
+                    let envelope = SequenceDiffEnvelope {
+                        test_id: &plan_value.id,
+                        renderer: &renderer_name,
+                        temporal_diff: result,
+                    };
+                    println!("{}", serde_json::to_string(&envelope)?);
+                } else {
+                    println!(
+                        "{}: temporal mean SSIM={:.4} min={:.4} (threshold {:.4}, {}), {} frame(s) compared{}",
+                        plan_value.id,
+                        mean_ssim,
+                        min_ssim,
+                        temporal_ssim_threshold,
+                        if passed { "PASS" } else { "FAIL" },
+                        frame_count_compared,
+                        if frame_count_match { "" } else { " (LENGTH MISMATCH)" },
+                    );
+                }
+
+                if !passed {
+                    std::process::exit(1);
+                }
+                Ok(())
+            } else if let (Some(rp), Some(rr)) = (render, reference) {
+                // Existing single-frame logic — keep as-is
+                use crate::diff::diff_one;
+                let result = diff_one(&plan_value, &rp, &rr, &renderer_name)?;
+                let passed = result.overall_passed();
+
+                if emit_json {
+                    println!("{}", serde_json::to_string(&result)?);
+                } else {
+                    println!(
+                        "{}: SSIM={:.4} (threshold {:.4}, {}), {} property assertion(s) {}",
+                        result.test_id,
+                        result.ssim,
+                        result.ssim_threshold,
+                        if result.ssim_passed { "PASS" } else { "FAIL" },
+                        result.properties.len(),
+                        if result.properties.iter().all(|p| p.passed) {
+                            "PASS"
+                        } else {
+                            "FAIL"
+                        },
+                    );
+                }
+
+                if !passed {
+                    std::process::exit(1);
+                }
+                Ok(())
             } else {
-                println!(
-                    "{}: SSIM={:.4} (threshold {:.4}, {}), {} property assertion(s) {}",
-                    result.test_id,
-                    result.ssim,
-                    result.ssim_threshold,
-                    if result.ssim_passed { "PASS" } else { "FAIL" },
-                    result.properties.len(),
-                    if result.properties.iter().all(|p| p.passed) {
-                        "PASS"
-                    } else {
-                        "FAIL"
-                    },
-                );
+                anyhow::bail!(
+                    "diff: provide either --render+--reference (single-frame) \
+                     or --render-frames+--reference-frames (sequence)"
+                )
             }
-
-            if !passed {
-                std::process::exit(1);
-            }
-            Ok(())
         }
         Cmd::ConsensusDiff {
             plan,
@@ -598,28 +704,70 @@ pub fn run(cli: Cli) -> Result<()> {
                         }
                     },
                     "diff": {
-                        "summary": "Diff a render PNG against a reference PNG using a test plan; emit DiffResult JSON. Exit non-zero when overall_passed is false.",
+                        "summary": "Single-frame or sequence-mode diff against a reference. Single-frame mode: --render <png> --reference <png>. Sequence mode: --render-frames <dir> --reference-frames <dir> (mutually exclusive). Exit non-zero when overall_passed / passed is false.",
                         "input_schema": {
                             "type": "object",
-                            "required": ["plan", "render", "reference"],
+                            "required": ["plan"],
                             "properties": {
                                 "plan": { "type": "string" },
-                                "render": { "type": "string" },
-                                "reference": { "type": "string" },
+                                "render": {
+                                    "type": "string",
+                                    "description": "Single-frame candidate PNG. Mutually exclusive with render_frames."
+                                },
+                                "reference": {
+                                    "type": "string",
+                                    "description": "Single-frame reference PNG. Mutually exclusive with reference_frames."
+                                },
+                                "render_frames": {
+                                    "type": "string",
+                                    "description": "Sequence-mode candidate frames directory. PNG files loaded in lexicographic order. Mutually exclusive with render."
+                                },
+                                "reference_frames": {
+                                    "type": "string",
+                                    "description": "Sequence-mode reference frames directory. Must be provided together with render_frames."
+                                },
                                 "renderer_name": { "type": "string" }
                             }
                         },
                         "output_schema": {
-                            "type": "object",
-                            "properties": {
-                                "test_id": { "type": "string" },
-                                "renderer": { "type": "string" },
-                                "reference_renderer": { "type": "string" },
-                                "ssim": { "type": "number" },
-                                "ssim_threshold": { "type": "number" },
-                                "ssim_passed": { "type": "boolean" },
-                                "properties": { "type": "array" }
-                            }
+                            "oneOf": [
+                                {
+                                    "description": "Single-frame mode output (DiffResult)",
+                                    "type": "object",
+                                    "properties": {
+                                        "test_id": { "type": "string" },
+                                        "renderer": { "type": "string" },
+                                        "reference_renderer": { "type": "string" },
+                                        "ssim": { "type": "number" },
+                                        "ssim_threshold": { "type": "number" },
+                                        "ssim_passed": { "type": "boolean" },
+                                        "properties": { "type": "array" }
+                                    }
+                                },
+                                {
+                                    "description": "Sequence mode output (TemporalDiffResult envelope)",
+                                    "type": "object",
+                                    "properties": {
+                                        "test_id": { "type": "string" },
+                                        "renderer": { "type": "string" },
+                                        "temporal_diff": {
+                                            "type": "object",
+                                            "properties": {
+                                                "frame_count": { "type": "integer" },
+                                                "frame_count_compared": { "type": "integer" },
+                                                "per_frame": { "type": "array" },
+                                                "mean_ssim": { "type": "number" },
+                                                "p95_ssim": { "type": "number" },
+                                                "min_ssim": { "type": "number" },
+                                                "worst_frame_index": { "type": "integer" },
+                                                "frame_count_match": { "type": "boolean" },
+                                                "temporal_ssim_threshold": { "type": "number" },
+                                                "passed": { "type": "boolean" }
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "consensus-diff": {
