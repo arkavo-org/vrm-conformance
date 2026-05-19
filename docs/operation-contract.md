@@ -118,6 +118,32 @@ These cover MToon material tests and must be implemented by every renderer adapt
 }
 ```
 
+### `render_sequence`
+
+Capture N frames at a fixed display Hz while advancing physics (and optionally a `.vrma` clip or root-transform animation) between samples. The adapter steps physics by `physics_dt_seconds` between each captured frame — display Hz and physics Hz are decoupled so the spring-bone determinism pin (60 Hz fixed step) holds independent of capture rate. See [`rfcs/0004-render-sequence-op.md`](../rfcs/0004-render-sequence-op.md) for the full design.
+
+Adapters that have not implemented sequences return the standard Unimplemented envelope:
+
+```
+-32000 Unimplemented   data: { "phase": "v1.x-sequence" }
+```
+
+- Params: `RenderSequenceParams { session_id, width, height, output_dir, frame_count, frame_hz, physics_dt_seconds, color_space, msaa, output_type, output_format, animate_root_transform?, apply_vrma? }`
+- Result: `RenderSequenceResult { frames: [{ index, timestamp_seconds, path, blake3 }], duration_seconds, actual_color_space, frame_hz_achieved, muxed_path? }`
+
+**Validation rules adapters MUST enforce:**
+
+- `animate_root_transform` and `apply_vrma` are mutually exclusive. Both set ⇒ `-32602 invalid params`.
+- `physics_dt_seconds > 1/60` violates the spring-bone determinism methodology pin ⇒ `-32602 invalid params`.
+
+**Output layout:**
+
+- `output_format: png_sequence` → `<output_dir>/<frame_index:04>.png`, no muxed file.
+- `output_format: mp4` → per-frame PNGs **plus** `<output_dir>/sequence.mp4` (h.264 yuv420p, lossless qp=0). `muxed_path` is set in the result.
+- `output_format: mov` → per-frame PNGs **plus** `<output_dir>/sequence.mov` (Apple ProRes 4444). `muxed_path` is set in the result.
+
+The diff engine consumes per-frame PNGs canonically regardless of `output_format`. Muxed files are convenience for site display and reviewer ergonomics.
+
 ### `dispose`
 
 ```json
