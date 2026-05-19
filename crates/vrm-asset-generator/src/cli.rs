@@ -78,6 +78,23 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the spring-bone sequence-mode sweep (~20 assets). Each asset's
+    /// `.test.yaml` carries a `render_sequence:` block instead of an
+    /// `animation:` block, dispatching the runner's render_sequence path
+    /// (multi-frame capture) instead of the single-frame render path.
+    /// 60 frames @ 30 Hz with `physics_dt_seconds = 1/60`, root translation
+    /// `[0,0,0] → [0.15,0,0]` linearly across all frames.
+    ///
+    /// Asset IDs are prefixed `swing_seq_` to keep them distinct from the
+    /// existing single-frame `swing_` variants in the cross-renderer
+    /// goldens manifest (both can coexist).
+    EmitSequenceSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the VRMC_springBone collider sweep (48 assets = 24 Cartesian
     /// variants × settle + swing). Each asset has one collider (sphere or
     /// capsule) attached to the head node in the chain's path. The settle
@@ -433,6 +450,59 @@ pub fn run(cli: Cli) -> Result<()> {
             } else {
                 println!(
                     "emitted {} swing spring-bone assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
+        Cmd::EmitSequenceSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_with_sidecars_spring_bone_swing_sequence;
+            use crate::spring_bone::spring_bone_basic_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = spring_bone_basic_sweep();
+            let total = variants.len();
+
+            let mut emitted = Vec::new();
+            for (i, spring) in variants.iter().enumerate() {
+                let seq_id = format!("swing_seq_{}", spring.id);
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-sequence-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": seq_id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, seq_id);
+                }
+
+                let mut prefixed = spring.clone();
+                prefixed.id = seq_id.clone();
+                prefixed.spring_name = format!("{seq_id}_chain");
+                let stem = output_dir.join(&seq_id);
+                let mtoon = MToonParams::defaults(&seq_id);
+                emit_with_sidecars_spring_bone_swing_sequence(&mtoon, &prefixed, &stem)?;
+                emitted.push(stem);
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} sequence-mode spring-bone assets to {}",
                     emitted.len(),
                     output_dir
                 );
