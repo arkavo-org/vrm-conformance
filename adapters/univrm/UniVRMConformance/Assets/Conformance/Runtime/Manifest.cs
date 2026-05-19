@@ -39,6 +39,7 @@ namespace Conformance
             public OutputDto output;
             public PhysicsDto physics;
             public AnimationDto animation;
+            public RenderSequenceDto render_sequence;
         }
 
         [Serializable]
@@ -119,6 +120,32 @@ namespace Conformance
             public int fps;
         }
 
+        [Serializable]
+        public class RenderSequenceDto
+        {
+            public int frame_count;
+            public float frame_hz;
+            public float physics_dt_seconds;
+            public string output_format;                            // "png_sequence"
+            public RenderSequenceAnimateDto animate_root_transform; // may be null
+            public RenderSequenceVrmaDto apply_vrma;                // may be null
+            public float temporal_ssim_threshold;                   // 0 ⇒ unset (use RFC default)
+        }
+
+        [Serializable]
+        public class RenderSequenceAnimateDto
+        {
+            public float[] translation_start;
+            public float[] translation_end;
+        }
+
+        [Serializable]
+        public class RenderSequenceVrmaDto
+        {
+            public int vrma_handle;
+            public float start_seconds;
+        }
+
         // ============== Unity → runner ==============
 
         [Serializable]
@@ -142,6 +169,19 @@ namespace Conformance
             public string actual_color_space;
             public float render_seconds;
             public ErrorDto error;
+            // Sequence-shape result fields. Null/zero for single-frame entries.
+            public RenderSequenceFrameOutputDto[] frames;
+            public float duration_seconds;
+            public float frame_hz_achieved;
+        }
+
+        [Serializable]
+        public class RenderSequenceFrameOutputDto
+        {
+            public int index;
+            public float timestamp_seconds;
+            public string path;
+            public string blake3;
         }
 
         [Serializable]
