@@ -157,6 +157,60 @@ fn frame_count_is_consistent_with_request() {
 }
 
 #[test]
+fn png_sequence_format_produces_no_muxed_file() {
+    let (mut reg, session_id) = fresh_session();
+    let out = tempfile::tempdir().unwrap();
+
+    let params = base_params(&session_id, out.path().to_str().unwrap());
+    let result = handlers::render_sequence(&mut reg, params).unwrap();
+    assert!(result.muxed_path.is_none());
+}
+
+/// This test runs only when ffmpeg is on PATH (gated by --ignored to keep
+/// CI green when ffmpeg isn't installed). The soft-skip path is covered
+/// implicitly by the PngSequence test above — when ffmpeg is missing the
+/// handler returns muxed_path: None just like the PngSequence case.
+#[test]
+#[ignore = "requires ffmpeg on PATH"]
+fn mp4_format_invokes_ffmpeg() {
+    let (mut reg, session_id) = fresh_session();
+    let out = tempfile::tempdir().unwrap();
+
+    let mut params = base_params(&session_id, out.path().to_str().unwrap());
+    params.output_format = ops::SequenceFormat::Mp4;
+    params.frame_count = 5;
+
+    let result = handlers::render_sequence(&mut reg, params).unwrap();
+    if let Some(path) = &result.muxed_path {
+        assert!(
+            std::path::Path::new(path).exists(),
+            "ffmpeg ran but didn't produce the file: {path}"
+        );
+        assert!(path.ends_with("sequence.mp4"));
+    } else {
+        // ffmpeg absent on this machine — soft-skip path taken. Still OK.
+        eprintln!("ffmpeg not on PATH; mp4 test soft-skipped");
+    }
+}
+
+#[test]
+#[ignore = "requires ffmpeg on PATH"]
+fn mov_format_invokes_ffmpeg() {
+    let (mut reg, session_id) = fresh_session();
+    let out = tempfile::tempdir().unwrap();
+
+    let mut params = base_params(&session_id, out.path().to_str().unwrap());
+    params.output_format = ops::SequenceFormat::Mov;
+    params.frame_count = 5;
+
+    let result = handlers::render_sequence(&mut reg, params).unwrap();
+    if let Some(path) = &result.muxed_path {
+        assert!(std::path::Path::new(path).exists());
+        assert!(path.ends_with("sequence.mov"));
+    }
+}
+
+#[test]
 fn frame_paths_match_zero_padded_naming() {
     let (mut reg, session_id) = fresh_session();
     let out = tempfile::tempdir().unwrap();

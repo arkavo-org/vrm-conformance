@@ -285,13 +285,76 @@ pub fn render_sequence(
         0.0
     };
 
+    let muxed_path = match params.output_format {
+        ops::SequenceFormat::PngSequence => None,
+        ops::SequenceFormat::Mp4 => mux_via_ffmpeg(
+            output_dir.as_path(),
+            "sequence.mp4",
+            &["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "0"],
+            params.frame_hz,
+        )?,
+        ops::SequenceFormat::Mov => mux_via_ffmpeg(
+            output_dir.as_path(),
+            "sequence.mov",
+            &["-c:v", "prores_ks", "-profile:v", "4444"],
+            params.frame_hz,
+        )?,
+    };
+
     Ok(ops::RenderSequenceResult {
         frames,
         duration_seconds,
         actual_color_space: params.color_space,
         frame_hz_achieved: params.frame_hz,
-        muxed_path: None,
+        muxed_path,
     })
+}
+
+/// Shell out to ffmpeg to mux per-frame PNGs into a single video file.
+/// Returns `Ok(Some(path))` on success, `Ok(None)` when ffmpeg is absent
+/// (soft-skip — PNG sequence is still useful on its own), or an `Err`
+/// when ffmpeg is present but muxing failed.
+fn mux_via_ffmpeg(
+    output_dir: &camino::Utf8Path,
+    out_file: &str,
+    codec_args: &[&str],
+    frame_hz: f32,
+) -> Result<Option<String>, RpcError> {
+    // Probe: is ffmpeg on PATH?
+    let probe = std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output();
+    if probe.is_err() {
+        tracing::warn!(
+            "ffmpeg not found on PATH; muxed output {} skipped (PNG sequence is still written)",
+            out_file
+        );
+        return Ok(None);
+    }
+
+    let mux_path = output_dir.join(out_file);
+    let frame_pattern = output_dir.join("%04d.png");
+    let mut cmd = std::process::Command::new("ffmpeg");
+    cmd.arg("-y") // overwrite
+        .arg("-framerate").arg(format!("{frame_hz}"))
+        .arg("-i").arg(frame_pattern.as_std_path())
+        .args(codec_args)
+        .arg(mux_path.as_std_path());
+
+    let out = cmd
+        .output()
+        .map_err(|e| RpcError::render_failed(format!("ffmpeg invocation failed: {e}")))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(RpcError::render_failed(format!(
+            "ffmpeg muxing {} failed (exit {}): {}",
+            out_file,
+            out.status.code().unwrap_or(-1),
+            stderr.lines().rev().take(5).collect::<Vec<_>>().join(" / "),
+        )));
+    }
+
+    Ok(Some(mux_path.to_string()))
 }
 
 fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
