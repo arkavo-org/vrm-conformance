@@ -53,7 +53,9 @@ pub struct TemporalDiffResult {
 ///            min_ssim >= threshold - 0.05 AND
 ///            frame_count_match`
 ///
-/// BLAKE3 short-circuit (identity_match) lands in a follow-up.
+/// Per-frame BLAKE3 hashing short-circuits SSIM computation when both
+/// PNGs are byte-identical; those frames get `identity_match=true` and
+/// `ssim=1.0` exactly.
 pub fn temporal_diff(
     candidate_frames: &[&Utf8Path],
     reference_frames: &[&Utf8Path],
@@ -66,6 +68,16 @@ pub fn temporal_diff(
 
     let mut per_frame = Vec::with_capacity(compared as usize);
     for i in 0..compared as usize {
+        let cand_hash = blake3_of_file(candidate_frames[i])?;
+        let ref_hash = blake3_of_file(reference_frames[i])?;
+        if cand_hash == ref_hash {
+            per_frame.push(FrameDiff {
+                index: i as u32,
+                ssim: 1.0,
+                identity_match: true,
+            });
+            continue;
+        }
         let ssim = ssim_pngs(candidate_frames[i], reference_frames[i])?;
         per_frame.push(FrameDiff {
             index: i as u32,
@@ -126,8 +138,22 @@ fn aggregate(frames: &[FrameDiff]) -> (f64, f64, f64, u32) {
     (mean, p95, min, worst)
 }
 
+fn blake3_of_file(path: &Utf8Path) -> Result<[u8; 32], TemporalDiffError> {
+    let bytes = std::fs::read(path.as_std_path()).map_err(|e| TemporalDiffError::Io {
+        path: path.to_string(),
+        source: e,
+    })?;
+    Ok(blake3::hash(&bytes).into())
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum TemporalDiffError {
     #[error(transparent)]
     Ssim(#[from] SsimError),
+
+    #[error("io error reading {path}: {source}")]
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
 }

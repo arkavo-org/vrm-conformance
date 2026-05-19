@@ -78,8 +78,8 @@ fn temporal_diff_identical_sequences_pass() {
     assert!(result.min_ssim > 0.99, "min = {}", result.min_ssim);
     assert!(result.passed);
     assert_eq!(result.per_frame.len(), 5);
-    // identity_match is false because BLAKE3 short-circuit lands in Task 3
-    assert!(result.per_frame.iter().all(|f| !f.identity_match));
+    // identity_match may be true (BLAKE3 short-circuit) for byte-identical PNGs —
+    // either path (ssim≈1.0 or identity_match=true) satisfies "identical inputs pass".
 }
 
 #[test]
@@ -149,6 +149,52 @@ fn temporal_diff_gradual_drift() {
             "SSIM should be monotonically non-increasing across drift: {:?}",
             result.per_frame
         );
+    }
+}
+
+#[test]
+fn temporal_diff_identical_files_short_circuit_to_identity_match() {
+    // Point both candidate and reference at the SAME file paths.
+    // BLAKE3 of each pair must match → identity_match=true, ssim=1.0 exactly.
+    let dir = tempfile::tempdir().unwrap();
+    let frames = write_solid_sequence(dir.path(), "shared", 3, [50, 150, 100]);
+
+    // Use the same paths for both sides. The function shouldn't even
+    // call ssim_pngs for these — identity_match should short-circuit.
+    let cand = as_utf8(&frames);
+    let refr = as_utf8(&frames);
+    let result = temporal_diff(&cand, &refr, 0.90).unwrap();
+
+    assert_eq!(result.frame_count, 3);
+    assert!(result.frame_count_match);
+    assert!(result.passed);
+
+    // Every frame must be flagged as identity_match
+    for (i, fd) in result.per_frame.iter().enumerate() {
+        assert!(fd.identity_match, "frame {i} should be identity_match");
+        // SSIM should be exactly 1.0 (not 0.9999...) since we skipped SSIM
+        assert_eq!(fd.ssim, 1.0, "frame {i} ssim should be exactly 1.0");
+    }
+}
+
+#[test]
+fn temporal_diff_identical_content_different_files_short_circuit() {
+    // Two distinct files with byte-identical content (same RGB).
+    // BLAKE3 should still match because content is identical.
+    let dir = tempfile::tempdir().unwrap();
+    let cand = write_solid_sequence(dir.path(), "cand", 2, [200, 100, 50]);
+    let refr = write_solid_sequence(dir.path(), "refr", 2, [200, 100, 50]);
+
+    // Sanity check: bytes match
+    for (a, b) in cand.iter().zip(refr.iter()) {
+        assert_eq!(std::fs::read(a).unwrap(), std::fs::read(b).unwrap(),
+                   "test setup: solid-color PNGs of same color should be byte-identical");
+    }
+
+    let result = temporal_diff(&as_utf8(&cand), &as_utf8(&refr), 0.90).unwrap();
+    for fd in &result.per_frame {
+        assert!(fd.identity_match, "byte-identical PNGs should short-circuit");
+        assert_eq!(fd.ssim, 1.0);
     }
 }
 
