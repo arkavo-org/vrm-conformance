@@ -31,8 +31,7 @@ fn fresh_session() -> (SessionRegistry, String) {
     });
     std::fs::write(&meta_path, serde_json::to_vec(&meta).unwrap()).unwrap();
 
-    let asset_path =
-        Utf8PathBuf::try_from(vrm_path).expect("path is valid UTF-8");
+    let asset_path = Utf8PathBuf::try_from(vrm_path).expect("path is valid UTF-8");
     let mut reg = SessionRegistry::new();
     let session = Session::load(asset_path.as_path()).unwrap();
     let session_id = reg.insert(session);
@@ -130,7 +129,10 @@ fn self_diff_via_temporal_diff_returns_ssim_1_for_all_frames() {
     let diff = temporal_diff(&refs_a, &refs_b, 0.95).unwrap();
 
     assert!(diff.frame_count_match);
-    assert_eq!(diff.mean_ssim, 1.0, "self-diff mean SSIM must be exactly 1.0");
+    assert_eq!(
+        diff.mean_ssim, 1.0,
+        "self-diff mean SSIM must be exactly 1.0"
+    );
     assert_eq!(diff.min_ssim, 1.0, "self-diff min SSIM must be exactly 1.0");
     assert!(
         diff.per_frame.iter().all(|f| f.identity_match),

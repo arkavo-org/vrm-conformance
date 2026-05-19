@@ -86,9 +86,8 @@ fn render_sequence_against_mock_produces_frames() {
     };
 
     // Sequence-mode execution must succeed (no anyhow propagation).
-    let result = execute_plan(&plan, &opts).expect(
-        "execute_plan must succeed against the mock in sequence mode",
-    );
+    let result = execute_plan(&plan, &opts)
+        .expect("execute_plan must succeed against the mock in sequence mode");
 
     // Sequence field must be populated.
     let seq = result
@@ -109,7 +108,9 @@ fn render_sequence_against_mock_produces_frames() {
         "no error_message when status is Ok"
     );
 
-    let seq_result = seq.result.expect("RenderSequenceResult should be populated");
+    let seq_result = seq
+        .result
+        .expect("RenderSequenceResult should be populated");
     assert_eq!(seq_result.frames.len(), 2, "frame_count was 2");
 
     // Each frame on disk + BLAKE3 prefix.

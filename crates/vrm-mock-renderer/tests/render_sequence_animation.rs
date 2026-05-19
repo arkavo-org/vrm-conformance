@@ -26,8 +26,7 @@ fn fresh_session() -> (SessionRegistry, String) {
     });
     std::fs::write(&meta_path, serde_json::to_vec(&meta).unwrap()).unwrap();
 
-    let asset_path =
-        Utf8PathBuf::try_from(vrm_path).expect("path is valid UTF-8");
+    let asset_path = Utf8PathBuf::try_from(vrm_path).expect("path is valid UTF-8");
     let mut reg = SessionRegistry::new();
     let session = Session::load(asset_path.as_path()).unwrap();
     let session_id = reg.insert(session);

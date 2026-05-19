@@ -210,8 +210,9 @@ pub fn render_sequence(
     if params.animate_root_transform.is_some() && params.apply_vrma.is_some() {
         return Err(RpcError {
             code: -32602,
-            message: "render_sequence: animate_root_transform and apply_vrma are mutually exclusive"
-                .into(),
+            message:
+                "render_sequence: animate_root_transform and apply_vrma are mutually exclusive"
+                    .into(),
             data: None,
         });
     }
@@ -336,8 +337,10 @@ fn mux_via_ffmpeg(
     let frame_pattern = output_dir.join("%04d.png");
     let mut cmd = std::process::Command::new("ffmpeg");
     cmd.arg("-y") // overwrite
-        .arg("-framerate").arg(format!("{frame_hz}"))
-        .arg("-i").arg(frame_pattern.as_std_path())
+        .arg("-framerate")
+        .arg(format!("{frame_hz}"))
+        .arg("-i")
+        .arg(frame_pattern.as_std_path())
         .args(codec_args)
         .arg(mux_path.as_std_path());
 
