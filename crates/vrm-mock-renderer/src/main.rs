@@ -114,6 +114,7 @@ fn dispatch(
         "set_humanoid_pose" | "set_root_transform" => {
             Err(handlers::unimplemented(method, "Phase 2"))
         }
+        "render_sequence" => Err(handlers::unimplemented(method, "v1.x-sequence")),
 
         _ => Err(RpcError {
             code: -32601,

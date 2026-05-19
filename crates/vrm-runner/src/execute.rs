@@ -34,6 +34,32 @@ pub struct ExecuteOptions {
     pub reference_pose_json: Option<Utf8PathBuf>,
 }
 
+/// Outcome of a `render_sequence` dispatch. All four adapters currently return
+/// `-32000 Unimplemented` for this op (Phase 1 surface); the struct captures
+/// that outcome structurally so callers can distinguish "adapter not yet
+/// sequence-capable" from "adapter crashed".
+#[derive(Debug, Clone)]
+pub struct SequenceExecuteResult {
+    /// `Ok` when the adapter returned `RenderSequenceResult`; `Unimplemented`
+    /// when it returned `-32000`; `Error` for any other adapter-side failure.
+    pub status: SequenceStatus,
+    /// Set when `status == Ok`. Carries the full result the adapter returned.
+    pub result: Option<ops::RenderSequenceResult>,
+    /// Set when `status == Unimplemented`. Carries the phase string from the
+    /// error envelope (e.g. `"v1.x-sequence"`) so callers can distinguish
+    /// different "not yet implemented" classes.
+    pub unimplemented_phase: Option<String>,
+    /// Set when `status == Error`. Human-readable error message.
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SequenceStatus {
+    Ok,
+    Unimplemented,
+    Error,
+}
+
 #[derive(Debug, Clone)]
 pub struct ExecuteResult {
     pub test_id: String,
@@ -46,6 +72,12 @@ pub struct ExecuteResult {
     pub position_diff: Option<vrm_diff_engine::positions::PositionDiffReport>,
     /// Populated only when `ExecuteOptions::reference_pose_json` was set.
     pub pose_diff: Option<vrm_diff_engine::pose_diff::PoseDiffReport>,
+    /// Populated only when `plan.render_sequence` was set. The runner produced
+    /// (or attempted to produce) a multi-frame sequence rather than a single
+    /// frame. When the adapter returned Unimplemented for `render_sequence`,
+    /// `sequence.status` is `SequenceStatus::Unimplemented` so callers can
+    /// distinguish "adapter not yet sequence-capable" from "adapter crashed".
+    pub sequence: Option<SequenceExecuteResult>,
 }
 
 pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteResult> {
@@ -204,19 +236,88 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         }
     }
 
-    let png = opts
-        .output_dir
-        .join(format!("{}_{}.png", plan.id, opts.renderer_name));
-    if let Some(parent) = png.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    progress(opts, "render", &plan.id, json!({ "output": png }));
-    let render: ops::RenderResult = adapter
-        .call(
-            "render",
-            render_params(&session_id, &plan.output, png.to_string()),
-        )
-        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+    // Sequence-mode dispatches `render_sequence` into a per-test frames directory.
+    // Single-frame mode (the legacy path) dispatches `render`.
+    let (output_png, actual_color_space, sequence) =
+        if let Some(seq_block) = &plan.render_sequence {
+            let seq_output_dir = opts.output_dir.join(format!(
+                "{}_{}_frames",
+                plan.id, opts.renderer_name
+            ));
+            std::fs::create_dir_all(&seq_output_dir)?;
+            progress(
+                opts,
+                "render_sequence",
+                &plan.id,
+                json!({ "output_dir": seq_output_dir }),
+            );
+
+            let params = render_sequence_params(
+                &session_id,
+                &plan.output,
+                seq_block,
+                seq_output_dir.to_string(),
+            );
+            let result: Result<ops::RenderSequenceResult, _> =
+                adapter.call("render_sequence", params);
+
+            let seq_result = match result {
+                Ok(r) => SequenceExecuteResult {
+                    status: SequenceStatus::Ok,
+                    result: Some(r),
+                    unimplemented_phase: None,
+                    error_message: None,
+                },
+                Err(crate::adapter::AdapterError::Rpc(ref rpc_err))
+                    if rpc_err.code == -32000 =>
+                {
+                    let phase = rpc_err
+                        .data
+                        .as_ref()
+                        .and_then(|d| d.get("phase"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    SequenceExecuteResult {
+                        status: SequenceStatus::Unimplemented,
+                        result: None,
+                        unimplemented_phase: phase,
+                        error_message: None,
+                    }
+                }
+                Err(e) => SequenceExecuteResult {
+                    status: SequenceStatus::Error,
+                    result: None,
+                    unimplemented_phase: None,
+                    error_message: Some(e.to_string()),
+                },
+            };
+
+            // No single PNG in sequence mode — use a sentinel path.
+            // (A follow-up will refactor ExecuteResult to handle this cleanly.)
+            let placeholder_png = seq_output_dir.join("0000.png");
+            let cs = seq_result
+                .result
+                .as_ref()
+                .map(|r| r.actual_color_space)
+                .unwrap_or(ops::ColorSpace::Linear);
+            (placeholder_png, cs, Some(seq_result))
+        } else {
+            let png = opts
+                .output_dir
+                .join(format!("{}_{}.png", plan.id, opts.renderer_name));
+            if let Some(parent) = png.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            progress(opts, "render", &plan.id, json!({ "output": png }));
+            let render: ops::RenderResult = adapter
+                .call(
+                    "render",
+                    render_params(&session_id, &plan.output, png.to_string()),
+                )
+                .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+            let output_png = Utf8PathBuf::from(render.output_path);
+            (output_png, render.actual_color_space, None)
+        };
 
     let position_dump: Option<ops::DumpBonePositionsResult> = if opts.reference_positions.is_some()
     {
@@ -243,16 +344,20 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         .shutdown()
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
 
-    let output_png = Utf8PathBuf::from(render.output_path);
-
+    // Sequence diff is deferred to P2 task 11 (temporal diff). In sequence
+    // mode, skip single-frame diff even if a reference was provided.
     let diff = if let Some(reference) = &opts.reference {
-        progress(opts, "diff", &plan.id, json!({ "reference": reference }));
-        Some(crate::diff::diff_one(
-            plan,
-            &output_png,
-            reference,
-            &opts.renderer_name,
-        )?)
+        if plan.render_sequence.is_some() {
+            None // temporal diff handled separately in P2 task 11
+        } else {
+            progress(opts, "diff", &plan.id, json!({ "reference": reference }));
+            Some(crate::diff::diff_one(
+                plan,
+                &output_png,
+                reference,
+                &opts.renderer_name,
+            )?)
+        }
     } else {
         None
     };
@@ -297,10 +402,11 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
         test_id: plan.id.clone(),
         renderer: opts.renderer_name.clone(),
         output_png,
-        actual_color_space: render.actual_color_space,
+        actual_color_space,
         diff,
         position_diff,
         pose_diff,
+        sequence,
     })
 }
 
@@ -387,19 +493,48 @@ pub fn execute_plan_capturing_positions(
         }
     }
 
-    let png = opts
-        .output_dir
-        .join(format!("{}_{}.png", plan.id, opts.renderer_name));
-    if let Some(parent) = png.parent() {
-        std::fs::create_dir_all(parent)?;
+    // Sequence-mode: dispatch render_sequence but swallow Unimplemented so
+    // position capture can still proceed. Single-frame mode: existing path.
+    if let Some(seq_block) = &plan.render_sequence {
+        let seq_output_dir = opts.output_dir.join(format!(
+            "{}_{}_frames",
+            plan.id, opts.renderer_name
+        ));
+        std::fs::create_dir_all(&seq_output_dir)?;
+        progress(
+            opts,
+            "render_sequence",
+            &plan.id,
+            json!({ "output_dir": seq_output_dir }),
+        );
+        let params = render_sequence_params(
+            &session_id,
+            &plan.output,
+            seq_block,
+            seq_output_dir.to_string(),
+        );
+        // Ignore Unimplemented (-32000); propagate other errors.
+        let result: Result<ops::RenderSequenceResult, _> = adapter.call("render_sequence", params);
+        if let Err(crate::adapter::AdapterError::Rpc(ref rpc_err)) = result {
+            if rpc_err.code != -32000 {
+                return Err(anyhow::anyhow!("adapter error: {}", result.unwrap_err()));
+            }
+        }
+    } else {
+        let png = opts
+            .output_dir
+            .join(format!("{}_{}.png", plan.id, opts.renderer_name));
+        if let Some(parent) = png.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        progress(opts, "render", &plan.id, json!({ "output": png }));
+        let _: ops::RenderResult = adapter
+            .call(
+                "render",
+                render_params(&session_id, &plan.output, png.to_string()),
+            )
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
     }
-    progress(opts, "render", &plan.id, json!({ "output": png }));
-    let _: ops::RenderResult = adapter
-        .call(
-            "render",
-            render_params(&session_id, &plan.output, png.to_string()),
-        )
-        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
 
     progress(opts, "dump_bone_positions", &plan.id, json!({}));
     let dump: ops::DumpBonePositionsResult = adapter
@@ -462,6 +597,7 @@ mod reference_positions_tests {
             let _: f32 = opts.apply_at_time;
             let _: &Option<Utf8PathBuf> = &opts.reference_pose_json;
             let _: &Option<vrm_diff_engine::pose_diff::PoseDiffReport> = &r.pose_diff;
+            let _: &Option<SequenceExecuteResult> = &r.sequence;
         }
     }
 }
