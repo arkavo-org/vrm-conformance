@@ -244,3 +244,85 @@ fn sequence_frame_roundtrip() {
     let back: SequenceFrame = serde_json::from_str(&s).unwrap();
     assert_eq!(back, f);
 }
+
+#[test]
+fn render_sequence_params_minimal_roundtrip() {
+    let p = RenderSequenceParams {
+        session_id: "sess-seq".into(),
+        width: 512,
+        height: 512,
+        output_dir: "/tmp/seq".into(),
+        frame_count: 60,
+        frame_hz: 30.0,
+        physics_dt_seconds: 1.0 / 60.0,
+        color_space: ColorSpace::Linear,
+        msaa: 4,
+        output_type: OutputType::Color,
+        output_format: SequenceFormat::PngSequence,
+        animate_root_transform: None,
+        apply_vrma: None,
+    };
+    let s = serde_json::to_string(&p).unwrap();
+    let back: RenderSequenceParams = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.frame_count, 60);
+    assert_eq!(back.frame_hz, 30.0);
+    assert!(back.animate_root_transform.is_none());
+    assert!(back.apply_vrma.is_none());
+    // None variants must skip serialization to keep the wire format tight.
+    assert!(!s.contains("animate_root_transform"));
+    assert!(!s.contains("apply_vrma"));
+}
+
+#[test]
+fn render_sequence_params_with_root_animation_roundtrip() {
+    let p = RenderSequenceParams {
+        session_id: "sess-seq".into(),
+        width: 256,
+        height: 256,
+        output_dir: "/tmp/seq".into(),
+        frame_count: 30,
+        frame_hz: 30.0,
+        physics_dt_seconds: 1.0 / 60.0,
+        color_space: ColorSpace::Srgb,
+        msaa: 4,
+        output_type: OutputType::Color,
+        output_format: SequenceFormat::Mp4,
+        animate_root_transform: Some(RootTransformAnimation {
+            translation_start: [0.0, 0.0, 0.0],
+            translation_end: [1.0, 0.0, 0.0],
+        }),
+        apply_vrma: None,
+    };
+    let s = serde_json::to_string(&p).unwrap();
+    let back: RenderSequenceParams = serde_json::from_str(&s).unwrap();
+    let anim = back.animate_root_transform.unwrap();
+    assert_eq!(anim.translation_end[0], 1.0);
+    assert!(s.contains(r#""output_format":"mp4""#));
+}
+
+#[test]
+fn render_sequence_params_with_vrma_roundtrip() {
+    let p = RenderSequenceParams {
+        session_id: "sess-seq".into(),
+        width: 256,
+        height: 256,
+        output_dir: "/tmp/seq".into(),
+        frame_count: 60,
+        frame_hz: 30.0,
+        physics_dt_seconds: 1.0 / 60.0,
+        color_space: ColorSpace::Linear,
+        msaa: 1,
+        output_type: OutputType::Color,
+        output_format: SequenceFormat::PngSequence,
+        animate_root_transform: None,
+        apply_vrma: Some(VrmaPlaybackSpec {
+            vrma_handle: 3,
+            start_seconds: 0.5,
+        }),
+    };
+    let s = serde_json::to_string(&p).unwrap();
+    let back: RenderSequenceParams = serde_json::from_str(&s).unwrap();
+    let v = back.apply_vrma.unwrap();
+    assert_eq!(v.vrma_handle, 3);
+    assert_eq!(v.start_seconds, 0.5);
+}

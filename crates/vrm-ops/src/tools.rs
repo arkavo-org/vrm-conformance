@@ -379,6 +379,45 @@ pub struct SequenceFrame {
     pub blake3: String,
 }
 
+/// Capture N frames at a fixed display Hz while advancing physics (and
+/// optionally a .vrma clip or root-transform animation) between samples.
+/// The adapter steps physics by `physics_dt_seconds` between each captured
+/// frame (decoupled from `frame_hz` so simulation determinism and display
+/// timing are configurable independently — see `docs/methodology.md`,
+/// "Sequence captures").
+///
+/// Frames land at `output_dir/<frame_index:04>.png` for PNG sequences;
+/// a single muxed file at `output_dir/sequence.mp4` (or `.mov`) for the
+/// muxed formats. The diff engine consumes PNG sequences canonically;
+/// muxed formats are convenience for site display.
+///
+/// Adapters that cannot produce sequences MUST return `-32000 Unimplemented`
+/// with `data: { phase: "v1.x-sequence" }`.
+///
+/// Validation:
+///   - If both `animate_root_transform` and `apply_vrma` are `Some`, the
+///     adapter MUST return `-32602 invalid params`.
+///   - If `physics_dt_seconds > 1.0 / 60.0`, the adapter SHOULD return
+///     `-32602 invalid params` (methodology pin: 60 Hz physics floor).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenderSequenceParams {
+    pub session_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub output_dir: String,
+    pub frame_count: u32,
+    pub frame_hz: f32,
+    pub physics_dt_seconds: f32,
+    pub color_space: ColorSpace,
+    pub msaa: u8,
+    pub output_type: OutputType,
+    pub output_format: SequenceFormat,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animate_root_transform: Option<RootTransformAnimation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_vrma: Option<VrmaPlaybackSpec>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
