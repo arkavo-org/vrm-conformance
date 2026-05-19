@@ -186,6 +186,7 @@ fn reserved_ops_still_return_unimplemented() {
         (2, "set_humanoid_pose", -32000, Some("Phase 2")),
         (3, "set_environment", -32000, Some("v1.x")),
         (4, "set_expression", -32000, Some("Phase 3")),
+        (5, "render_sequence", -32000, Some("v1.x-sequence")),
     ];
     for (id, method, code, phase) in &cases {
         let req = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"{method}","params":{{}}}}"#);

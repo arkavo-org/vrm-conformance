@@ -21,6 +21,7 @@ const PHASE_BY_RESERVED_METHOD := {
     "dump_humanoid_pose": "vrma-v1",
     "dump_expression_weights": "vrma-v1",
     "dump_look_at_state": "vrma-v1",
+    "render_sequence": "v1.x-sequence",
 }
 
 # Phase 1 method names. dispatch() routes these to Session.<name>.
