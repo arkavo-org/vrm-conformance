@@ -321,6 +321,62 @@ pub struct DumpLookAtStateResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitResult {}
 
+/// Output format for `render_sequence`. PNG sequence is canonical for diff;
+/// MP4 and MOV are convenience formats for site display + reviewer ergonomics.
+/// When MP4 or MOV is requested, the adapter MUST still emit the per-frame
+/// PNGs (diff consumes them); the muxed file is in addition, not instead.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SequenceFormat {
+    /// Per-frame PNG at `<output_dir>/<frame_index:04>.png`. Canonical for
+    /// diff; lossless; BLAKE3-identifiable for identity short-circuit.
+    PngSequence,
+    /// PNG sequence + muxed `<output_dir>/sequence.mp4` (h.264 yuv420p,
+    /// lossless qp=0).
+    Mp4,
+    /// PNG sequence + muxed `<output_dir>/sequence.mov` (Apple ProRes 4444).
+    Mov,
+}
+
+/// Linear root-transform animation interpolated across `frame_count` frames
+/// of a `render_sequence` call. The adapter samples translation at
+/// `t = i / (frame_count - 1)` for each captured frame i ∈ [0, frame_count).
+/// Duration is implicit: `frame_count / frame_hz` seconds.
+///
+/// Distinct from the v0.1 `AnimateRootTransformParams` because that op
+/// carries its own `duration_seconds` + `fps` (single-shot animation, then
+/// one render). For sequence-driven animation, those fields are redundant
+/// with the sequence's own `frame_count` + `frame_hz`, so they're omitted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RootTransformAnimation {
+    pub translation_start: [f32; 3],
+    pub translation_end: [f32; 3],
+}
+
+/// VRMA playback spec for `render_sequence`. Samples the loaded `.vrma` at
+/// `t = start_seconds + (i / frame_hz)` for each captured frame i.
+/// Display clock drives sampling; physics clock is internal to the adapter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VrmaPlaybackSpec {
+    pub vrma_handle: u32,
+    /// Offset into the .vrma clip where capture begins. Use 0.0 to start
+    /// at clip beginning.
+    pub start_seconds: f32,
+}
+
+/// One captured frame of a `render_sequence` result. The BLAKE3 hash lets
+/// the diff engine short-circuit when both renderers produced byte-identical
+/// frames (common for rest-pose lead-in frames).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SequenceFrame {
+    pub index: u32,
+    pub timestamp_seconds: f32,
+    pub path: String,
+    /// BLAKE3 hex of the PNG contents, prefixed `blake3:` per the content-
+    /// addressing convention in `docs/operation-contract.md`.
+    pub blake3: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

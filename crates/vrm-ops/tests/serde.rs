@@ -192,3 +192,59 @@ fn dump_look_at_state_applied_via_off_serializes() {
     let s = serde_json::to_string(&r).unwrap();
     assert!(s.contains(r#""applied_via":"off""#));
 }
+
+#[test]
+fn sequence_format_serializes_snake_case() {
+    let png = SequenceFormat::PngSequence;
+    let mp4 = SequenceFormat::Mp4;
+    let mov = SequenceFormat::Mov;
+    assert_eq!(serde_json::to_string(&png).unwrap(), r#""png_sequence""#);
+    assert_eq!(serde_json::to_string(&mp4).unwrap(), r#""mp4""#);
+    assert_eq!(serde_json::to_string(&mov).unwrap(), r#""mov""#);
+
+    // Round-trip
+    for fmt in [SequenceFormat::PngSequence, SequenceFormat::Mp4, SequenceFormat::Mov] {
+        let s = serde_json::to_string(&fmt).unwrap();
+        let back: SequenceFormat = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, fmt);
+    }
+}
+
+#[test]
+fn root_transform_animation_roundtrip() {
+    let r = RootTransformAnimation {
+        translation_start: [0.0, 0.0, 0.0],
+        translation_end:   [1.0, 0.0, 0.0],
+    };
+    let s = serde_json::to_string(&r).unwrap();
+    let back: RootTransformAnimation = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.translation_start[0], 0.0);
+    assert_eq!(back.translation_end[0], 1.0);
+}
+
+#[test]
+fn vrma_playback_spec_roundtrip() {
+    let v = VrmaPlaybackSpec {
+        vrma_handle: 7,
+        start_seconds: 0.25,
+    };
+    let s = serde_json::to_string(&v).unwrap();
+    let back: VrmaPlaybackSpec = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.vrma_handle, 7);
+    assert_eq!(back.start_seconds, 0.25);
+}
+
+#[test]
+fn sequence_frame_roundtrip() {
+    let f = SequenceFrame {
+        index: 12,
+        timestamp_seconds: 0.4,
+        path: "/tmp/seq/0012.png".into(),
+        blake3: "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+    };
+    let s = serde_json::to_string(&f).unwrap();
+    let back: SequenceFrame = serde_json::from_str(&s).unwrap();
+    assert_eq!(back.index, 12);
+    assert_eq!(back.path, "/tmp/seq/0012.png");
+    assert!(back.blake3.starts_with("blake3:"));
+}
