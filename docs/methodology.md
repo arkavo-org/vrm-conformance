@@ -132,3 +132,19 @@ The spec allows ignoring stored TANGENT and recomputing via MikkTSpace. Recomput
 ## Apple Silicon vs other GPUs
 
 VRMMetalKit is Metal-only; cross-GPU pixel-exact comparison is a non-goal. SSIM thresholds are tuned per-pair, with stricter intra-family thresholds (same GPU vendor, same color space) and looser cross-family thresholds. **Property assertions remain strict across all pairs.**
+
+## Sequence captures (multi-frame `render_sequence`)
+
+Adopted by [RFC-0004](../rfcs/0004-render-sequence-op.md). These pins apply to any test plan with a `render_sequence:` block; single-frame `render:` tests are unaffected.
+
+**Physics floor.** `physics_dt_seconds <= 1.0 / 60.0`. Anything coarser violates the spring-bone determinism pin. Adapters SHOULD reject coarser values with `-32602 invalid params`; the runner SHOULD pre-validate before dispatch.
+
+**Sampling clock.** Sequence captures with `apply_vrma` set MUST sample the `.vrma` at `t = start_seconds + (i / frame_hz)` — display clock drives sampling; the physics clock is internal to the adapter. This decoupling exists so a test can capture at 30 Hz while running spring-bone physics at 60 Hz (two physics steps per captured frame).
+
+**No temporal alignment.** Per-frame SSIM compares same-index frames only. The runner does NOT attempt temporal alignment (no DTW, no frame-offset search). If two adapters produce equivalent trajectories at different timings, the test's `physics_dt_seconds` or `frame_hz` is wrong, not the diff.
+
+**Pass criteria.** Default: `mean_ssim >= temporal_ssim_threshold AND min_ssim >= temporal_ssim_threshold - 0.05`. The 0.05 single-frame relaxation acknowledges that a one-frame transient (e.g. a settle-tick offset by a single physics step) shouldn't fail an otherwise-conforming sequence. Per-test thresholds via the existing `vrm-conformance#2` mechanism.
+
+**Worst-frame reporting.** Every sequence diff result MUST surface `worst_frame_index` so site reviewers can land on the divergent frame directly. A single bad frame in a 60-frame sequence is fine if mean SSIM holds; the threshold relaxation handles this.
+
+**Output format.** PNG sequence is the canonical contract format. MP4/MOV are convenience formats for site display and reviewer ergonomics — the diff engine consumes the per-frame PNGs regardless. Adapters that emit only PNG sequences are spec-compliant; the bootstrap script can mux post-hoc via `ffmpeg`.
