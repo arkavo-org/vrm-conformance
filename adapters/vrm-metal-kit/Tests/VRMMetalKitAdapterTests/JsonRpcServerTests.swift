@@ -312,4 +312,91 @@ final class JsonRpcServerTests: XCTestCase {
         let err = try XCTUnwrap(resp["error"] as? [String: Any])
         XCTAssertEqual(err["code"] as? Int, -32602)
     }
+
+    // MARK: - render_sequence validation (Phase 5)
+
+    func testRenderSequenceMutualExclusionRejected() throws {
+        // animate_root_transform + apply_vrma both set → -32602 per RFC-0004.
+        let request = #"""
+        {"jsonrpc":"2.0","id":60,"method":"render_sequence","params":{"session_id":"no-such","width":64,"height":64,"output_dir":"/tmp/x","frame_count":1,"frame_hz":30.0,"physics_dt_seconds":0.01666,"color_space":"linear","msaa":1,"output_type":"color","output_format":"png_sequence","animate_root_transform":{"translation_start":[0,0,0],"translation_end":[1,0,0]},"apply_vrma":{"vrma_handle":1,"start_seconds":0}}}
+        """#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+        let msg = try XCTUnwrap(err["message"] as? String)
+        XCTAssertTrue(
+            msg.contains("mutually exclusive"),
+            "expected mutual exclusion message, got: \(msg)"
+        )
+    }
+
+    func testRenderSequencePhysicsDtAbove60HzRejected() throws {
+        // physics_dt_seconds > 1/60 (methodology pin) → -32602.
+        let request = #"""
+        {"jsonrpc":"2.0","id":61,"method":"render_sequence","params":{"session_id":"no-such","width":64,"height":64,"output_dir":"/tmp/x","frame_count":1,"frame_hz":30.0,"physics_dt_seconds":0.1,"color_space":"linear","msaa":1,"output_type":"color","output_format":"png_sequence"}}
+        """#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+        let msg = try XCTUnwrap(err["message"] as? String)
+        XCTAssertTrue(
+            msg.contains("60 Hz floor"),
+            "expected physics_dt floor message, got: \(msg)"
+        )
+    }
+
+    func testRenderSequenceUnsupportedOutputFormatRejected() throws {
+        // output_format mp4 deferred to a follow-up; only png_sequence works
+        // in Phase 5.
+        let request = #"""
+        {"jsonrpc":"2.0","id":62,"method":"render_sequence","params":{"session_id":"no-such","width":64,"height":64,"output_dir":"/tmp/x","frame_count":1,"frame_hz":30.0,"physics_dt_seconds":0.01666,"color_space":"linear","msaa":1,"output_type":"color","output_format":"mp4"}}
+        """#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+        let msg = try XCTUnwrap(err["message"] as? String)
+        XCTAssertTrue(
+            msg.contains("not yet supported"),
+            "expected unsupported-output_format message, got: \(msg)"
+        )
+    }
+
+    func testRenderSequenceApplyVrmaRejected() throws {
+        // apply_vrma deferred to a follow-up.
+        let request = #"""
+        {"jsonrpc":"2.0","id":63,"method":"render_sequence","params":{"session_id":"no-such","width":64,"height":64,"output_dir":"/tmp/x","frame_count":1,"frame_hz":30.0,"physics_dt_seconds":0.01666,"color_space":"linear","msaa":1,"output_type":"color","output_format":"png_sequence","apply_vrma":{"vrma_handle":1,"start_seconds":0}}}
+        """#
+        let reader = MemoryReader(frame(request))
+        let writer = MemoryWriter()
+        let log = MemoryWriter()
+
+        JsonRpcServer(input: reader, output: writer, log: log).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+        let msg = try XCTUnwrap(err["message"] as? String)
+        XCTAssertTrue(
+            msg.contains("apply_vrma"),
+            "expected apply_vrma-deferred message, got: \(msg)"
+        )
+    }
 }
