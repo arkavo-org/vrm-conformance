@@ -3,6 +3,8 @@
 //! identity short-circuit. See `rfcs/0004-render-sequence-op.md` and
 //! `docs/methodology.md` ("Sequence captures") for the contract.
 
+use crate::ssim::{ssim_pngs, SsimError};
+use camino::Utf8Path;
 use serde::{Deserialize, Serialize};
 
 /// Per-frame diff record. `identity_match` is true when both renders
@@ -37,4 +39,95 @@ pub struct TemporalDiffResult {
     pub frame_count_match: bool,
     pub temporal_ssim_threshold: f64,
     pub passed: bool,
+}
+
+/// Diff two sequences frame-by-frame. Each sequence is a list of PNG
+/// paths in capture order (index 0 = first frame). When the two
+/// sequences differ in length, only the common prefix is compared and
+/// `frame_count_match` is set to false (a hard failure regardless of
+/// SSIM, per docs/methodology.md).
+///
+/// The `threshold` is the per-test `temporal_ssim_threshold` (RFC-0004
+/// default 0.90). Pass formula matches `docs/methodology.md`:
+///   `passed = mean_ssim >= threshold AND
+///            min_ssim >= threshold - 0.05 AND
+///            frame_count_match`
+///
+/// BLAKE3 short-circuit (identity_match) lands in a follow-up.
+pub fn temporal_diff(
+    candidate_frames: &[&Utf8Path],
+    reference_frames: &[&Utf8Path],
+    threshold: f64,
+) -> Result<TemporalDiffResult, TemporalDiffError> {
+    let candidate_count = candidate_frames.len() as u32;
+    let reference_count = reference_frames.len() as u32;
+    let frame_count_match = candidate_count == reference_count;
+    let compared = candidate_count.min(reference_count);
+
+    let mut per_frame = Vec::with_capacity(compared as usize);
+    for i in 0..compared as usize {
+        let ssim = ssim_pngs(candidate_frames[i], reference_frames[i])?;
+        per_frame.push(FrameDiff {
+            index: i as u32,
+            ssim,
+            identity_match: false,
+        });
+    }
+
+    let (mean_ssim, p95_ssim, min_ssim, worst_frame_index) = aggregate(&per_frame);
+
+    let passed = frame_count_match
+        && mean_ssim >= threshold
+        && min_ssim >= threshold - 0.05;
+
+    Ok(TemporalDiffResult {
+        frame_count: candidate_count,
+        frame_count_compared: compared,
+        per_frame,
+        mean_ssim,
+        p95_ssim,
+        min_ssim,
+        worst_frame_index,
+        frame_count_match,
+        temporal_ssim_threshold: threshold,
+        passed,
+    })
+}
+
+/// Returns (mean, p95, min, worst_frame_index).
+///
+/// "p95 SSIM" is the 5th percentile (95% of frames are at least this
+/// good). This convention matches site display: the headline number
+/// shown to a reviewer is "worst-case quality across the run."
+fn aggregate(frames: &[FrameDiff]) -> (f64, f64, f64, u32) {
+    if frames.is_empty() {
+        return (0.0, 0.0, 0.0, 0);
+    }
+    let sum: f64 = frames.iter().map(|f| f.ssim).sum();
+    let mean = sum / frames.len() as f64;
+
+    let mut sorted: Vec<f64> = frames.iter().map(|f| f.ssim).collect();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let p95_index = ((sorted.len() as f64) * 0.05).floor() as usize;
+    let p95 = sorted[p95_index];
+    let min = *sorted.first().unwrap();
+
+    let worst = frames
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| {
+            a.ssim
+                .partial_cmp(&b.ssim)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(i, _)| i as u32)
+        .unwrap_or(0);
+
+    (mean, p95, min, worst)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TemporalDiffError {
+    #[error(transparent)]
+    Ssim(#[from] SsimError),
 }
