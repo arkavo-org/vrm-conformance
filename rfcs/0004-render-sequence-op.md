@@ -1,6 +1,6 @@
 # RFC 0004: `render_sequence` op — multi-frame capture for temporal conformance
 
-- **Status:** Draft
+- **Status:** Accepted
 - **Author(s):** Paul Flynn
 - **Date:** 2026-05-18
 
