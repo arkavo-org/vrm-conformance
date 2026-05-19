@@ -2,7 +2,7 @@
 //! dispatch loop will wrap in a successful JsonRpcResponse, or an RpcError
 //! that becomes the response's `error` field.
 
-use crate::render::synthesize_png;
+use crate::render::{synthesize_frame, synthesize_png, FrameState};
 use crate::session::{Session, SessionRegistry};
 use camino::Utf8Path;
 use vrm_ops::tools as ops;
@@ -201,6 +201,105 @@ pub fn dump_look_at_state(
         applied_via: ops::LookAtAppliedVia::Off,
         offset_from_head_bone: [0.0, 0.0, 0.0],
     })
+}
+
+pub fn render_sequence(
+    registry: &mut SessionRegistry,
+    params: ops::RenderSequenceParams,
+) -> Result<ops::RenderSequenceResult, RpcError> {
+    if params.animate_root_transform.is_some() && params.apply_vrma.is_some() {
+        return Err(RpcError {
+            code: -32602,
+            message: "render_sequence: animate_root_transform and apply_vrma are mutually exclusive"
+                .into(),
+            data: None,
+        });
+    }
+    if params.physics_dt_seconds > 1.0 / 60.0 + 1e-9 {
+        return Err(RpcError {
+            code: -32602,
+            message: format!(
+                "render_sequence: physics_dt_seconds {} exceeds 60 Hz floor (1/60 ≈ 0.01667)",
+                params.physics_dt_seconds
+            ),
+            data: None,
+        });
+    }
+
+    let session = registry
+        .get(&params.session_id)
+        .ok_or_else(|| invalid_session(&params.session_id))?;
+    let session_params = session.params.clone();
+
+    let root_anim = params.animate_root_transform.clone();
+    let vrma_spec = params.apply_vrma.clone();
+
+    let output_dir = camino::Utf8PathBuf::from(&params.output_dir);
+    std::fs::create_dir_all(output_dir.as_std_path())
+        .map_err(|e| RpcError::render_failed(format!("create output_dir: {e}")))?;
+
+    let mut frames = Vec::with_capacity(params.frame_count as usize);
+    for i in 0..params.frame_count {
+        let t = if params.frame_count <= 1 {
+            0.0
+        } else {
+            i as f32 / (params.frame_count - 1) as f32
+        };
+
+        let root_translation = root_anim.as_ref().map_or([0.0, 0.0, 0.0], |a| {
+            lerp3(a.translation_start, a.translation_end, t)
+        });
+
+        let vrma_time = vrma_spec
+            .as_ref()
+            .map(|v| v.start_seconds + (i as f32) / params.frame_hz);
+
+        let state = FrameState {
+            index: i,
+            frame_count: params.frame_count,
+            root_translation,
+            vrma_time_seconds: vrma_time,
+        };
+
+        let img = synthesize_frame(&session_params, state, params.width, params.height);
+        let frame_path = output_dir.join(format!("{i:04}.png"));
+        img.save(frame_path.as_std_path())
+            .map_err(|e| RpcError::render_failed(format!("save frame {i}: {e}")))?;
+
+        let bytes = std::fs::read(frame_path.as_std_path())
+            .map_err(|e| RpcError::render_failed(format!("read frame {i} for blake3: {e}")))?;
+        let hash = blake3::hash(&bytes);
+        let blake3_hex = format!("blake3:{}", hash.to_hex());
+
+        frames.push(ops::SequenceFrame {
+            index: i,
+            timestamp_seconds: (i as f32) / params.frame_hz,
+            path: frame_path.to_string(),
+            blake3: blake3_hex,
+        });
+    }
+
+    let duration_seconds = if params.frame_hz > 0.0 {
+        params.frame_count as f32 / params.frame_hz
+    } else {
+        0.0
+    };
+
+    Ok(ops::RenderSequenceResult {
+        frames,
+        duration_seconds,
+        actual_color_space: params.color_space,
+        frame_hz_achieved: params.frame_hz,
+        muxed_path: None,
+    })
+}
+
+fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
 }
 
 fn invalid_session(id: &str) -> RpcError {

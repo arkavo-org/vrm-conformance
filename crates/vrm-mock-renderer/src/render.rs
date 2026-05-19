@@ -77,6 +77,104 @@ pub fn synthesize_png(params: &MToonParams, width: u32, height: u32) -> RgbImage
     img
 }
 
+/// Per-frame state that drives deterministic variation in
+/// `synthesize_frame`. Encodes everything an animation can change about
+/// the rendered pixel content. Values must be deterministic functions of
+/// the inputs — no clock time, no hash randomness.
+#[derive(Debug, Clone, Copy)]
+pub struct FrameState {
+    pub index: u32,
+    pub frame_count: u32,
+    /// Linear root-transform offset (metres) applied at this frame's
+    /// `index`. `[0, 0, 0]` when no animation is in play.
+    pub root_translation: [f32; 3],
+    /// VRMA sample time at this frame. `None` when no `apply_vrma` was set.
+    pub vrma_time_seconds: Option<f32>,
+}
+
+/// Frame-aware synthesis. Reuses `synthesize_png` as the base, then adds:
+///   - Horizontal shift: when `root_translation.x != 0`, the entire image
+///     is shifted by `round(root_translation.x * width)` pixels (rows
+///     filled with magenta sentinel where source pixels are out of range).
+///   - Bottom-left frame-index progress bar (4 px tall, green): bar
+///     width = `((index + 1) / frame_count) * width`.
+///   - Top-right VRMA marker (4×4 px square): RGB encodes
+///     `frac = vrma_time_seconds.rem_euclid(1.0)` as
+///     `[r, g, 0]` where r = `floor(frac * 256)` and
+///     g = `floor(frac * 65536) & 0xFF`. Skipped when vrma_time_seconds is None.
+///
+/// Same `(params, state, w, h)` → byte-identical RgbImage.
+#[allow(clippy::cast_possible_truncation)]
+pub fn synthesize_frame(
+    params: &MToonParams,
+    state: FrameState,
+    width: u32,
+    height: u32,
+) -> RgbImage {
+    let mut img = synthesize_png(params, width, height);
+
+    let shift_x_px = (state.root_translation[0] * width as f32).round() as i32;
+    if shift_x_px != 0 {
+        img = shift_horizontally(&img, shift_x_px);
+    }
+
+    draw_frame_marker(&mut img, state.index, state.frame_count);
+
+    if let Some(t) = state.vrma_time_seconds {
+        draw_vrma_marker(&mut img, t);
+    }
+
+    img
+}
+
+fn shift_horizontally(img: &RgbImage, shift_x: i32) -> RgbImage {
+    let (w, h) = img.dimensions();
+    let mut out = RgbImage::from_pixel(w, h, Rgb(MAGENTA));
+    for y in 0..h {
+        for x in 0..w {
+            let src_x = x as i32 - shift_x;
+            if src_x >= 0 && src_x < w as i32 {
+                let src = img.get_pixel(src_x as u32, y);
+                out.put_pixel(x, y, *src);
+            }
+        }
+    }
+    out
+}
+
+fn draw_frame_marker(img: &mut RgbImage, index: u32, frame_count: u32) {
+    let (w, h) = img.dimensions();
+    if h < 6 || w < 6 || frame_count == 0 {
+        return;
+    }
+    let bar_y_start = h - 4;
+    let frac = (index as f32 + 1.0) / frame_count as f32;
+    let bar_x_end = ((w as f32) * frac).round() as u32;
+    let bar_x_end = bar_x_end.min(w);
+    for y in bar_y_start..h {
+        for x in 0..bar_x_end {
+            img.put_pixel(x, y, Rgb([0, 255, 0]));
+        }
+    }
+}
+
+fn draw_vrma_marker(img: &mut RgbImage, time_seconds: f32) {
+    let (w, _h) = img.dimensions();
+    if w < 6 {
+        return;
+    }
+    let frac = time_seconds.rem_euclid(1.0);
+    let r = (frac * 256.0).floor().clamp(0.0, 255.0) as u8;
+    let g = ((frac * 65536.0).floor() as u32 & 0xFF) as u8;
+    let color = [r, g, 0];
+    let x_start = w - 4;
+    for y in 0..4_u32 {
+        for x in x_start..w {
+            img.put_pixel(x, y, Rgb(color));
+        }
+    }
+}
+
 fn avatar_bbox(width: u32, height: u32) -> (u32, u32, u32, u32) {
     let x0 = width / 4;
     let y0 = height / 4;

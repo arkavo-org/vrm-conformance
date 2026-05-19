@@ -91,6 +91,7 @@ fn dispatch(
             json_result(handlers::set_post_processing(registry, deser(params)?))
         }
         "render" => json_result(handlers::render(registry, deser(params)?)),
+        "render_sequence" => json_result(handlers::render_sequence(registry, deser(params)?)),
         "dispose" => json_result(handlers::dispose(registry, deser(params)?)),
         "step_physics" => json_result(handlers::step_physics(registry, params)),
         "reset_physics" => json_result(handlers::reset_physics(registry, params)),
@@ -114,8 +115,6 @@ fn dispatch(
         "set_humanoid_pose" | "set_root_transform" => {
             Err(handlers::unimplemented(method, "Phase 2"))
         }
-        "render_sequence" => Err(handlers::unimplemented(method, "v1.x-sequence")),
-
         _ => Err(RpcError {
             code: -32601,
             message: format!("method not found: {method}"),
