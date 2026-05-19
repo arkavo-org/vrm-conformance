@@ -216,6 +216,58 @@ if [ "${RUN_THREE_VRM:-0}" = "1" ] && [ "$SKIP_RENDER" != "1" ] && [ -f "$THREE_
     fi
 fi
 
+# ---- step 4f: optional sequence smoke (render_sequence, mock renderer) ----
+if [ "${SEQUENCE:-0}" = "1" ]; then
+    echo "==> sequence smoke (mock renderer + render_sequence)"
+
+    SEQ_PLAN="$ASSETS/smoke_seq.test.yaml"
+    cat > "$SEQ_PLAN" <<'EOF_PLAN'
+id: smoke_seq
+spec_section: phase3
+asset: smoke_default.vrm
+camera: {position: [0.0, 1.2, 1.5], target: [0.0, 1.0, 0.0], up: [0.0, 1.0, 0.0], fov_degrees: 30.0}
+lighting:
+  directional: {dir: [0.0, -1.0, 0.0], color: [1.0, 1.0, 1.0], intensity: 1.0}
+  ambient: {color: [1.0, 1.0, 1.0], intensity: 0.3}
+output: {width: 64, height: 64, color_space: linear, msaa: 1}
+diff: {mode: ssim, threshold: 0.5, reference_renderer: mock}
+render_sequence:
+  frame_count: 5
+  frame_hz: 30.0
+  physics_dt_seconds: 0.01666
+  output_format: png_sequence
+EOF_PLAN
+
+    SEQ_OUT="$OUTPUTS/seq-out"
+    mkdir -p "$SEQ_OUT"
+
+    cargo run --release -q -p vrm-runner -- execute-test-plan \
+        --plan "$SEQ_PLAN" \
+        --adapter-bin "$ADAPTER" \
+        --asset-dir "$ASSETS" \
+        --output-dir "$SEQ_OUT" \
+        --renderer-name mock \
+        --json > "$SEQ_OUT/run-summary.json" 2>&1
+
+    # The runner creates a per-test frames dir at
+    # <output_dir>/<id>_<renderer>_frames/.
+    FRAMES_DIR="$SEQ_OUT/smoke_seq_mock_frames"
+    for i in 0 1 2 3 4; do
+        FRAME=$(printf "%s/%04d.png" "$FRAMES_DIR" "$i")
+        if [ ! -f "$FRAME" ]; then
+            echo "FAIL: missing sequence frame $i ($FRAME)" >&2
+            cat "$SEQ_OUT/run-summary.json" >&2 || true
+            exit 5
+        fi
+        SIZE=$(stat -f%z "$FRAME" 2>/dev/null || stat -c%s "$FRAME")
+        if [ "$SIZE" -lt 50 ]; then
+            echo "FAIL: frame $i too small ($SIZE bytes)" >&2
+            exit 6
+        fi
+    done
+    echo "OK: 5 sequence frames produced under $FRAMES_DIR"
+fi
+
 # ---- step 5: optional S3 upload -------------------------------------------
 if [ -n "${VRM_GOLDENS_BUCKET:-}" ]; then
     if [ -f "$PNG" ] && [ "$SKIP_RENDER" != "1" ]; then

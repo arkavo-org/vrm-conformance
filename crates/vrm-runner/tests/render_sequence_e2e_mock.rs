@@ -1,12 +1,12 @@
 //! End-to-end test for the render_sequence dispatch path.
 //!
-//! Spawns the mock-renderer binary with a plan that has `render_sequence` set.
-//! The mock returns -32000 Unimplemented with phase "v1.x-sequence" — which is
-//! exactly the current Phase 1 behaviour for all real adapters too. The test
-//! verifies that the runner:
-//!   1. Does not propagate the Unimplemented error as an anyhow::Error.
-//!   2. Populates `result.sequence` with `status == Unimplemented`.
-//!   3. Extracts the phase label from the error envelope.
+//! The mock is the canonical reference renderer; this test verifies the full
+//! success path: TestPlan → plan_to_ops → execute_plan → render_sequence
+//! dispatch → SequenceExecuteResult → N PNG frames on disk.
+//!
+//! Phase 3 Task 1 made the mock a real implementer of `render_sequence`,
+//! replacing the old Phase 2 Unimplemented behaviour. The assertions below
+//! verify that all N frames land on disk with valid BLAKE3 hashes.
 
 use camino::Utf8PathBuf;
 use vrm_asset_generator::{params::MToonParams, sidecar::build_default_test_plan};
@@ -41,12 +41,12 @@ fn mock_bin() -> Utf8PathBuf {
 }
 
 #[test]
-fn render_sequence_against_mock_returns_unimplemented() {
+fn render_sequence_against_mock_produces_frames() {
     let dir = tempfile::tempdir().unwrap();
     let asset_dir = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
     let output_dir = asset_dir.clone();
 
-    let id = "seq_unimpl";
+    let id = "seq_e2e";
     let vrm_path = asset_dir.join(format!("{id}.vrm"));
     let meta_path = asset_dir.join(format!("{id}.meta.json"));
     // Minimal valid-enough VRM header so mock's load_vrm succeeds.
@@ -85,36 +85,56 @@ fn render_sequence_against_mock_returns_unimplemented() {
         reference_pose_json: None,
     };
 
-    // The runner must not propagate Unimplemented as an error.
+    // Sequence-mode execution must succeed (no anyhow propagation).
     let result = execute_plan(&plan, &opts).expect(
-        "execute_plan must succeed even when adapter returns Unimplemented for render_sequence",
+        "execute_plan must succeed against the mock in sequence mode",
     );
 
-    // sequence field must be populated.
+    // Sequence field must be populated.
     let seq = result
         .sequence
         .expect("sequence mode should populate result.sequence");
 
     assert_eq!(
         seq.status,
-        SequenceStatus::Unimplemented,
-        "mock returns -32000 Unimplemented; status should be Unimplemented"
-    );
-    assert_eq!(
-        seq.unimplemented_phase.as_deref(),
-        Some("v1.x-sequence"),
-        "phase label must be extracted from error envelope"
+        SequenceStatus::Ok,
+        "mock is a real implementer; status should be Ok"
     );
     assert!(
-        seq.result.is_none(),
-        "no RenderSequenceResult when Unimplemented"
+        seq.unimplemented_phase.is_none(),
+        "no Unimplemented when status is Ok"
     );
     assert!(
         seq.error_message.is_none(),
-        "error_message should be None for Unimplemented (not a crash)"
+        "no error_message when status is Ok"
     );
 
-    // Diff should be skipped in sequence mode.
+    let seq_result = seq.result.expect("RenderSequenceResult should be populated");
+    assert_eq!(seq_result.frames.len(), 2, "frame_count was 2");
+
+    // Each frame on disk + BLAKE3 prefix.
+    for (i, frame) in seq_result.frames.iter().enumerate() {
+        assert_eq!(frame.index, i as u32);
+        assert!(
+            std::path::Path::new(&frame.path).exists(),
+            "frame {} not on disk: {}",
+            i,
+            frame.path
+        );
+        assert!(
+            frame.blake3.starts_with("blake3:"),
+            "frame {} blake3 missing prefix: {}",
+            i,
+            frame.blake3
+        );
+        assert_eq!(
+            frame.blake3.len(),
+            "blake3:".len() + 64,
+            "frame {i} blake3 wrong length"
+        );
+    }
+
+    // Diff should still be skipped in sequence mode (Phase 2 contract).
     assert!(
         result.diff.is_none(),
         "single-frame diff must be skipped in sequence mode"

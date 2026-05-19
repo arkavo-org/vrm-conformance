@@ -3205,6 +3205,7 @@ name = "vrm-mock-renderer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "camino",
  "image",
  "serde",
@@ -3213,6 +3214,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vrm-asset-generator",
+ "vrm-diff-engine",
  "vrm-ops",
 ]
 
