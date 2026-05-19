@@ -272,6 +272,32 @@ pub enum DiffMode {
 // dependency leaking through.
 pub use vrm_diff_engine::property::{BboxRegion, PropertyAssertion};
 
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum TestPlanError {
+    #[error(
+        "test plan declares both `animation` and `render_sequence` — these are \
+        mutually exclusive (single-frame animation vs multi-frame sequence). \
+        Use `render_sequence.animate_root_transform` or `render_sequence.apply_vrma` \
+        for sequence-mode tests; use `animation.root_transform` or \
+        `animation.vrma` for single-frame tests."
+    )]
+    BothAnimationAndRenderSequence,
+}
+
+impl TestPlan {
+    /// Validate cross-field rules that serde can't express alone.
+    ///
+    /// Currently checks:
+    ///   - `animation` and `render_sequence` are mutually exclusive
+    ///     (RFC-0004: a plan is single-frame OR sequence, not both).
+    pub fn validate(&self) -> Result<(), TestPlanError> {
+        if self.animation.is_some() && self.render_sequence.is_some() {
+            return Err(TestPlanError::BothAnimationAndRenderSequence);
+        }
+        Ok(())
+    }
+}
+
 /// One parameter-perturbed variant in a coupling matrix run.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CouplingPerturbation {
@@ -542,5 +568,106 @@ render_sequence:
         let seq = plan.render_sequence.expect("render_sequence should parse");
         assert_eq!(seq.frame_count, 60);
         assert!(seq.animate_root_transform.is_some());
+    }
+
+    fn make_minimal_plan() -> TestPlan {
+        TestPlan {
+            id: "x".into(),
+            spec_section: "x".into(),
+            asset: "x.vrm".into(),
+            camera: Camera {
+                position: [0.0; 3],
+                target: [0.0; 3],
+                up: [0.0; 3],
+                fov_degrees: 30.0,
+            },
+            lighting: Lighting {
+                directional: DirectionalLight {
+                    dir: [0.0; 3],
+                    color: [1.0; 3],
+                    intensity: 1.0,
+                },
+                ambient: AmbientLight {
+                    color: [1.0; 3],
+                    intensity: 0.3,
+                },
+                cast_shadows: false,
+                receive_shadows: false,
+            },
+            post_processing: PostProcessing::default(),
+            output: Output {
+                width: 512,
+                height: 512,
+                color_space: ColorSpace::Linear,
+                msaa: 4,
+            },
+            diff: Diff {
+                mode: DiffMode::Ssim,
+                threshold: 0.9,
+                reference_renderer: "vmk".into(),
+                conformance_status: ConformanceStatus::default(),
+                pose_tolerance: None,
+            },
+            ignore_renderers: vec![],
+            properties: vec![],
+            physics: None,
+            animation: None,
+            render_sequence: None,
+        }
+    }
+
+    #[test]
+    fn validate_accepts_neither_animation_nor_sequence() {
+        let plan = make_minimal_plan();
+        assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_animation_alone() {
+        let mut plan = make_minimal_plan();
+        plan.animation = Some(AnimationConfig {
+            root_transform: None,
+            vrma: None,
+        });
+        plan.render_sequence = None;
+        assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_render_sequence_alone() {
+        let mut plan = make_minimal_plan();
+        plan.animation = None;
+        plan.render_sequence = Some(RenderSequenceBlock {
+            frame_count: 30,
+            frame_hz: 30.0,
+            physics_dt_seconds: 0.01666,
+            output_format: SequenceFormat::PngSequence,
+            animate_root_transform: None,
+            apply_vrma: None,
+            temporal_ssim_threshold: None,
+        });
+        assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_both_animation_and_render_sequence() {
+        let mut plan = make_minimal_plan();
+        plan.animation = Some(AnimationConfig {
+            root_transform: None,
+            vrma: None,
+        });
+        plan.render_sequence = Some(RenderSequenceBlock {
+            frame_count: 30,
+            frame_hz: 30.0,
+            physics_dt_seconds: 0.01666,
+            output_format: SequenceFormat::PngSequence,
+            animate_root_transform: None,
+            apply_vrma: None,
+            temporal_ssim_threshold: None,
+        });
+        assert_eq!(
+            plan.validate(),
+            Err(TestPlanError::BothAnimationAndRenderSequence)
+        );
     }
 }
