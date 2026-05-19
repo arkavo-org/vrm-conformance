@@ -143,7 +143,7 @@ Adopted by [RFC-0004](../rfcs/0004-render-sequence-op.md). These pins apply to a
 
 **No temporal alignment.** Per-frame SSIM compares same-index frames only. The runner does NOT attempt temporal alignment (no DTW, no frame-offset search). If two adapters produce equivalent trajectories at different timings, the test's `physics_dt_seconds` or `frame_hz` is wrong, not the diff.
 
-**Pass criteria.** Default: `mean_ssim >= temporal_ssim_threshold AND min_ssim >= temporal_ssim_threshold - 0.05`. The 0.05 single-frame relaxation acknowledges that a one-frame transient (e.g. a settle-tick offset by a single physics step) shouldn't fail an otherwise-conforming sequence. Per-test thresholds via the existing `vrm-conformance#2` mechanism.
+**Pass criteria.** Default: `mean_ssim >= temporal_ssim_threshold AND min_ssim >= temporal_ssim_threshold - 0.05 AND frame_count_match == true`. The 0.05 single-frame relaxation acknowledges that a one-frame transient (e.g. a settle-tick offset by a single physics step) shouldn't fail an otherwise-conforming sequence; a frame-count mismatch between renders fails the test unconditionally regardless of SSIM. Per-test thresholds via the existing `vrm-conformance#2` mechanism.
 
 **Worst-frame reporting.** Every sequence diff result MUST surface `worst_frame_index` so site reviewers can land on the divergent frame directly. A single bad frame in a 60-frame sequence is fine if mean SSIM holds; the threshold relaxation handles this.
 
