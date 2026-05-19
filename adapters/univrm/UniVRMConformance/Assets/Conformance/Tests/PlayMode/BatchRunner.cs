@@ -280,13 +280,27 @@ namespace Conformance.Tests.Play
                     $"physics_dt_seconds {rs.physics_dt_seconds} exceeds 60 Hz floor"));
                 yield break;
             }
-            if (rs.animate_root_transform != null && rs.apply_vrma != null)
+            // JsonUtility quirk (matches the VRMA precedent ~line 184):
+            // absent JSON sub-objects deserialize as default-constructed
+            // instances rather than null. Detect "actually present" via
+            // payload-bearing sub-fields:
+            //   - animate_root_transform: translation_start array is null
+            //     when the block was absent from JSON
+            //   - apply_vrma: vrma_handle and start_seconds both default
+            //     to 0 when absent; treat (0, 0) as absent. Phase 7
+            //     rejects apply_vrma either way so the rare false-negative
+            //     (legitimate request for handle 0 at t=0) doesn't matter.
+            bool hasRootAnim = rs.animate_root_transform != null
+                && rs.animate_root_transform.translation_start != null;
+            bool hasVrma = rs.apply_vrma != null
+                && (rs.apply_vrma.vrma_handle != 0 || rs.apply_vrma.start_seconds != 0f);
+            if (hasRootAnim && hasVrma)
             {
                 setEntry(ErrorEntry(t.test_id, -32602, "InvalidParams", "L4-sequence",
                     "animate_root_transform and apply_vrma are mutually exclusive"));
                 yield break;
             }
-            if (rs.apply_vrma != null)
+            if (hasVrma)
             {
                 setEntry(ErrorEntry(t.test_id, -32602, "InvalidParams", "L4-sequence",
                     "apply_vrma not yet implemented in UniVRM (Phase 7 deferral)"));

@@ -270,7 +270,11 @@ pub fn write_local_manifest(path: &Path, entries: &[LocalManifestEntry]) -> anyh
     let mut materialized: Vec<LocalManifestEntry> = Vec::with_capacity(entries.len());
     for entry in entries {
         let mut e = entry.clone();
-        if e.blake3.is_none() && e.status == "ok" {
+        // Single-PNG rehash: only when output_path actually points at a file.
+        // Sequence-shape entries (Phase 7) have empty output_path because
+        // their per-frame paths live in ResultEntry.frames; those frames
+        // were already rehashed in run() before reconcile_to_local_manifest.
+        if e.blake3.is_none() && e.status == "ok" && !e.output_path.is_empty() {
             let bytes = std::fs::read(&e.output_path)
                 .map_err(|err| anyhow::anyhow!("read {}: {err}", e.output_path))?;
             let hash = blake3::hash(&bytes);
