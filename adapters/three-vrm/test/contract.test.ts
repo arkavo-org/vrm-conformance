@@ -104,18 +104,116 @@ test("reserved phase-3 op (set_expression) returns phase Phase 3", async () => {
   }
 });
 
-test("reserved sequence op (render_sequence) returns phase v1.x-sequence", async () => {
+test(
+  "render_sequence returns frames on disk with blake3 sentinel",
+  { timeout: 120_000 },
+  async () => {
+    const { mkdtempSync, existsSync } = await import("node:fs");
+    const { execFileSync } = await import("node:child_process");
+    const { tmpdir } = await import("node:os");
+    const generator = path.resolve(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "target",
+      "release",
+      "vrm-asset-generator",
+    );
+    if (!existsSync(generator)) {
+      // Skip gracefully if release binary absent (CI doesn't build release for TS tests).
+      return;
+    }
+    const assetDir = mkdtempSync(path.join(tmpdir(), "three-vrm-seq-asset-"));
+    execFileSync(generator, ["emit-default", "--id", "smoke", "--output-dir", assetDir], {
+      stdio: "inherit",
+    });
+    const vrmPath = path.join(assetDir, "smoke.vrm");
+    const outDir = mkdtempSync(path.join(tmpdir(), "three-vrm-seq-out-"));
+
+    const h = spawnAdapter();
+    try {
+      // Phase 1 setup: load, camera, lighting, post-processing.
+      await rpc(h, 1, "load_vrm", { path: vrmPath });
+      await rpc(h, 2, "set_camera", {
+        position: [0, 1, 3],
+        target: [0, 1, 0],
+        fov_degrees: 30,
+      });
+      await rpc(h, 3, "set_lighting", {
+        ambient_intensity: 0.3,
+        directional_intensity: 1.0,
+        directional_direction: [0, 1, 0],
+      });
+      await rpc(h, 4, "set_post_processing", { tone_mapping: "none" });
+
+      const seqResp = await rpc(h, 5, "render_sequence", {
+        output_dir: outDir,
+        frame_count: 2,
+        output_format: "png_sequence",
+      });
+
+      assert.ok(
+        !seqResp.error,
+        `render_sequence failed: ${JSON.stringify(seqResp.error)}`,
+      );
+      const result = seqResp.result as {
+        frames: Array<{ path: string; blake3: string }>;
+      };
+      assert.strictEqual(result.frames.length, 2, "expected 2 frames");
+      for (const frame of result.frames) {
+        assert.ok(existsSync(frame.path), `frame file missing: ${frame.path}`);
+        assert.ok(
+          frame.blake3.startsWith("blake3:"),
+          `blake3 must start with "blake3:": ${frame.blake3}`,
+        );
+        assert.strictEqual(
+          frame.blake3.length,
+          7 + 64,
+          `blake3 sentinel must be "blake3:" + 64 hex chars`,
+        );
+      }
+    } finally {
+      h.stdin.end();
+      await new Promise((r) => h.child.on("exit", r));
+    }
+  },
+);
+
+test("render_sequence rejects mutual exclusion of animate_root_transform and apply_vrma", async () => {
   const h = spawnAdapter();
   try {
     const resp = await rpc(h, 6, "render_sequence", {
-      output_dir: "/tmp/seq",
-      fps: 30,
-      duration_seconds: 1.0,
+      output_dir: "/tmp/seq-reject",
+      frame_count: 1,
+      output_format: "png_sequence",
+      animate_root_transform: { translation_start: [0, 0, 0], translation_end: [1, 0, 0] },
+      apply_vrma: { vrma_handle: 0, time_seconds: 0 },
     });
-    assert.equal(resp.error?.code, -32000);
-    assert.equal(
-      (resp.error?.data as { phase?: string } | undefined)?.phase,
-      "v1.x-sequence",
+    assert.equal(resp.error?.code, -32602, `expected -32602, got: ${JSON.stringify(resp)}`);
+    assert.ok(
+      (resp.error?.message ?? "").includes("mutually exclusive"),
+      `expected "mutually exclusive" in message: ${resp.error?.message}`,
+    );
+  } finally {
+    h.stdin.end();
+    await new Promise((r) => h.child.on("exit", r));
+  }
+});
+
+test("render_sequence rejects physics_dt_seconds above 60 Hz floor", async () => {
+  const h = spawnAdapter();
+  try {
+    const resp = await rpc(h, 7, "render_sequence", {
+      output_dir: "/tmp/seq-reject-dt",
+      frame_count: 1,
+      output_format: "png_sequence",
+      physics_dt_seconds: 0.02,
+    });
+    assert.equal(resp.error?.code, -32602, `expected -32602, got: ${JSON.stringify(resp)}`);
+    assert.ok(
+      (resp.error?.message ?? "").includes("60 Hz"),
+      `expected "60 Hz" in message: ${resp.error?.message}`,
     );
   } finally {
     h.stdin.end();

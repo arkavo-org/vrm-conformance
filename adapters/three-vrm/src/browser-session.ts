@@ -263,6 +263,44 @@ export class BrowserSession {
     );
   }
 
+  async renderSequence(params: {
+    output_dir: string;
+    frame_count: number;
+    physics_dt_seconds: number;
+    animate_root_transform: unknown;
+  }): Promise<{
+    frames: Array<{ path: string; blake3: string }>;
+  }> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    await fs.mkdir(params.output_dir, { recursive: true });
+
+    const dataUrls: string[] = await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (p) => (window as any).__renderSequence(p),
+      {
+        frame_count: params.frame_count,
+        physics_dt_seconds: params.physics_dt_seconds,
+        animate_root_transform: params.animate_root_transform,
+      },
+    );
+
+    const ZERO_BLAKE3 = `blake3:${"0".repeat(64)}`;
+    const frames: Array<{ path: string; blake3: string }> = [];
+    for (let i = 0; i < dataUrls.length; i++) {
+      const dataUrl = dataUrls[i];
+      const comma = dataUrl.indexOf(",");
+      if (comma < 0) throw new Error(`frame ${i}: malformed data URL`);
+      const b64 = dataUrl.slice(comma + 1);
+      const png = Buffer.from(b64, "base64");
+      const frameIndex = String(i).padStart(4, "0");
+      const framePath = path.join(params.output_dir, `${frameIndex}.png`);
+      await fs.writeFile(framePath, png);
+      frames.push({ path: framePath, blake3: ZERO_BLAKE3 });
+    }
+
+    return { frames };
+  }
+
   async render(params: {
     width: number;
     height: number;

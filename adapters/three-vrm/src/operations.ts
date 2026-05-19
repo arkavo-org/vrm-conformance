@@ -23,7 +23,6 @@ const PHASE_BY_RESERVED_METHOD: Record<string, string> = {
   set_expression: "Phase 3",
   set_humanoid_pose: "Phase 2",
   set_root_transform: "Phase 2",
-  render_sequence: "v1.x-sequence",
 };
 
 export interface DispatchSuccess<T = unknown> {
@@ -104,6 +103,43 @@ export async function dispatch(
       case "animate_root_transform": {
         await ctx.session.animateRootTransform(params);
         return { ok: true, result: {} };
+      }
+      case "render_sequence": {
+        const p = params as {
+          output_dir?: string;
+          frame_count?: number;
+          output_format?: string;
+          physics_dt_seconds?: number;
+          animate_root_transform?: unknown;
+          apply_vrma?: unknown;
+        };
+        if (!p?.output_dir) return badParams("missing output_dir");
+        if (!p?.frame_count || p.frame_count < 1)
+          return badParams("frame_count must be >= 1");
+        const outputFormat = p.output_format ?? "png_sequence";
+        if (outputFormat !== "png_sequence")
+          return badParams(`unsupported output_format: ${outputFormat}`);
+        if (p.animate_root_transform != null && p.apply_vrma != null)
+          return badParams(
+            "animate_root_transform and apply_vrma are mutually exclusive",
+          );
+        if (p.apply_vrma != null)
+          return badParams("apply_vrma not yet implemented in three-vrm");
+        const physicsDt =
+          typeof p.physics_dt_seconds === "number"
+            ? p.physics_dt_seconds
+            : 1 / 60;
+        if (physicsDt > 1 / 60 + 1e-6)
+          return badParams(
+            `physics_dt_seconds ${physicsDt} exceeds 60 Hz floor (max ~0.01667)`,
+          );
+        const result = await ctx.session.renderSequence({
+          output_dir: p.output_dir,
+          frame_count: p.frame_count,
+          physics_dt_seconds: physicsDt,
+          animate_root_transform: p.animate_root_transform ?? null,
+        });
+        return { ok: true, result };
       }
       case "dump_bone_positions": {
         const p = params as { session_id?: string; spring_index?: number };
@@ -213,6 +249,7 @@ export function knownMethods(): string[] {
     "set_lighting",
     "set_post_processing",
     "render",
+    "render_sequence",
     "dispose",
     "step_physics",
     "reset_physics",

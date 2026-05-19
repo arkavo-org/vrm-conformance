@@ -473,6 +473,60 @@
         return { springs: out };
       };
 
+      // Render a sequence of frames with optional root-transform animation.
+      // Returns an array of PNG data URLs (one per frame).
+      // params:
+      //   frame_count: number — how many frames to capture
+      //   physics_dt_seconds: number — physics step size (≤ 1/60)
+      //   animate_root_transform: { translation_start, translation_end } | null
+      window.__renderSequence = async function (params) {
+        if (!state.vrm) {
+          throw new Error("__renderSequence: no VRM loaded");
+        }
+        ensureRenderer(state.canvas?.width ?? 1024, state.canvas?.height ?? 1024);
+
+        const frameCount = typeof params.frame_count === "number" ? params.frame_count : 1;
+        const dt = typeof params.physics_dt_seconds === "number" ? params.physics_dt_seconds : 1 / 60;
+        const art = params.animate_root_transform;
+
+        // Snapshot original root position for restoration after the sequence.
+        const origX = state.vrm.scene.position.x;
+        const origY = state.vrm.scene.position.y;
+        const origZ = state.vrm.scene.position.z;
+
+        const results = [];
+        for (let i = 0; i < frameCount; i++) {
+          const t = frameCount > 1 ? i / (frameCount - 1) : 0;
+
+          // Interpolate root translation if animate_root_transform is provided.
+          if (art) {
+            const start = art.translation_start ?? [0, 0, 0];
+            const end = art.translation_end ?? [0, 0, 0];
+            state.vrm.scene.position.set(
+              start[0] + (end[0] - start[0]) * t,
+              start[1] + (end[1] - start[1]) * t,
+              start[2] + (end[2] - start[2]) * t,
+            );
+          }
+
+          // Drive spring-bone physics one step.
+          state.vrm.update(dt);
+
+          // Render and collect data URL.
+          const dataUrl = await window.__render({
+            width: state.canvas.width,
+            height: state.canvas.height,
+            color_space: "Srgb",
+          });
+          results.push(dataUrl);
+        }
+
+        // Restore original root position.
+        state.vrm.scene.position.set(origX, origY, origZ);
+
+        return results;
+      };
+
       window.__dispose = function () {
         if (state.vrm) {
           state.scene.remove(state.vrm.scene);
