@@ -1,10 +1,30 @@
 # `render_sequence` — Phased Rollout Plan
 
-> **For agentic workers:** This is a META-PLAN. Each numbered phase below will be expanded into its own task-by-task plan file (`2026-05-18-render-sequence-phaseN-<topic>.md`) once RFC-0004 is Accepted. Do not start implementation from this file alone.
+> **For agentic workers:** This is a META-PLAN. Each numbered phase below has been expanded into its own task-by-task plan file (`2026-05-18-render-sequence-phaseN-<topic>.md` or `2026-05-19-...`). Phases 1–7 landed end-to-end on 2026-05-18/19 (commits `4eab23d..46ad9ea`). Phase 8 (site UI) remains deferred — no production blocker.
+
+**Status snapshot (2026-05-19):**
+
+| Phase | Status | Latest commit | Notes |
+|---|---|---|---|
+| 1 — Op surface + Unimplemented stubs | ✅ Landed | `7b1f1cf` | All 4 adapters return Unimplemented |
+| 2 — Diff + manifest + runner | ✅ Landed | `a480f26` | `temporal_diff` aggregator + sequence manifest entries + runner dispatch |
+| 3 — Mock renderer reference impl | ✅ Landed | `8407262` | Deterministic; self-diff = SSIM 1.0 by construction |
+| 4 — Asset generator + sequence plans | ✅ Landed | `35fedbe` | `emit-sequence-sweep` emits 20 swing variants |
+| 5 — vrm-metal-kit | ✅ Landed | `8b80f24` | First real GPU implementer |
+| 6 — three-vrm + godot-vrm | ✅ Landed | `b9c77ff` | Second + third real implementers |
+| 7 — UniVRM PlayMode | ✅ Landed | `46ad9ea` | Consortium reference is sequence-capable |
+| 8 — Site frame scrubber UI | ⏸ Deferred | — | Non-blocking; can ship when desired |
+
+**Deferred follow-ups (none blocking the pipeline):**
+
+- VMK `apply_vrma` per-frame VRMA driving
+- VMK + UniVRM `ffmpeg` mux for MP4/MOV output formats
+- `bootstrap-goldens.sh` sequence path (writes sequence-kind manifest entries with S3 URLs)
+- `docs/findings.md` cross-renderer numbers entry (needs a real bootstrap run first)
 
 **Goal:** Land RFC-0004 (`render_sequence` op + temporal diff + sequence manifest entries) end-to-end across all four real adapters plus the site, in 8 incremental phases that each ship behind back-compat defaults and never block existing single-frame tests.
 
-**Spec:** [`rfcs/0004-render-sequence-op.md`](../../../rfcs/0004-render-sequence-op.md)
+**Spec:** [`rfcs/0004-render-sequence-op.md`](../../../rfcs/0004-render-sequence-op.md) (Accepted)
 
 **Architecture (one-line per layer):**
 - **Op surface** in `crates/vrm-ops` (Phase 1): types + JSON Schema + Unimplemented stubs everywhere.

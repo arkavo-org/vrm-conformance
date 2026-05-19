@@ -1703,3 +1703,43 @@ The "What we CANNOT directly verify yet" section above implies VMK lacks the run
 - `VRMExpressionPreset` with all five visemes including `oh` (`Core/VRMTypes.swift:152-209`)
 
 The actual blocker is our **adapter wrapper**: `adapters/vrm-metal-kit/Sources/VRMMetalKitAdapter/Operations.swift:48-58` declares `set_expression`, `load_vrma`, `apply_vrma_at_time`, and `dump_expression_weights` as `Unimplemented` with a stale comment ("pending VMK#165 closure" — VMK#165 has been closed for months). The fix is wiring these four ops through to VMK's existing APIs, not an upstream change. Tracked at [vrm-conformance#13](https://github.com/arkavo-org/vrm-conformance/issues/13). The end-to-end pixel verification of VMK 0.15.2's viseme parse-fix is gated on closing that adapter-side issue.
+
+## `render_sequence` (RFC-0004) — four real renderers + mock reference, end-to-end
+
+**Date**: 2026-05-19, vrm-conformance commits `4eab23d..46ad9ea` (60 commits across 7 phases, ~3-day push).
+
+**What landed.** Multi-frame capture is now a first-class op across the suite. A test plan with a `render_sequence:` block dispatches the runner through a per-frame loop instead of a single-frame render; per-frame PNGs land at `<output_dir>/<test_id>_<renderer>_frames/<NNNN>.png` with BLAKE3 hashes the runner re-computes from disk. Four real renderers + the parametric mock implement it end-to-end:
+
+| Renderer | Engine | Status |
+|---|---|---|
+| `vrm-mock-renderer` | Rust (parametric) | ✅ deterministic; self-diff = SSIM 1.0 by construction |
+| `vrm-metal-kit` | Swift / Metal | ✅ PNG + animate_root_transform |
+| `three-vrm` | TS / Playwright / WebGL | ✅ PNG + animate_root_transform |
+| `godot-vrm` | GDScript / Godot 4 SubViewport | ✅ PNG + animate_root_transform |
+| `univrm` | C# / Unity 6 PlayMode | ✅ PNG + animate_root_transform (FastSpringBone runs in PlayMode) |
+
+Asset corpus: `cargo run -p vrm-asset-generator -- emit-sequence-sweep` produces 20 swing variants (`swing_seq_*` prefix) coexisting with the existing single-frame `swing_*` variants. Diff: `vrm_diff_engine::temporal::temporal_diff` with mean / p95 / min SSIM + worst-frame tracking + BLAKE3 short-circuit. Consensus: N-way pairwise `sequence_consensus_diff` accessible via `vrm-runner consensus-diff --render-frames name=dir`.
+
+### Three architectural decisions worth recording
+
+**1. BLAKE3 ownership is centralized in Rust.** Every real adapter returns a 64-zero sentinel per frame; the runner re-hashes from on-disk PNG bytes before populating the manifest (`execute.rs::rehash_frames` for per-op adapters, batch-level loop in `execute_batch.rs::run` for UniVRM). This avoids adding a BLAKE3 dependency to Swift / TypeScript / GDScript / C#, and the runner becomes the single authoritative source for the manifest's content-addressed column. Adapter hashes are advisory only.
+
+**2. JsonUtility absent-field quirk** (UniVRM Phase 7). Unity's `JsonUtility` deserializes absent sub-objects as default-constructed instances rather than null. The mutual-exclusion guard in `BatchRunner.RenderSequenceCo` initially false-positived because `rs.apply_vrma != null` was always true. Fix: detect "actually present" via payload-bearing sub-fields (`translation_start` array non-null for animate, non-zero `vrma_handle`/`start_seconds` for vrma). This is the same precedent the existing VRMA path uses (BatchRunner.cs line ~184). Worth knowing for every future Rust→Unity manifest schema extension.
+
+**3. f32 round-trip noise at the physics_dt floor.** Runners send `physics_dt_seconds` as `f32`, so `1.0_f32 / 60.0_f32` lands on the wire as `0.016666668` (next-up f32). VMK's initial check `physicsDt > 1.0 / 60.0 + 1e-9` evaluated as Double and rejected this. Loosened to `1e-6` tolerance — still rejects any meaningful overage (0.02+) while absorbing wire-format noise. UniVRM uses the same tolerance.
+
+### Cross-renderer numbers — not yet
+
+This entry documents infrastructure, not cross-renderer SSIM. Real numbers across the 20-variant swing-seq corpus require `scripts/bootstrap-goldens.sh` to learn the sequence path (per-frame PNG push to S3 + sequence-kind manifest entries). That's the next follow-up. Until then, each `#[ignore]`-gated runner E2E test verifies its renderer produces real PNGs end-to-end — that's the pre-condition; cross-renderer numbers come when bootstrap-goldens runs the sequence corpus across all five and `consensus-report.sh` aggregates pairwise temporal_diff.
+
+### Deferred follow-ups (none blocking the pipeline)
+
+- VMK `apply_vrma` per-frame VRMA driving (Phase 5 deferral).
+- VMK + UniVRM `ffmpeg` mux for MP4/MOV output formats (current adapters reject non-PNG).
+- `bootstrap-goldens.sh` sequence path — writes sequence-kind manifest entries with S3 URLs across all five renderers. This unblocks real cross-renderer numbers.
+- `site/` frame scrubber UI (Phase 8 from the rollout plan) — non-blocking; current PNGs are reviewable individually.
+- Real-numbers follow-up entry to this finding once bootstrap-goldens produces consensus output.
+
+### Forward
+
+The swing-seq corpus's main payoff is in physics-divergence detection — single-frame captures collapse the entire chain trajectory into one frame, hiding renderer differences in inertia / drag / overshoot. Spreading the same 0.15 m translation across 60 frames at 30 Hz gives reviewers 60 frames of per-frame SSIM signal instead of 1. The "arms twist inside-out during walking" failure class (VMK#165, since closed) is the canonical example of behavior only visible in a sequence — sequences finally make that class of finding directly observable in the suite.
