@@ -1,4 +1,4 @@
-use vrm_s3::manifest::{Manifest, ManifestEntry, SubmissionMetadata};
+use vrm_s3::manifest::{Manifest, ManifestEntry, ManifestEntryKind, SubmissionMetadata};
 
 #[test]
 fn manifest_round_trips_json() {
@@ -17,14 +17,16 @@ fn manifest_round_trips_json() {
                 driver_version: "Metal 3".into(),
                 build_flags: "release".into(),
             },
-            image_url: "s3://arkavo-vrm-conformance/test/mtoon_default.png".into(),
-            image_blake3: "blake3:abcdef".into(),
-            byte_size: 12345,
+            kind: ManifestEntryKind::Image,
+            image_url: Some("s3://arkavo-vrm-conformance/test/mtoon_default.png".into()),
+            image_blake3: Some("blake3:abcdef".into()),
+            byte_size: Some(12345),
             submitted_at: "2026-05-10T12:00:00Z".into(),
             positions_url: None,
             positions_blake3: None,
             vrma_url: None,
             vrma_blake3: None,
+            sequence: None,
         }],
     };
     let s = serde_json::to_string(&m).unwrap();

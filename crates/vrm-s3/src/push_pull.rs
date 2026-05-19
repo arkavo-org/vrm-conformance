@@ -1,7 +1,7 @@
 //! Push: upload a PNG to S3, compute BLAKE3, return a ManifestEntry.
 //! Pull: download by URL into a local file path.
 
-use crate::manifest::{ManifestEntry, SubmissionMetadata};
+use crate::manifest::{ManifestEntry, ManifestEntryKind, SubmissionMetadata};
 use anyhow::Result;
 use aws_sdk_s3::primitives::ByteStream;
 use camino::Utf8Path;
@@ -47,14 +47,16 @@ pub async fn push_png(file: &Utf8Path, test_id: &str, opts: &PushOptions) -> Res
         renderer_version: opts.renderer_version.clone(),
         git_hash: opts.git_hash.clone(),
         metadata: opts.metadata.clone(),
-        image_url: format!("s3://{}/{}", opts.bucket, key),
-        image_blake3: blake3_str,
-        byte_size: bytes.len() as u64,
+        kind: ManifestEntryKind::Image,
+        image_url: Some(format!("s3://{}/{}", opts.bucket, key)),
+        image_blake3: Some(blake3_str),
+        byte_size: Some(bytes.len() as u64),
         submitted_at: now_rfc3339(),
         positions_url: None,
         positions_blake3: None,
         vrma_url: None,
         vrma_blake3: None,
+        sequence: None,
     })
 }
 

@@ -1,5 +1,34 @@
 use serde::{Deserialize, Serialize};
 
+/// Kind of manifest entry. `Image` is the default to preserve back-compat
+/// with existing manifest files written before sequence support landed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestEntryKind {
+    #[default]
+    Image,
+    Sequence,
+}
+
+/// Sequence manifest block. Present when `ManifestEntry::kind == Sequence`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SequenceManifest {
+    pub frame_count: u32,
+    pub frame_hz: f32,
+    pub frames: Vec<SequenceManifestFrame>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muxed_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muxed_blake3: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SequenceManifestFrame {
+    pub index: u32,
+    pub image_url: String,
+    pub blake3: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: u32,
@@ -16,9 +45,19 @@ pub struct ManifestEntry {
     #[serde(flatten)]
     pub metadata: SubmissionMetadata,
 
-    pub image_url: String,
-    pub image_blake3: String,
-    pub byte_size: u64,
+    /// Defaults to Image for back-compat with existing flat entries
+    /// written before sequence support landed.
+    #[serde(default)]
+    pub kind: ManifestEntryKind,
+
+    // Image-kind fields (required for kind=Image; absent for kind=Sequence).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_blake3: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byte_size: Option<u64>,
+
     pub submitted_at: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -32,6 +71,10 @@ pub struct ManifestEntry {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vrma_blake3: Option<String>,
+
+    // Sequence-kind fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<SequenceManifest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,14 +130,16 @@ mod tests {
             renderer_version: "0.1.0".into(),
             git_hash: "deadbeef".into(),
             metadata: sample_metadata(),
-            image_url: format!("s3://b/{test_id}_{renderer_name}.png"),
-            image_blake3: image_blake3.into(),
-            byte_size: 100,
+            kind: ManifestEntryKind::Image,
+            image_url: Some(format!("s3://b/{test_id}_{renderer_name}.png")),
+            image_blake3: Some(image_blake3.into()),
+            byte_size: Some(100),
             submitted_at: "2026-05-10T12:00:00Z".into(),
             positions_url: None,
             positions_blake3: None,
             vrma_url: None,
             vrma_blake3: None,
+            sequence: None,
         }
     }
 
@@ -106,14 +151,16 @@ mod tests {
             renderer_version: "0.1.0".into(),
             git_hash: "deadbeef".into(),
             metadata: sample_metadata(),
-            image_url: "s3://b/x.png".into(),
-            image_blake3: "blake3:aaa".into(),
-            byte_size: 100,
+            kind: ManifestEntryKind::Image,
+            image_url: Some("s3://b/x.png".into()),
+            image_blake3: Some("blake3:aaa".into()),
+            byte_size: Some(100),
             submitted_at: "2026-05-15T12:00:00Z".into(),
             positions_url: Some("s3://b/x.positions.json".into()),
             positions_blake3: Some("blake3:bbb".into()),
             vrma_url: None,
             vrma_blake3: None,
+            sequence: None,
         };
         let s = serde_json::to_string(&e).unwrap();
         let back: ManifestEntry = serde_json::from_str(&s).unwrap();
@@ -132,14 +179,16 @@ mod tests {
             renderer_version: "v".into(),
             git_hash: "g".into(),
             metadata: sample_metadata(),
-            image_url: "s3://b/x.png".into(),
-            image_blake3: "blake3:aaa".into(),
-            byte_size: 1,
+            kind: ManifestEntryKind::Image,
+            image_url: Some("s3://b/x.png".into()),
+            image_blake3: Some("blake3:aaa".into()),
+            byte_size: Some(1),
             submitted_at: "2026-05-15T12:00:00Z".into(),
             positions_url: None,
             positions_blake3: None,
             vrma_url: None,
             vrma_blake3: None,
+            sequence: None,
         };
         let v: serde_json::Value = serde_json::to_value(&e).unwrap();
         assert!(
@@ -196,7 +245,7 @@ mod tests {
         assert_eq!(m.entries.len(), 2);
         assert_eq!(m.entries[0].test_id, "t1");
         assert_eq!(m.entries[0].renderer_name, "r1");
-        assert_eq!(m.entries[0].image_blake3, "blake3:ccc");
+        assert_eq!(m.entries[0].image_blake3.as_deref(), Some("blake3:ccc"));
         assert_eq!(m.entries[1].test_id, "t2");
     }
 
@@ -222,14 +271,16 @@ mod tests {
             renderer_version: "v0.131.0".into(),
             git_hash: "abc".into(),
             metadata: sample_metadata(),
-            image_url: "s3://b/x.png".into(),
-            image_blake3: "blake3:img".into(),
-            byte_size: 1024,
+            kind: ManifestEntryKind::Image,
+            image_url: Some("s3://b/x.png".into()),
+            image_blake3: Some("blake3:img".into()),
+            byte_size: Some(1024),
             submitted_at: "2026-05-10T12:00:00Z".into(),
             positions_url: None,
             positions_blake3: None,
             vrma_url: Some("s3://b/x.vrma".into()),
             vrma_blake3: Some("blake3:vrma".into()),
+            sequence: None,
         };
         let json = serde_json::to_string(&e).unwrap();
         let back: ManifestEntry = serde_json::from_str(&json).unwrap();
@@ -246,14 +297,16 @@ mod tests {
             renderer_version: "v0.131.0".into(),
             git_hash: "abc".into(),
             metadata: sample_metadata(),
-            image_url: "s3://b/x.png".into(),
-            image_blake3: "blake3:img".into(),
-            byte_size: 1024,
+            kind: ManifestEntryKind::Image,
+            image_url: Some("s3://b/x.png".into()),
+            image_blake3: Some("blake3:img".into()),
+            byte_size: Some(1024),
             submitted_at: "2026-05-10T12:00:00Z".into(),
             positions_url: None,
             positions_blake3: None,
             vrma_url: None,
             vrma_blake3: None,
+            sequence: None,
         };
         let v: serde_json::Value = serde_json::to_value(&e).unwrap();
         assert!(
@@ -263,6 +316,79 @@ mod tests {
         assert!(
             v.get("vrma_blake3").is_none(),
             "vrma_blake3 None must be omitted, got {v}"
+        );
+    }
+
+    #[test]
+    fn image_kind_default_when_field_absent() {
+        // Existing on-disk entries don't have "kind": "image". Deserialization
+        // must default to ManifestEntryKind::Image.
+        let raw = r#"{
+            "test_id": "x",
+            "renderer_name": "vmk",
+            "renderer_version": "0.15.2",
+            "git_hash": "abcdef1",
+            "os": "macos", "os_version": "14", "gpu_vendor": "Apple",
+            "gpu_model": "M2", "driver_version": "Metal 3", "build_flags": "release",
+            "image_url": "s3://bucket/x.png",
+            "image_blake3": "blake3:abc",
+            "byte_size": 1024,
+            "submitted_at": "2026-01-01T00:00:00Z"
+        }"#;
+        let e: ManifestEntry = serde_json::from_str(raw).unwrap();
+        assert_eq!(e.kind, ManifestEntryKind::Image);
+        assert_eq!(e.image_url.as_deref(), Some("s3://bucket/x.png"));
+        assert!(e.sequence.is_none());
+    }
+
+    #[test]
+    fn sequence_kind_roundtrips() {
+        let raw = r#"{
+            "test_id": "swing_seq",
+            "renderer_name": "vmk",
+            "renderer_version": "0.15.2",
+            "git_hash": "abcdef1",
+            "os": "macos", "os_version": "14", "gpu_vendor": "Apple",
+            "gpu_model": "M2", "driver_version": "Metal 3", "build_flags": "release",
+            "kind": "sequence",
+            "submitted_at": "2026-01-01T00:00:00Z",
+            "sequence": {
+                "frame_count": 2,
+                "frame_hz": 30.0,
+                "frames": [
+                    {"index": 0, "image_url": "s3://b/0000.png", "blake3": "blake3:aaa"},
+                    {"index": 1, "image_url": "s3://b/0001.png", "blake3": "blake3:bbb"}
+                ]
+            }
+        }"#;
+        let e: ManifestEntry = serde_json::from_str(raw).unwrap();
+        assert_eq!(e.kind, ManifestEntryKind::Sequence);
+        assert!(e.image_url.is_none());
+        assert!(e.image_blake3.is_none());
+        assert!(e.byte_size.is_none());
+        {
+            let seq = e.sequence.as_ref().expect("sequence block required");
+            assert_eq!(seq.frame_count, 2);
+            assert_eq!(seq.frames.len(), 2);
+            assert_eq!(seq.frames[1].image_url, "s3://b/0001.png");
+        }
+
+        // Round-trip
+        let serialized = serde_json::to_string(&e).unwrap();
+        let back: ManifestEntry = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(back.kind, ManifestEntryKind::Sequence);
+        assert_eq!(back.sequence.as_ref().unwrap().frames.len(), 2);
+        // Top-level image_url / image_blake3 must be absent (skip_serializing_if None).
+        // Note: "image_url" also appears inside the sequence.frames array, so we
+        // check the parsed Value rather than the raw string for the top-level key.
+        let v: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        assert!(
+            v.get("image_url").is_none(),
+            "top-level image_url must be omitted for Sequence entries, got {v}"
+        );
+        assert!(
+            v.get("image_blake3").is_none(),
+            "top-level image_blake3 must be omitted for Sequence entries, got {v}"
         );
     }
 }

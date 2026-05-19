@@ -8,7 +8,7 @@ use camino::Utf8PathBuf;
 use clap::Parser;
 use serde_json::json;
 use vrm_s3::{
-    manifest::{Manifest, ManifestEntry},
+    manifest::{Manifest, ManifestEntry, ManifestEntryKind},
     push_pull::{pull_png, verify_blake3},
 };
 
@@ -48,6 +48,30 @@ async fn main() -> Result<()> {
     let mut failures: Vec<(String, String)> = Vec::new();
 
     for (i, entry) in manifest.entries.iter().enumerate() {
+        match entry.kind {
+            ManifestEntryKind::Sequence => {
+                eprintln!(
+                    "  skipping {} ({}): sequence-kind entries not yet supported by pull-goldens",
+                    entry.test_id, entry.renderer_name
+                );
+                continue;
+            }
+            ManifestEntryKind::Image => {}
+        }
+        let image_url = entry.image_url.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "[{}/{}] kind=image but image_url is None",
+                entry.test_id,
+                entry.renderer_name
+            )
+        })?;
+        let image_blake3 = entry.image_blake3.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "[{}/{}] kind=image but image_blake3 is None",
+                entry.test_id,
+                entry.renderer_name
+            )
+        })?;
         let dest = compute_dest(&args.output_dir, entry);
         if args.json {
             let evt = json!({
@@ -57,7 +81,7 @@ async fn main() -> Result<()> {
                 "total": total,
                 "test_id": entry.test_id,
                 "renderer_name": entry.renderer_name,
-                "image_url": entry.image_url,
+                "image_url": image_url,
                 "dest": dest,
             });
             eprintln!("{}", serde_json::to_string(&evt)?);
@@ -72,7 +96,7 @@ async fn main() -> Result<()> {
             );
         }
 
-        match pull_one(&entry.image_url, &dest, &entry.image_blake3).await {
+        match pull_one(image_url, &dest, image_blake3).await {
             Ok(()) => pulled.push(dest),
             Err(e) => {
                 failures.push((

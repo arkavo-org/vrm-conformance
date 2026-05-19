@@ -2,7 +2,7 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use vrm_s3::{
-    manifest::{Manifest, ManifestEntry, SubmissionMetadata},
+    manifest::{Manifest, ManifestEntry, ManifestEntryKind, SubmissionMetadata},
     push_pull::{push_png, PushOptions},
 };
 
@@ -130,9 +130,10 @@ fn local_manifest_entry(
         renderer_version: renderer_version.into(),
         git_hash: git_hash.into(),
         metadata,
-        image_url,
-        image_blake3: blake3_str,
-        byte_size: bytes.len() as u64,
+        kind: ManifestEntryKind::Image,
+        image_url: Some(image_url),
+        image_blake3: Some(blake3_str),
+        byte_size: Some(bytes.len() as u64),
         submitted_at: time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string()),
@@ -140,5 +141,6 @@ fn local_manifest_entry(
         positions_blake3: None,
         vrma_url: None,
         vrma_blake3: None,
+        sequence: None,
     })
 }

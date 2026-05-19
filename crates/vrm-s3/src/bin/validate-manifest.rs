@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use camino::Utf8PathBuf;
 use clap::Parser;
-use vrm_s3::manifest::Manifest;
+use vrm_s3::manifest::{Manifest, ManifestEntryKind};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -20,14 +20,34 @@ fn main() -> Result<()> {
 
     let mut errors = Vec::new();
     for (i, e) in m.entries.iter().enumerate() {
-        if !e.image_url.starts_with("s3://") {
-            errors.push(format!(
-                "[{i}] image_url must start with s3://: {}",
-                e.image_url
-            ));
-        }
-        if !e.image_blake3.starts_with("blake3:") {
-            errors.push(format!("[{i}] image_blake3 must start with blake3:"));
+        match e.kind {
+            ManifestEntryKind::Image => {
+                let image_url = e.image_url.as_deref().unwrap_or("");
+                let image_blake3 = e.image_blake3.as_deref().unwrap_or("");
+                if !image_url.starts_with("s3://") {
+                    errors.push(format!(
+                        "[{i}] image_url must start with s3://: {image_url}"
+                    ));
+                }
+                if !image_blake3.starts_with("blake3:") {
+                    errors.push(format!("[{i}] image_blake3 must start with blake3:"));
+                }
+                if e.image_url.is_none() {
+                    errors.push(format!("[{i}] kind=image but image_url is None"));
+                }
+                if e.image_blake3.is_none() {
+                    errors.push(format!("[{i}] kind=image but image_blake3 is None"));
+                }
+            }
+            ManifestEntryKind::Sequence => {
+                // Full sequence validation lands in Task 8.
+                // For now: just verify the sequence block exists.
+                if e.sequence.is_none() {
+                    errors.push(format!(
+                        "[{i}] kind=sequence but sequence block is missing"
+                    ));
+                }
+            }
         }
         match (&e.positions_url, &e.positions_blake3) {
             (Some(_url), Some(hash)) => {
