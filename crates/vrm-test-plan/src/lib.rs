@@ -524,7 +524,10 @@ diff:
   reference_renderer: vrm-metal-kit
 "#;
         let plan: TestPlan = serde_yml::from_str(raw).unwrap();
-        assert!(plan.render_sequence.is_none(), "absent field must default to None");
+        assert!(
+            plan.render_sequence.is_none(),
+            "absent field must default to None"
+        );
     }
 
     #[test]

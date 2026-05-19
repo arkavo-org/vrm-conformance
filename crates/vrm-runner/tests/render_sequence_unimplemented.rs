@@ -86,7 +86,9 @@ fn render_sequence_against_mock_returns_unimplemented() {
     };
 
     // The runner must not propagate Unimplemented as an error.
-    let result = execute_plan(&plan, &opts).expect("execute_plan must succeed even when adapter returns Unimplemented for render_sequence");
+    let result = execute_plan(&plan, &opts).expect(
+        "execute_plan must succeed even when adapter returns Unimplemented for render_sequence",
+    );
 
     // sequence field must be populated.
     let seq = result

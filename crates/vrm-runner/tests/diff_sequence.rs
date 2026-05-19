@@ -4,7 +4,12 @@
 use camino::Utf8PathBuf;
 use std::process::Command;
 
-fn make_solid_color_dir(dir: &std::path::Path, prefix: &str, n: usize, rgb: [u8; 3]) -> Vec<Utf8PathBuf> {
+fn make_solid_color_dir(
+    dir: &std::path::Path,
+    prefix: &str,
+    n: usize,
+    rgb: [u8; 3],
+) -> Vec<Utf8PathBuf> {
     (0..n)
         .map(|i| {
             let p = dir.join(format!("{prefix}_{i:04}.png"));
@@ -73,15 +78,22 @@ fn diff_sequence_mode_passes_on_identical_dirs() {
     let out = Command::new(vrm_runner_bin().as_std_path())
         .args([
             "diff",
-            "--plan", plan.to_str().unwrap(),
-            "--render-frames", cand_dir.to_str().unwrap(),
-            "--reference-frames", refr_dir.to_str().unwrap(),
+            "--plan",
+            plan.to_str().unwrap(),
+            "--render-frames",
+            cand_dir.to_str().unwrap(),
+            "--reference-frames",
+            refr_dir.to_str().unwrap(),
             "--json",
         ])
         .output()
         .expect("vrm-runner diff failed to spawn");
 
-    assert!(out.status.success(), "diff failed: stderr={}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "diff failed: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("not json");
     assert_eq!(parsed["test_id"], "smoke_seq_cli");
@@ -103,9 +115,12 @@ fn diff_sequence_mode_fails_on_length_mismatch() {
     let out = Command::new(vrm_runner_bin().as_std_path())
         .args([
             "diff",
-            "--plan", plan.to_str().unwrap(),
-            "--render-frames", cand_dir.to_str().unwrap(),
-            "--reference-frames", refr_dir.to_str().unwrap(),
+            "--plan",
+            plan.to_str().unwrap(),
+            "--render-frames",
+            cand_dir.to_str().unwrap(),
+            "--reference-frames",
+            refr_dir.to_str().unwrap(),
             "--json",
         ])
         .output()

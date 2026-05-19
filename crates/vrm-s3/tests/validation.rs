@@ -100,10 +100,7 @@ fn sequence_with_empty_frames_fails() {
     e.sequence.as_mut().unwrap().frames.clear();
     e.sequence.as_mut().unwrap().frame_count = 0;
     let errs = validate_entries(&[e]);
-    assert!(
-        errs.iter().any(|s| s.contains("0 frames")),
-        "{errs:?}",
-    );
+    assert!(errs.iter().any(|s| s.contains("0 frames")), "{errs:?}",);
 }
 
 #[test]
@@ -111,10 +108,7 @@ fn sequence_frame_count_mismatch_fails() {
     let mut e = good_sequence_entry();
     e.sequence.as_mut().unwrap().frame_count = 5; // frames has 2
     let errs = validate_entries(&[e]);
-    assert!(
-        errs.iter().any(|s| s.contains("frame_count")),
-        "{errs:?}",
-    );
+    assert!(errs.iter().any(|s| s.contains("frame_count")), "{errs:?}",);
 }
 
 #[test]
@@ -122,10 +116,7 @@ fn sequence_frame_index_mismatch_fails() {
     let mut e = good_sequence_entry();
     e.sequence.as_mut().unwrap().frames[1].index = 99;
     let errs = validate_entries(&[e]);
-    assert!(
-        errs.iter().any(|s| s.contains("index field")),
-        "{errs:?}",
-    );
+    assert!(errs.iter().any(|s| s.contains("index field")), "{errs:?}",);
 }
 
 #[test]
@@ -133,10 +124,7 @@ fn sequence_bad_image_url_fails() {
     let mut e = good_sequence_entry();
     e.sequence.as_mut().unwrap().frames[0].image_url = "http://bad".into();
     let errs = validate_entries(&[e]);
-    assert!(
-        errs.iter().any(|s| s.contains("s3://")),
-        "{errs:?}",
-    );
+    assert!(errs.iter().any(|s| s.contains("s3://")), "{errs:?}",);
 }
 
 #[test]
@@ -171,21 +159,18 @@ fn muxed_url_without_blake3_fails() {
     e.sequence.as_mut().unwrap().muxed_url = Some("s3://bucket/out.mp4".into());
     // muxed_blake3 still None
     let errs = validate_entries(&[e]);
-    assert!(
-        errs.iter().any(|s| s.contains("muxed_url")),
-        "{errs:?}",
-    );
+    assert!(errs.iter().any(|s| s.contains("muxed_url")), "{errs:?}",);
 }
 
 #[test]
 fn muxed_blake3_without_url_fails() {
     let mut e = good_sequence_entry();
-    e.sequence.as_mut().unwrap().muxed_blake3 =
-        Some(format!("blake3:{}", "c".repeat(64)));
+    e.sequence.as_mut().unwrap().muxed_blake3 = Some(format!("blake3:{}", "c".repeat(64)));
     // muxed_url still None
     let errs = validate_entries(&[e]);
     assert!(
-        errs.iter().any(|s| s.contains("muxed_blake3 set without muxed_url")),
+        errs.iter()
+            .any(|s| s.contains("muxed_blake3 set without muxed_url")),
         "{errs:?}",
     );
 }

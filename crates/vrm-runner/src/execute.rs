@@ -238,86 +238,82 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
 
     // Sequence-mode dispatches `render_sequence` into a per-test frames directory.
     // Single-frame mode (the legacy path) dispatches `render`.
-    let (output_png, actual_color_space, sequence) =
-        if let Some(seq_block) = &plan.render_sequence {
-            let seq_output_dir = opts.output_dir.join(format!(
-                "{}_{}_frames",
-                plan.id, opts.renderer_name
-            ));
-            std::fs::create_dir_all(&seq_output_dir)?;
-            progress(
-                opts,
-                "render_sequence",
-                &plan.id,
-                json!({ "output_dir": seq_output_dir }),
-            );
+    let (output_png, actual_color_space, sequence) = if let Some(seq_block) = &plan.render_sequence
+    {
+        let seq_output_dir = opts
+            .output_dir
+            .join(format!("{}_{}_frames", plan.id, opts.renderer_name));
+        std::fs::create_dir_all(&seq_output_dir)?;
+        progress(
+            opts,
+            "render_sequence",
+            &plan.id,
+            json!({ "output_dir": seq_output_dir }),
+        );
 
-            let params = render_sequence_params(
-                &session_id,
-                &plan.output,
-                seq_block,
-                seq_output_dir.to_string(),
-            );
-            let result: Result<ops::RenderSequenceResult, _> =
-                adapter.call("render_sequence", params);
+        let params = render_sequence_params(
+            &session_id,
+            &plan.output,
+            seq_block,
+            seq_output_dir.to_string(),
+        );
+        let result: Result<ops::RenderSequenceResult, _> = adapter.call("render_sequence", params);
 
-            let seq_result = match result {
-                Ok(r) => SequenceExecuteResult {
-                    status: SequenceStatus::Ok,
-                    result: Some(r),
-                    unimplemented_phase: None,
-                    error_message: None,
-                },
-                Err(crate::adapter::AdapterError::Rpc(ref rpc_err))
-                    if rpc_err.code == -32000 =>
-                {
-                    let phase = rpc_err
-                        .data
-                        .as_ref()
-                        .and_then(|d| d.get("phase"))
-                        .and_then(|v| v.as_str())
-                        .map(String::from);
-                    SequenceExecuteResult {
-                        status: SequenceStatus::Unimplemented,
-                        result: None,
-                        unimplemented_phase: phase,
-                        error_message: None,
-                    }
-                }
-                Err(e) => SequenceExecuteResult {
-                    status: SequenceStatus::Error,
+        let seq_result = match result {
+            Ok(r) => SequenceExecuteResult {
+                status: SequenceStatus::Ok,
+                result: Some(r),
+                unimplemented_phase: None,
+                error_message: None,
+            },
+            Err(crate::adapter::AdapterError::Rpc(ref rpc_err)) if rpc_err.code == -32000 => {
+                let phase = rpc_err
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("phase"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                SequenceExecuteResult {
+                    status: SequenceStatus::Unimplemented,
                     result: None,
-                    unimplemented_phase: None,
-                    error_message: Some(e.to_string()),
-                },
-            };
-
-            // No single PNG in sequence mode — use a sentinel path.
-            // (A follow-up will refactor ExecuteResult to handle this cleanly.)
-            let placeholder_png = seq_output_dir.join("0000.png");
-            let cs = seq_result
-                .result
-                .as_ref()
-                .map(|r| r.actual_color_space)
-                .unwrap_or(ops::ColorSpace::Linear);
-            (placeholder_png, cs, Some(seq_result))
-        } else {
-            let png = opts
-                .output_dir
-                .join(format!("{}_{}.png", plan.id, opts.renderer_name));
-            if let Some(parent) = png.parent() {
-                std::fs::create_dir_all(parent)?;
+                    unimplemented_phase: phase,
+                    error_message: None,
+                }
             }
-            progress(opts, "render", &plan.id, json!({ "output": png }));
-            let render: ops::RenderResult = adapter
-                .call(
-                    "render",
-                    render_params(&session_id, &plan.output, png.to_string()),
-                )
-                .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
-            let output_png = Utf8PathBuf::from(render.output_path);
-            (output_png, render.actual_color_space, None)
+            Err(e) => SequenceExecuteResult {
+                status: SequenceStatus::Error,
+                result: None,
+                unimplemented_phase: None,
+                error_message: Some(e.to_string()),
+            },
         };
+
+        // No single PNG in sequence mode — use a sentinel path.
+        // (A follow-up will refactor ExecuteResult to handle this cleanly.)
+        let placeholder_png = seq_output_dir.join("0000.png");
+        let cs = seq_result
+            .result
+            .as_ref()
+            .map(|r| r.actual_color_space)
+            .unwrap_or(ops::ColorSpace::Linear);
+        (placeholder_png, cs, Some(seq_result))
+    } else {
+        let png = opts
+            .output_dir
+            .join(format!("{}_{}.png", plan.id, opts.renderer_name));
+        if let Some(parent) = png.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        progress(opts, "render", &plan.id, json!({ "output": png }));
+        let render: ops::RenderResult = adapter
+            .call(
+                "render",
+                render_params(&session_id, &plan.output, png.to_string()),
+            )
+            .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+        let output_png = Utf8PathBuf::from(render.output_path);
+        (output_png, render.actual_color_space, None)
+    };
 
     let position_dump: Option<ops::DumpBonePositionsResult> = if opts.reference_positions.is_some()
     {
@@ -496,10 +492,9 @@ pub fn execute_plan_capturing_positions(
     // Sequence-mode: dispatch render_sequence but swallow Unimplemented so
     // position capture can still proceed. Single-frame mode: existing path.
     if let Some(seq_block) = &plan.render_sequence {
-        let seq_output_dir = opts.output_dir.join(format!(
-            "{}_{}_frames",
-            plan.id, opts.renderer_name
-        ));
+        let seq_output_dir = opts
+            .output_dir
+            .join(format!("{}_{}_frames", plan.id, opts.renderer_name));
         std::fs::create_dir_all(&seq_output_dir)?;
         progress(
             opts,
