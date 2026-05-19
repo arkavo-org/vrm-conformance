@@ -46,8 +46,7 @@ final class Operations: @unchecked Sendable {
     /// three Phase 2 physics ops out of the deferral block; they now have
     /// real handlers backed by VRMMetalKit's spring-bone GPU system.
     /// VRMA ops are deferred to a future phase pending VMK#165 closure.
-    /// `render_sequence` is deferred to the render-sequence phase; VMK is
-    /// the first real adapter in the rollout plan.
+    /// `render_sequence` was promoted to a real handler in Phase 5 Task 1.
     static let reservedPhases: [String: String] = [
         "set_environment":         "v1.x",
         "set_expression":          "Phase 3",
@@ -58,7 +57,6 @@ final class Operations: @unchecked Sendable {
         "dump_humanoid_pose":      "vrma-v1",
         "dump_expression_weights": "vrma-v1",
         "dump_look_at_state":      "vrma-v1",
-        "render_sequence":         "v1.x-sequence",
     ]
 
     /// Phase label for the still-deferred Phase 2 ops.
@@ -148,6 +146,7 @@ final class Operations: @unchecked Sendable {
         case "step_physics":            return handleStepPhysics(params: params)
         case "reset_physics":           return handleResetPhysics(params: params)
         case "animate_root_transform":  return handleAnimateRootTransform(params: params)
+        case "render_sequence":         return handleRenderSequence(params: params)
         case "dump_bone_positions":     return handleDumpBonePositions(params: params)
         case "dispose":                 return handleDispose(params: params)
         default:
@@ -790,6 +789,250 @@ final class Operations: @unchecked Sendable {
         // Clear inertia hint so subsequent renders don't see phantom motion.
         physicsRenderer.characterVelocity = .zero
         return .ok(.object([:]))
+    }
+
+    // MARK: - render_sequence (Phase 5 Task 1)
+
+    /// Multi-frame capture with optional root-transform animation (RFC-0004).
+    ///
+    /// Each frame is rendered through the same MSAA 4× path as `handleRender`
+    /// after applying the linear root-transform interpolation. Physics is
+    /// driven implicitly by each frame's real draw call (VMK steps
+    /// spring-bone during render).
+    ///
+    /// Phase 5 scope: PNG sequence + animate_root_transform only.
+    /// `apply_vrma` and `output_format` ∈ {Mp4, Mov} are rejected as
+    /// invalid_params; both ship as follow-ups.
+    ///
+    /// `blake3` on each emitted SequenceFrame is populated with a 64-zero
+    /// sentinel. The runner re-hashes from PNG bytes after this method
+    /// returns so the manifest gets real hashes (centralizes hashing in
+    /// Rust where the diff engine already uses blake3).
+    private func handleRenderSequence(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else { return invalidParams("missing session_id") }
+
+        guard case .number(let widthD) = obj["width"],
+              let width = Int(exactly: widthD), width > 0,
+              case .number(let heightD) = obj["height"],
+              let height = Int(exactly: heightD), height > 0,
+              case .string(let outputDir) = obj["output_dir"],
+              case .number(let frameCountD) = obj["frame_count"],
+              let frameCount = Int(exactly: frameCountD), frameCount > 0,
+              case .number(let frameHz) = obj["frame_hz"],
+              case .number(let physicsDt) = obj["physics_dt_seconds"],
+              case .string(let colorSpace) = obj["color_space"],
+              case .string(let outputFormat) = obj["output_format"]
+        else {
+            return invalidParams("missing or malformed required render_sequence fields")
+        }
+
+        // 60 Hz physics floor (methodology pin, RFC-0004 failure-modes).
+        if physicsDt > 1.0 / 60.0 + 1e-9 {
+            return invalidParams("physics_dt_seconds \(physicsDt) exceeds 60 Hz floor (1/60 ≈ 0.01667)")
+        }
+
+        // Mutual exclusion: animate_root_transform + apply_vrma both set ⇒ reject.
+        let hasRootAnim = isPresent(obj["animate_root_transform"])
+        let hasVrma = isPresent(obj["apply_vrma"])
+        if hasRootAnim && hasVrma {
+            return invalidParams("animate_root_transform and apply_vrma are mutually exclusive")
+        }
+        if hasVrma {
+            return invalidParams("apply_vrma is not yet implemented in vrm-metal-kit (Phase 5 deferral)")
+        }
+
+        // Only PNG sequence is supported in this phase. Mp4/Mov mux is a
+        // follow-up.
+        if outputFormat != "png_sequence" {
+            return invalidParams("output_format \"\(outputFormat)\" is not yet supported by vrm-metal-kit; only png_sequence")
+        }
+
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+        guard let device = device, let commandQueue = commandQueue else {
+            return renderFailed("no Metal device or command queue available")
+        }
+
+        // Parse optional animate_root_transform; absent ⇒ no movement.
+        var startV = SIMD3<Float>(0, 0, 0)
+        var endV = SIMD3<Float>(0, 0, 0)
+        if hasRootAnim, case .object(let anim) = obj["animate_root_transform"] {
+            guard let s = parseVec3(anim["translation_start"]),
+                  let e = parseVec3(anim["translation_end"])
+            else {
+                return invalidParams("animate_root_transform: translation_start/end required as [f32; 3]")
+            }
+            startV = s
+            endV = e
+        }
+
+        // Snapshot root translations for restoration after the loop so
+        // subsequent ops don't see drift.
+        let rootNodes: [VRMNode] = session.model.nodes.filter { $0.parent == nil }
+        let originalTranslations: [SIMD3<Float>] = rootNodes.map { $0.translation }
+
+        // Camera + lighting — same as handleRender. Persisted once before
+        // the loop; the renderer's matrices and lighting state are stable
+        // across frames within a single render_sequence call.
+        let position = session.cameraPosition ?? SIMD3<Float>(0, 1.4, 1.5)
+        let target = session.cameraTarget ?? SIMD3<Float>(0, 1.4, 0)
+        let up = session.cameraUp ?? SIMD3<Float>(0, 1, 0)
+        let fov = session.cameraFovDegrees ?? 30.0
+        let aspect = Float(width) / Float(height)
+        session.renderer.projectionMatrix = perspective(
+            fovRadians: fov * .pi / 180.0,
+            aspect: aspect,
+            near: 0.01,
+            far: 100.0
+        )
+        session.renderer.viewMatrix = lookAt(eye: position, center: target, up: up)
+        if let dir = session.directionalDir,
+           let color = session.directionalColor,
+           let intensity = session.directionalIntensity {
+            session.renderer.setLight(0, direction: dir, color: color, intensity: intensity)
+            session.renderer.disableLight(1)
+            session.renderer.disableLight(2)
+        }
+        if let ambColor = session.ambientColor, let ambIntensity = session.ambientIntensity {
+            session.renderer.setAmbientColor(ambColor * ambIntensity)
+        }
+
+        // Ensure output_dir exists.
+        do {
+            try FileManager.default.createDirectory(
+                atPath: outputDir,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            return renderFailed("create output_dir \(outputDir): \(error)")
+        }
+
+        let colorPixelFormat: MTLPixelFormat =
+            (colorSpace.lowercased() == "srgb") ? .rgba8Unorm_srgb : .rgba8Unorm
+        let sampleCount = Operations.msaaSampleCount
+        let zeroHash = "blake3:" + String(repeating: "0", count: 64)
+
+        var frames: [JSONValue] = []
+
+        for i in 0..<frameCount {
+            // Interpolate root translation. For frameCount==1, t=0 (no animation).
+            let t: Float = frameCount > 1 ? Float(i) / Float(frameCount - 1) : 0
+            let offset = startV + (endV - startV) * t
+            for (idx, root) in rootNodes.enumerated() {
+                root.translation = originalTranslations[idx] + offset
+                root.updateWorldTransform()
+            }
+
+            // Per-frame MSAA targets — allocating inside the loop keeps memory
+            // pressure flat (resolve target's .shared bytes deallocate after
+            // each PNG export).
+            let msColorDesc = MTLTextureDescriptor()
+            msColorDesc.textureType = .type2DMultisample
+            msColorDesc.pixelFormat = colorPixelFormat
+            msColorDesc.width = width
+            msColorDesc.height = height
+            msColorDesc.sampleCount = sampleCount
+            msColorDesc.usage = [.renderTarget]
+            msColorDesc.storageMode = .private
+            guard let msColorTex = device.makeTexture(descriptor: msColorDesc) else {
+                return renderFailed("frame \(i): failed to create MS color texture")
+            }
+
+            let resolveDesc = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: colorPixelFormat,
+                width: width, height: height, mipmapped: false
+            )
+            resolveDesc.usage = [.renderTarget, .shaderRead]
+            resolveDesc.storageMode = .shared
+            guard let resolveTex = device.makeTexture(descriptor: resolveDesc) else {
+                return renderFailed("frame \(i): failed to create resolve texture")
+            }
+
+            let depthDesc = MTLTextureDescriptor()
+            depthDesc.textureType = .type2DMultisample
+            depthDesc.pixelFormat = .depth32Float
+            depthDesc.width = width
+            depthDesc.height = height
+            depthDesc.sampleCount = sampleCount
+            depthDesc.usage = [.renderTarget]
+            depthDesc.storageMode = .private
+            guard let msDepthTex = device.makeTexture(descriptor: depthDesc) else {
+                return renderFailed("frame \(i): failed to create MS depth texture")
+            }
+
+            let rpd = MTLRenderPassDescriptor()
+            rpd.colorAttachments[0].texture = msColorTex
+            rpd.colorAttachments[0].resolveTexture = resolveTex
+            rpd.colorAttachments[0].loadAction = .clear
+            rpd.colorAttachments[0].storeAction = .multisampleResolve
+            rpd.colorAttachments[0].clearColor = MTLClearColor(red: 1.0, green: 0.0, blue: 1.0, alpha: 1.0)
+            rpd.depthAttachment.texture = msDepthTex
+            rpd.depthAttachment.loadAction = .clear
+            rpd.depthAttachment.storeAction = .dontCare
+            rpd.depthAttachment.clearDepth = 1.0
+
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                return renderFailed("frame \(i): failed to make command buffer")
+            }
+
+            MainActor.assumeIsolated {
+                session.renderer.drawOffscreenHeadless(
+                    to: msColorTex,
+                    depth: msDepthTex,
+                    commandBuffer: commandBuffer,
+                    renderPassDescriptor: rpd
+                )
+            }
+            let sem = DispatchSemaphore(value: 0)
+            commandBuffer.addCompletedHandler { _ in sem.signal() }
+            commandBuffer.commit()
+            sem.wait()
+            if let err = commandBuffer.error {
+                return renderFailed("frame \(i): GPU error: \(err)")
+            }
+
+            // Export PNG.
+            let framePath = "\(outputDir)/\(String(format: "%04d", i)).png"
+            do {
+                try writeTexturePng(resolveTex, to: framePath)
+            } catch {
+                return renderFailed("frame \(i): PNG export failed: \(error)")
+            }
+
+            frames.append(.object([
+                "index": .number(Double(i)),
+                "timestamp_seconds": .number(Double(i) / Double(frameHz)),
+                "path": .string(framePath),
+                "blake3": .string(zeroHash),
+            ]))
+        }
+
+        // Restore original root translations so subsequent ops on this
+        // session see the avatar at rest.
+        for (idx, root) in rootNodes.enumerated() {
+            root.translation = originalTranslations[idx]
+            root.updateWorldTransform()
+        }
+
+        let durationSeconds = frameHz > 0 ? Double(frameCount) / frameHz : 0.0
+
+        return .ok(.object([
+            "frames": .array(frames),
+            "duration_seconds": .number(durationSeconds),
+            "actual_color_space": .string(colorSpace),
+            "frame_hz_achieved": .number(frameHz),
+        ]))
+    }
+
+    /// True iff the value is present and not JSONValue.null.
+    private func isPresent(_ v: JSONValue?) -> Bool {
+        guard let v = v else { return false }
+        if case .null = v { return false }
+        return true
     }
 
     // MARK: - Helpers
