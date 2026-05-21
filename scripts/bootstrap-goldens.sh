@@ -319,14 +319,18 @@ if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
 
         # Push each ok PNG to the goldens manifest.
         if [ -f "$UNIVRM_OUT/local-manifest.json" ]; then
-            entries_json=$(cat "$UNIVRM_OUT/local-manifest.json")
+            # Read directly from the file — never embed JSON in a python
+            # triple-quoted string. Entry error_message fields contain
+            # multi-line stack traces with control characters that break
+            # python heredoc parsing.
             ok_test_ids=$(python3 -c "
-import json
-m = json.loads('''$entries_json''')
+import json, sys
+with open(sys.argv[1]) as f:
+    m = json.load(f)
 for e in m.get('entries', []):
     if e.get('status') == 'ok':
         print(e['test_id'])
-")
+" "$UNIVRM_OUT/local-manifest.json")
             echo "    pushing $(echo "$ok_test_ids" | wc -w | tr -d ' ') univrm PNGs to manifest"
             for test_id in $ok_test_ids; do
                 png="$UNIVRM_OUT/${test_id}.png"
