@@ -1743,3 +1743,89 @@ This entry documents infrastructure, not cross-renderer SSIM. Real numbers acros
 ### Forward
 
 The swing-seq corpus's main payoff is in physics-divergence detection — single-frame captures collapse the entire chain trajectory into one frame, hiding renderer differences in inertia / drag / overshoot. Spreading the same 0.15 m translation across 60 frames at 30 Hz gives reviewers 60 frames of per-frame SSIM signal instead of 1. The "arms twist inside-out during walking" failure class (VMK#165, since closed) is the canonical example of behavior only visible in a sequence — sequences finally make that class of finding directly observable in the suite.
+
+## VMK 0.16.0-rc.1 verification — animated spring-bone non-determinism regression
+
+**Date**: 2026-05-21, vrm-conformance commit `63a97cc` (working tree, RC pin bump unmerged).
+
+**RC under test**: [`0.16.0-rc.1`](https://github.com/arkavo-org/VRMMetalKit/releases/tag/0.16.0-rc.1) (commit `6a7084d`, pre-released 2026-05-21). RC closes VMK#196, #237, #242, #243, #268, #273 (see `adapters/vrm-metal-kit/Package.swift` for the full diff annotation).
+
+### Headline
+
+| Surface | Result vs 0.15.2 |
+|---|---|
+| MToon (49 tests) | ✅ byte-identical |
+| Static spring-bone settle (82 tests) | ✅ byte-identical |
+| Animated swing spring-bone (82 tests) | ⚠️ **non-deterministic** on a subset; same RC binary + same input → different bytes |
+| `render_sequence` end-to-end | ✅ all 60 frames produced |
+| Conformance pass-rate vs UniVRM consortium reference | 190 / 191 (99%) — matches 0.15.1 baseline pass-rate exactly |
+| Pairwise SSIM mean vs UniVRM | 0.954 (was 0.947 at 0.15.1) — improved on 2.3× larger sample |
+
+The RC ships the suite's six in-flight upstream closures with no MToon or settle regression. **The single regression worth flagging is a hidden reproducibility loss on the animated swing path.**
+
+### Reproducer (10 lines)
+
+```bash
+# Build VMK adapter twice — once at 0.15.2 (de87578), once at 0.16.0-rc.1 (6a7084d)
+PLAN=goldens-cache/_assets_swing/swing_springbone_joints_16.test.yaml
+
+# 0.15.2 — 3 runs, byte-identical:
+for i in 1 2 3; do
+    target/release/vrm-runner execute-test-plan \
+        --plan "$PLAN" --adapter-bin /path/to/vmk-adapter.0_15_2 \
+        --asset-dir "$(dirname $PLAN)" --output-dir /tmp/b$i \
+        --renderer-name vrm-metal-kit --json >/dev/null
+done
+# → all three PNGs blake3=14b61fb5..., 46068 bytes
+
+# 0.16.0-rc.1 — 5 runs, 3 distinct outputs:
+for i in 1 2 3 4 5; do … same with vmk-adapter.rc … ; done
+# → 14b61fb5 (×2), d5e06701 (×2), 1144c101 (×1); pairwise SSIM ≥ 0.9885
+```
+
+### What we observed
+
+Direct A/B (0.15.2 vs RC, same binary) plus same-binary-twice noise characterization on the swing sweep:
+
+| `swing_springbone_joints_16`, 5 runs, RC binary | size | blake3 |
+|---|---|---|
+| run 1 | 46068 | `14b61fb5...` ← matches 0.15.2 baseline |
+| run 2 | 46068 | `14b61fb5...` ← matches 0.15.2 baseline |
+| run 3 | 48480 | `d5e06701...` |
+| run 4 | 48734 | `1144c101...` |
+| run 5 | 48480 | `d5e06701...` |
+
+Pairwise SSIM r1 vs r3/r4/r5: 0.9897 / 0.9885 / 0.9897. Same binary, same input, same hardware (Apple M4 Max), same machine, contiguous runs — 0.15.2 produced byte-identical output across all repetitions; RC produced three distinct outputs, two of which happen to match the 0.15.2 baseline.
+
+Subset of swing tests where the RC was observed to drift in at least one of two runs vs the 0.15.2 baseline (others observed deterministic in this sweep, but the noise floor of "0.15.2 always reproduces, RC sometimes reproduces" suggests broader coverage with more samples):
+
+- `swing_springbone_joints_16`
+- `swing_springbone_drag_0`, `_0p2`, `_0p8`, `_1`
+- `swing_springbone_stiffness_0p2`, `_0p8`, `_1`
+- `swing_springbone_segment_0p1`, `_0p2`
+- `swing_springbone_gravity_0p02`, `_0p05`, `_0p1`, `_0p2` (also confounded by corpus retune `2a51ecc`)
+
+NOT affected (verified byte-identical across runs and against 0.15.2): all MToon tests, all static settle tests, `swing_springbone_default`, `swing_springbone_joints_8`.
+
+### Why the consensus report is the wrong oracle here
+
+We initially saw the signal in `scripts/consensus-report.sh`'s per-test SSIM delta vs the 0.15.1 baseline (15 swing tests with mean Δ > 0.001 in unexpected subclasses — joints, drag, stiffness, segment, taper, multichain). Direct A/B then revealed that the consensus signal was contaminated: e.g., `swing_springbone_joints_8` appeared shifted in consensus (-0.0034 mean Δ across peers) but is byte-identical in direct A/B. Peer renderers (three-vrm / godot-vrm / univrm) also produce slightly different output between bootstraps, and the consensus pair-wise SSIM picks up that noise too. Cross-bootstrap consensus deltas under ~0.01 are noisy.
+
+The reproducibility signal (RC same-binary twice → different bytes) is the cleaner oracle and is what we file on.
+
+### Likely cause
+
+Animated swing tests are the only affected surface — they drive the spring-bone integrator across multiple per-frame substeps via `animate_root_transform`. Static settle tests are byte-identical, MToon is byte-identical, `swing_springbone_default` (single 1-joint chain) is byte-identical. The race signature lights up on multi-joint chains under per-frame physics integration.
+
+Highest-prior PRs in the RC's spring-bone surface:
+
+- **PR #278** (VMK#268, CPU/GPU race on shared-buffer multi-system) — fixes a real CPU/GPU race in the same code path. The PR's claim "single-system / self-committed-buffer callers (our adapter) unaffected" appears to need re-verification: we are single-system, we are seeing non-determinism on animated input that we did not see at 0.15.2, and the affected code is exactly the `animatedRootPositionsBuffer` write path the PR re-architected.
+- **PR #274** (VMK#237, five SpringBone fixes including "completion handler optimization") — changes when the CPU completion handler fires across substeps. If a downstream read of the simulation state depends on per-substep completion ordering that is no longer synchronized, that is a race.
+
+### Filed upstream
+
+[VMK#283](https://github.com/arkavo-org/VRMMetalKit/issues/283) (2026-05-21). Issue body archived locally at `docs/upstream/VMK-0.16.0-rc.1-noise.md`.
+
+### Promotion verdict
+
+**Do not promote 0.16.0-rc.1 to the conformance suite's VMK pin until the swing non-determinism is closed.** Hold at 0.15.2. The remaining surface (KHR PBR extensions, VRMExpressionController weight getters, GLTFSceneGraph refactor) ships behavioural improvements but does not justify accepting a reproducibility regression on a surface the suite actively tests.
