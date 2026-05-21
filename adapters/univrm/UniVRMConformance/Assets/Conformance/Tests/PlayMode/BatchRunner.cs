@@ -221,7 +221,13 @@ namespace Conformance.Tests.Play
             // declares render_sequence, run a per-frame loop instead of the
             // single-frame render. Coroutine yields require splitting cleanup
             // from the loop (C# iterator restriction on try/finally across yield).
-            if (t.render_sequence != null)
+            //
+            // JsonUtility quirk — absent JSON sub-objects deserialize as
+            // default-constructed instances rather than null, so a non-null
+            // check alone matches every plan and rejects every static-frame
+            // test on `frame_count must be >= 1` downstream. Match the VRMA
+            // precedent (line ~191): guard on a payload-bearing field.
+            if (t.render_sequence != null && t.render_sequence.frame_count > 0)
             {
                 Manifest.EntryDto sequenceResult = null;
                 yield return RenderSequenceCo(outputDir, rendererName, t, cam, vrm, e => sequenceResult = e);

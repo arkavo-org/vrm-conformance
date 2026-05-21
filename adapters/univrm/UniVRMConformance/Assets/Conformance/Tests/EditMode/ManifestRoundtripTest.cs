@@ -122,5 +122,55 @@ namespace Conformance.Tests
             Assert.IsNull(back.root_transform);
             StringAssert.Contains("\"vrma\":", json);
         }
+
+        // Regression — JsonUtility instantiates an absent nested object as a
+        // default-constructed instance (frame_count=0), not null. Dispatch
+        // checks that only test `t.render_sequence != null` would treat every
+        // static-frame plan as a sequence test and reject it on `frame_count
+        // must be >= 1`. The contract here pins the payload-bearing check
+        // that BatchRunner.cs:224 and Conformance.cs:161 must use.
+        [Test]
+        public void StaticFrameManifestNotDetectedAsSequence()
+        {
+            var manifest = JsonUtility.FromJson<Manifest.ManifestDto>(FixtureJson);
+            var t = manifest.tests[0];
+
+            // The quirk itself — frame_count defaults to 0 for an absent field.
+            Assert.AreEqual(0, t.render_sequence.frame_count,
+                "absent render_sequence still yields a default DTO with frame_count=0");
+
+            // The payload-bearing presence check — what dispatch sites must use.
+            bool isSequence = t.render_sequence != null && t.render_sequence.frame_count > 0;
+            Assert.IsFalse(isSequence, "static-frame plans must NOT enter sequence dispatch");
+        }
+
+        [Test]
+        public void SequenceManifestDetectedAsSequence()
+        {
+            const string sequenceJson = @"{
+                ""manifest_version"": 1,
+                ""output_dir"": ""/tmp/out"",
+                ""renderer_name"": ""univrm"",
+                ""tests"": [
+                    {
+                        ""test_id"": ""swing_seq_default"",
+                        ""vrm_path"": ""/tmp/x.vrm"",
+                        ""spec_section"": ""VRMC_springBone"",
+                        ""render_sequence"": {
+                            ""frame_count"": 60,
+                            ""frame_hz"": 60.0,
+                            ""physics_dt_seconds"": 0.01666667,
+                            ""output_format"": ""png_sequence""
+                        }
+                    }
+                ]
+            }";
+            var manifest = JsonUtility.FromJson<Manifest.ManifestDto>(sequenceJson);
+            var t = manifest.tests[0];
+
+            Assert.AreEqual(60, t.render_sequence.frame_count);
+            bool isSequence = t.render_sequence != null && t.render_sequence.frame_count > 0;
+            Assert.IsTrue(isSequence, "render_sequence plans with frame_count > 0 must enter sequence dispatch");
+        }
     }
 }

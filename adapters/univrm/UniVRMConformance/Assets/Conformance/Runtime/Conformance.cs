@@ -158,7 +158,12 @@ namespace Conformance
             // frame physics + render loop that's only available with
             // Application.isPlaying == true. EditMode -executeMethod has no
             // frame ticks. Mirror the VRMA rejection above.
-            if (t.render_sequence != null)
+            //
+            // JsonUtility quirk: absent JSON sub-objects deserialize as
+            // default-constructed instances (frame_count=0), so a non-null
+            // check alone matches every static-frame plan too. Guard on the
+            // payload-bearing frame_count to match BatchRunner.cs.
+            if (t.render_sequence != null && t.render_sequence.frame_count > 0)
             {
                 return new Manifest.EntryDto
                 {
