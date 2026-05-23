@@ -137,7 +137,7 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
         OutlineWidthMode::ScreenCoordinates => "screenCoordinates",
     };
 
-    json!({
+    let mut mtoon = json!({
         "specVersion": "1.0",
         "transparentWithZWrite": p.transparent_with_z_write,
         "renderQueueOffsetNumber": p.render_queue_offset_number,
@@ -157,7 +157,19 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
         "uvAnimationScrollXSpeedFactor": p.uv_animation_scroll_x_speed_factor,
         "uvAnimationScrollYSpeedFactor": p.uv_animation_scroll_y_speed_factor,
         "uvAnimationRotationSpeedFactor": p.uv_animation_rotation_speed_factor
-    })
+    });
+
+    // `shadeMultiplyTexture` per VRMC_materials_mtoon-1.0:
+    //   shadeColorTerm = shadeColorFactor.rgb * texture(shadeMultiplyTexture, uv).rgb
+    // We reuse the global texture index 0 (the procedural quadrant
+    // checkerboard appended by `emit_vrm` when any texture-needing
+    // param is set), so the same texture serves both baseColorTexture
+    // and shadeMultiplyTexture without duplication.
+    if p.shade_multiply_texture {
+        mtoon["shadeMultiplyTexture"] = json!({ "index": 0 });
+    }
+
+    mtoon
 }
 
 /// glTF base material wrapping MToon. MToon depends on KHR_materials_unlit

@@ -2137,6 +2137,33 @@ The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera 
 
 **For the firstPerson question**: godot's failure to differentiate the 4 variants is consistent with the avatar not being meaningfully rendered to begin with — there's nothing for `perform_head_hiding()` to cull because the mesh isn't visibly present. Diagnosing godot's MToon-shader pipeline is the right next thread, not a corpus retune.
 
+## MToon shadeMultiplyTexture — VMK + three-vrm both conformant; godot blocked by import-time root cause
+
+**Date**: 2026-05-23. Surfaced on the first run of the new shadeMultiplyTexture sweep.
+
+`crates/vrm-asset-generator/src/sweep.rs::mtoon_shade_multiply_texture_sweep` emits 6 MToon assets exercising the spec's shaded-color path (`shadeColorTerm = shadeColorFactor.rgb * texture(shadeMultiplyTexture, uv).rgb`, per `docs/upstream-specs/vrm-specification/specification/VRMC_materials_mtoon-1.0/README.md:307`). All variants reuse the procedural 16×16 quadrant checkerboard texture (index 0 — shared with the texture-transform sweep, no duplication). Renders direct via `vrm-runner execute-test-plan`:
+
+| test_id | shadeColorFactor | shadingShift | vrm-metal-kit | three-vrm | godot-vrm |
+|---|---|---|---|---|---|
+| `mtoon_shadetex_baseline` (no texture) | `[0.5, 0.5, 0.5]` | `0.0` | `5d8cf1789282` | `6ff1f5687375` | `4587bf323df1` |
+| `mtoon_shadetex_default` | `[0.5, 0.5, 0.5]` | `0.0` | `dfec1281483f` | `8906734a25b3` | `4587bf323df1` |
+| `mtoon_shadetex_white_tint` | `[1, 1, 1]` | `0.0` | `3db2f48a6638` | `42ac57832959` | `4587bf323df1` |
+| `mtoon_shadetex_red_tint` | `[1, 0, 0]` | `0.0` | `d721f4fd2186` | `dfa83093fffc` | `4587bf323df1` |
+| `mtoon_shadetex_shift_neg0p5` | `[1, 1, 1]` | `-0.5` | `ccb0c061e330` | `b98c612e8985` | `4587bf323df1` |
+| `mtoon_shadetex_shift_pos0p5` | `[1, 1, 1]` | `+0.5` | `dc0697e11d63` | `6e096f4213de` | `4587bf323df1` |
+
+**vrm-metal-kit: fully spec-conformant.** All 6 variants render distinctly — including the baseline-vs-default pair (`5d8cf1789282` vs `dfec1281483f` proves VMK reads `shadeMultiplyTexture` and multiplies it into the shade term) and the per-axis controls (tinted vs un-tinted, shifted vs unshifted). Notable contrast with the texture-transform sweep where VMK ignored `KHR_texture_transform` entirely: VMK's MToon parser **does** read the per-MToon texture bindings (`shadeMultiplyTexture` here), it just doesn't apply the per-textureInfo `KHR_texture_transform` extension to the UVs. So VMK#288's scope is narrower than it might've appeared — the fix only needs to thread the UV transform into the shader's texture-sampling step, not add new texture-binding support.
+
+**three-vrm: fully spec-conformant.** All 6 distinct hashes, including the red-tint variant which exercises the multiplicative blending (red × {red, green, blue, yellow} → {red, black, black, red}).
+
+**godot-vrm: every variant produces `4587bf323df1`** — the same hash godot has been producing for every textured/no-texture mtoon_default render. Consistent with the documented `_import_post` import-time vs runtime mismatch root cause: godot's scene never gets the textured material attached, so the conformance test can't observe any shading behaviour. Marked as blocked by the addon-import-time fix.
+
+### Net signal
+
+- **VMK conformance**: 1-of-2 textured-MToon paths conformant (shadeMultiplyTexture ✅, baseColorTexture + KHR_texture_transform ❌). Filed VMK#287 (emissive) + VMK#288 (texture transform) cover the gaps.
+- **three-vrm conformance**: clean on all texture-related conformance tests so far (emissive minus HDR-clamp expected, firstPerson after the adapter fix, baseColorTexture + transform, shadeMultiplyTexture).
+- **godot-vrm**: every texture-related finding inherits from the import-time root cause. Sub-question of "does godot support shadeMultiplyTexture in its addon shader" can't be answered until that root cause closes.
+
 ## KHR_texture_transform — three distinct conformance patterns
 
 **Date**: 2026-05-23. Surfaced on the first run of the new texture-transform sweep.

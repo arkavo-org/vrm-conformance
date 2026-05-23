@@ -194,6 +194,86 @@ pub fn mtoon_emissive_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// MToon `shadeMultiplyTexture` sweep: 6 variants exercising the spec's
+/// shaded-color path (`shadeColorTerm = shadeColorFactor * texture(shadeMultiplyTexture, uv)`).
+/// All variants use the procedural quadrant checkerboard texture; the
+/// sweep axis is the surrounding shading state that determines how
+/// much of the rendered sphere is in the shadowed (texture-visible)
+/// region.
+///
+/// Variants:
+/// - `mtoon_shadetex_baseline` — `shadeMultiplyTexture = None`,
+///   `shadeColorFactor = [0.5, 0.5, 0.5]` (the suite's MToon default).
+///   The visual baseline: shaded portion of the sphere renders as
+///   plain mid-gray. Difference between baseline and any textured
+///   variant proves the renderer reads `shadeMultiplyTexture`.
+/// - `mtoon_shadetex_default` — same default shading, but with the
+///   checkerboard texture on `shadeMultiplyTexture`. Lit half stays
+///   white from `baseColorFactor=[1,1,1]`; shaded half gets the
+///   texture × `shadeColorFactor=[0.5,0.5,0.5]` blend.
+/// - `mtoon_shadetex_white_tint` — `shadeColorFactor = [1, 1, 1]`,
+///   textured. With no tint, the shaded half should display the
+///   raw checkerboard colors directly. Maximally visible signal.
+/// - `mtoon_shadetex_red_tint` — `shadeColorFactor = [1, 0, 0]`,
+///   textured. Tests the multiplicative blending: red × {red, green,
+///   blue, yellow} should produce {red, black, black, red} in the
+///   shaded region.
+/// - `mtoon_shadetex_shift_neg0p5` — `shadingShiftFactor = -0.5`,
+///   pushing more of the sphere into shadow. More texture visible.
+/// - `mtoon_shadetex_shift_pos0p5` — `shadingShiftFactor = 0.5`,
+///   pulling the sphere out of shadow. Less texture visible (lit
+///   region dominates).
+pub fn mtoon_shade_multiply_texture_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    // Baseline: no shade texture, default shadeColorFactor mid-gray.
+    let mut baseline = MToonParams::defaults("mtoon_shadetex_baseline");
+    // Explicitly false so the conditional-emit guard in emit_vrm
+    // produces a no-texture render (validator + visual-diff baseline).
+    baseline.shade_multiply_texture = false;
+    out.push(baseline);
+
+    // Textured + default shading: visible checkerboard in shaded half,
+    // tinted by shadeColorFactor=[0.5,0.5,0.5].
+    let mut default_textured = MToonParams::defaults("mtoon_shadetex_default");
+    default_textured.shade_multiply_texture = true;
+    out.push(default_textured);
+
+    // Textured + white shadeColorFactor: raw checkerboard colors in
+    // shaded region. Maximum visible signal — easiest to inspect.
+    let mut white_tint = MToonParams::defaults("mtoon_shadetex_white_tint");
+    white_tint.shade_multiply_texture = true;
+    white_tint.shade_color_factor = [1.0, 1.0, 1.0];
+    out.push(white_tint);
+
+    // Textured + red shadeColorFactor: only red channel survives in
+    // shaded region. Per spec multiplicative blending, the green and
+    // blue quadrants should darken to near-black, while red and yellow
+    // (red+green) should keep their red component.
+    let mut red_tint = MToonParams::defaults("mtoon_shadetex_red_tint");
+    red_tint.shade_multiply_texture = true;
+    red_tint.shade_color_factor = [1.0, 0.0, 0.0];
+    out.push(red_tint);
+
+    // Textured + shadingShift -0.5: more of the sphere in shadow,
+    // larger area covered by texture.
+    let mut shifted_more_shadow = MToonParams::defaults("mtoon_shadetex_shift_neg0p5");
+    shifted_more_shadow.shade_multiply_texture = true;
+    shifted_more_shadow.shade_color_factor = [1.0, 1.0, 1.0];
+    shifted_more_shadow.shading_shift_factor = -0.5;
+    out.push(shifted_more_shadow);
+
+    // Textured + shadingShift +0.5: most of the sphere out of shadow,
+    // texture barely visible.
+    let mut shifted_less_shadow = MToonParams::defaults("mtoon_shadetex_shift_pos0p5");
+    shifted_less_shadow.shade_multiply_texture = true;
+    shifted_less_shadow.shade_color_factor = [1.0, 1.0, 1.0];
+    shifted_less_shadow.shading_shift_factor = 0.5;
+    out.push(shifted_less_shadow);
+
+    out
+}
+
 /// KHR_texture_transform sweep: 8 variants exercising the spec's three
 /// transform axes (offset, rotation, scale) on a textured MToon
 /// material. The texture itself is a 16×16 quadrant checkerboard
@@ -1102,6 +1182,49 @@ mod multichain_sweep_tests {
                     "share_all variants must point all chains at the same group"
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod shade_multiply_texture_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn shade_multiply_texture_sweep_has_6_variants_with_unique_ids() {
+        let s = mtoon_shade_multiply_texture_sweep();
+        assert_eq!(s.len(), 6);
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), s.len(), "shadetex sweep IDs must be unique");
+    }
+
+    #[test]
+    fn baseline_variant_has_no_shade_texture() {
+        let s = mtoon_shade_multiply_texture_sweep();
+        let baseline = s
+            .iter()
+            .find(|p| p.id == "mtoon_shadetex_baseline")
+            .expect("baseline variant missing");
+        assert!(
+            !baseline.shade_multiply_texture,
+            "baseline must omit shadeMultiplyTexture so it renders as the no-texture diff target"
+        );
+    }
+
+    #[test]
+    fn every_non_baseline_variant_sets_the_texture() {
+        let s = mtoon_shade_multiply_texture_sweep();
+        for p in &s {
+            if p.id == "mtoon_shadetex_baseline" {
+                continue;
+            }
+            assert!(
+                p.shade_multiply_texture,
+                "{}: non-baseline variant must set shade_multiply_texture",
+                p.id
+            );
         }
     }
 }

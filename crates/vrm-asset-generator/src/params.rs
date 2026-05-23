@@ -60,6 +60,17 @@ pub struct MToonParams {
     /// requested transform extension to the textureInfo.
     pub texture_transform: Option<TextureTransform>,
 
+    /// When `true`, attaches the procedural quadrant-checkerboard
+    /// texture to MToon's `VRMC_materials_mtoon.shadeMultiplyTexture`
+    /// binding. Per the MToon spec
+    /// (`shadeColorTerm = shadeColorFactor.rgb * texture(shadeMultiplyTexture, uv).rgb`),
+    /// this multiplies into the shaded-portion color, so conformant
+    /// renderers display the checkerboard pattern wherever the sphere
+    /// is in shadow relative to the directional light. Renderers that
+    /// ignore the binding fall back to plain `shadeColorFactor`.
+    /// `false` (default) keeps the current corpus unchanged.
+    pub shade_multiply_texture: bool,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -97,6 +108,7 @@ impl MToonParams {
             emissive_multiplier: 1.0,
             first_person_type: None,
             texture_transform: None,
+            shade_multiply_texture: false,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,

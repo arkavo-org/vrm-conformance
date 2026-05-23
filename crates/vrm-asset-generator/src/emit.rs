@@ -132,7 +132,12 @@ pub fn emit_vrm_with_custom_expressions(
     // image lives in JSON. samplers[0] uses REPEAT wrap mode so
     // KHR_texture_transform variants with non-[0,1] UVs (offset > 0,
     // scale > 1) display the tiling.
-    if params.texture_transform.is_some() {
+    //
+    // Triggered by any of the texture-needing params; the texture is
+    // shared across binding points (baseColorTexture +
+    // shadeMultiplyTexture both reference index 0).
+    let needs_texture = params.texture_transform.is_some() || params.shade_multiply_texture;
+    if needs_texture {
         let img = crate::texture::quadrant_checkerboard_16();
         let data_uri = crate::texture::image_as_data_uri(&img);
         doc["images"] = json!([{
