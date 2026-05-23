@@ -83,6 +83,19 @@
         }
       }
 
+      // Three.js layers used by VRMFirstPerson.setup() to reassign meshes
+      // tagged firstPersonOnly / thirdPersonOnly. Layer 0 is the default
+      // (every object spawns on it; cameras render it). After setup(),
+      // firstPersonOnly meshes move to layer FIRST_PERSON_ONLY_LAYER and
+      // thirdPersonOnly meshes move to layer THIRD_PERSON_ONLY_LAYER. We
+      // enable the thirdPersonOnly layer on the camera so a third-person
+      // render shows thirdPersonOnly + both + auto-non-head while the
+      // firstPersonOnly variant gets correctly culled. Matches the VMK
+      // adapter's behaviour (which the conformance suite renders against
+      // as the only previously-conformant firstPerson reference).
+      const FIRST_PERSON_ONLY_LAYER = 9;
+      const THIRD_PERSON_ONLY_LAYER = 10;
+
       window.__loadVrm = async function (url) {
         ensureRenderer(1024, 1024);
         if (state.vrm) {
@@ -95,6 +108,29 @@
         const vrm = gltf.userData.vrm;
         state.vrm = vrm;
         state.scene.add(vrm.scene);
+
+        // Activate VRMC_vrm.firstPerson culling. Without this call the
+        // plugin parses meshAnnotations into vrm.firstPerson but doesn't
+        // touch any object layers, so every annotation type renders
+        // identically. setup() assigns layers per the spec's enum.
+        if (vrm.firstPerson) {
+          vrm.firstPerson.setup({
+            firstPersonOnlyLayer: FIRST_PERSON_ONLY_LAYER,
+            thirdPersonOnlyLayer: THIRD_PERSON_ONLY_LAYER,
+          });
+        }
+
+        // Configure the camera for third-person rendering: enable the
+        // thirdPersonOnly layer (so thirdPersonOnly meshes ARE rendered)
+        // and leave the firstPersonOnly layer disabled (so they are
+        // culled). Layer 0 stays enabled by default for `both` and the
+        // auto-split non-head portion. This is the camera-mode default
+        // the conformance suite expects today; a first-person camera
+        // mode would invert the layer enable / disable pair.
+        if (state.camera) {
+          state.camera.layers.enable(THIRD_PERSON_ONLY_LAYER);
+          state.camera.layers.disable(FIRST_PERSON_ONLY_LAYER);
+        }
       };
 
       window.__loadVrma = async function (url) {

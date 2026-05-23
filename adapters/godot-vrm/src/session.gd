@@ -26,6 +26,15 @@ func load_vrm(tree_root: Node, params: Dictionary) -> Dictionary:
     var gltf := GLTFDocument.new()
     var registered := VrmRuntimeExtensions.register_all()
     var state := GLTFState.new()
+    # head_hiding_method = 0 selects HeadHidingSetting.ThirdPersonOnly
+    # (per addons/vrm/vrm_constants.gd:73), which makes
+    # perform_head_hiding() assign per-mesh layer masks based on
+    # VRMC_vrm.firstPerson.meshAnnotations[*].type. first_person_layers
+    # and third_person_layers are the bit masks the addon writes onto
+    # each MeshInstance3D's `layers` property: firstPersonOnly meshes
+    # get layers=2 (bit 1), thirdPersonOnly meshes get layers=4 (bit 2),
+    # both meshes get layers=6, auto meshes get split by head-bone
+    # weight. Camera cull_mask below decides what's visible.
     state.set_additional_data(&"vrm/head_hiding_method", 0)
     state.set_additional_data(&"vrm/first_person_layers", 2)
     state.set_additional_data(&"vrm/third_person_layers", 4)
@@ -68,6 +77,14 @@ func load_vrm(tree_root: Node, params: Dictionary) -> Dictionary:
     viewport.add_child(camera)
     camera.look_at_from_position(Vector3(0.0, 1.4, 1.5), Vector3(0.0, 1.4, 0.0), Vector3.UP)
     camera.fov = 30.0
+    # Third-person rendering: exclude the firstPersonOnly layer (bit 1,
+    # mask 2) so meshes annotated firstPersonOnly are culled. Layers 1
+    # (default mask 1) and 3 (thirdPersonOnly mask 4) stay visible so
+    # `both`, `auto`-non-head, and `thirdPersonOnly` meshes all render.
+    # Godot Camera3D's default cull_mask is 0xFFFFF (20 visible layers);
+    # clearing bit 1 alone gives third-person semantics. A future
+    # first-person camera mode would invert this.
+    camera.cull_mask = 0xFFFFF & ~2
 
     directional_light = DirectionalLight3D.new()
     viewport.add_child(directional_light)

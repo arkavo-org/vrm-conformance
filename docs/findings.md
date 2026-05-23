@@ -2098,3 +2098,25 @@ To file:
 - Upstream three-vrm: clarify whether firstPerson culling is expected from `VRMLoaderPlugin` output or requires explicit camera-mode integration. If the latter, conformance adapter needs the integration.
 - Upstream godot-vrm: same question.
 - VMK gets a small commendation in this finding (one of the rare cases where it leads, not lags, the peers).
+
+### Update — three-vrm fixed adapter-side; godot-vrm deeper than a culling gap
+
+Investigation (subagent trace through `@pixiv/three-vrm-core/types/firstPerson/VRMFirstPerson.d.ts` + `addons/vrm/vrm_utils.gd`) confirmed both gaps were **adapter-side fixable** in principle, not renderer-side bugs. Two `adapters/` edits:
+
+- **`adapters/three-vrm/src/renderer-host.html`**: call `vrm.firstPerson.setup({firstPersonOnlyLayer: 9, thirdPersonOnlyLayer: 10})` after `state.scene.add(vrm.scene)`, and `state.camera.layers.enable(10)` + `state.camera.layers.disable(9)` for third-person camera mode.
+- **`adapters/godot-vrm/src/session.gd`**: `camera.cull_mask = 0xFFFFF & ~2` to exclude the firstPersonOnly layer bit (the addon already assigns `layers=2` to firstPersonOnly meshes via `perform_head_hiding()`; we just weren't filtering them at the camera).
+
+Post-fix re-render (same 4 plans, same hardware):
+
+| test_id | vrm-metal-kit | three-vrm (fixed) | godot-vrm |
+|---|---|---|---|
+| `mtoon_firstperson_auto` | `5d8cf1789282` (49.6 kB) | `6ff1f5687375` (57.5 kB) | `4587bf323df1` (10.6 kB) |
+| `mtoon_firstperson_both` | `5d8cf1789282` (49.6 kB) | `6ff1f5687375` (57.5 kB) | `4587bf323df1` (10.6 kB) |
+| `mtoon_firstperson_thirdPersonOnly` | `5d8cf1789282` (49.6 kB) | `6ff1f5687375` (57.5 kB) | `4587bf323df1` (10.6 kB) |
+| `mtoon_firstperson_firstPersonOnly` | **`0c167e74f194` (20.6 kB)** | **`ec736560cc6c` (24.7 kB)** | `4587bf323df1` (10.6 kB) |
+
+**three-vrm is now conformant** — `firstPersonOnly` hashes distinctly and the PNG drops from 57.5 kB → 24.7 kB (less than half), matching the head-culled signature VMK produces. Pattern across the 4 variants now mirrors VMK exactly: 3 visible-head + 1 culled-head.
+
+**godot-vrm: the camera.cull_mask edit applied, but the rendered output is unchanged.** All 4 variants still hash identically at 10.6 kB. The deeper issue is that godot-vrm is rendering only a small, identical portion of the scene regardless of mesh annotations — consistent with the prior emissive-sweep finding where godot produced identical 10.6 kB output across every emissive variant too. The addon's `perform_head_hiding()` may be silently no-op'ing (no head bone in our synthetic mesh's weights, perhaps, or the registration order keeps mesh-layer assignment from firing). This is no longer a firstPerson-culling story — it's a baseline godot rendering issue affecting the synthetic-avatar corpus. Worth filing as its own thread once diagnosed.
+
+Conformance count delta: **1 of 3 peer renderers moved from non-conformant to conformant** on this surface with a 10-line adapter change. VMK + three-vrm now both pass; godot-vrm still needs investigation.
