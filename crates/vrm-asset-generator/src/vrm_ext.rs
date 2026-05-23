@@ -266,6 +266,28 @@ pub fn base_material(p: &MToonParams) -> Value {
         material["pbrMetallicRoughness"]["baseColorTexture"] = tex_info;
     }
 
+    // glTF-core `normalTexture` per `material.normalTextureInfo.schema.json`.
+    // Uses index 1 (the procedural normal map appended by emit_vrm)
+    // because tangent-space normal maps require different RGB encoding
+    // semantics from the color-style checkerboard at index 0.
+    if let Some(scale) = p.normal_texture_scale {
+        material["normalTexture"] = json!({
+            "index": 1,
+            "scale": scale,
+        });
+    }
+
+    // glTF-core `occlusionTexture` per `material.occlusionTextureInfo.schema.json`.
+    // Reuses index 0 (the quadrant checkerboard) — the R-channel doubles
+    // as an AO multiplier (red/yellow quadrants have R≈220 ≈ no occlusion,
+    // green/blue quadrants have R≈30 ≈ heavy occlusion).
+    if let Some(strength) = p.occlusion_texture_strength {
+        material["occlusionTexture"] = json!({
+            "index": 0,
+            "strength": strength,
+        });
+    }
+
     // Emit `emissiveFactor` only when non-zero — the glTF default is
     // [0,0,0] and a zero emissive contributes nothing visually, so leaving
     // the field absent keeps the MToon-default material JSON identical to

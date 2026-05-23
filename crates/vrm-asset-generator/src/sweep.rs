@@ -112,6 +112,51 @@ pub fn mtoon_basic_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// glTF-core PBR textures sweep: 6 variants covering `normalTexture`
+/// (tangent-space normal map) and `occlusionTexture` (R-channel AO
+/// modulation, reuses checkerboard). These bindings are NOT in MToon —
+/// they're glTF-core PBR. The question this surfaces: do MToon renderers
+/// integrate with the glTF-core PBR pipeline?
+///
+/// Variants:
+/// - `mtoon_pbrtex_baseline` — no PBR textures.
+/// - `mtoon_pbrtex_normal_default` — normal map scale=1.0.
+/// - `mtoon_pbrtex_normal_scale_2x` — scale=2.0.
+/// - `mtoon_pbrtex_occlusion_default` — occlusion strength=1.0.
+/// - `mtoon_pbrtex_occlusion_strength_half` — strength=0.5.
+/// - `mtoon_pbrtex_combined` — both.
+pub fn mtoon_pbr_textures_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    let mut baseline = MToonParams::defaults("mtoon_pbrtex_baseline");
+    baseline.normal_texture_scale = None;
+    baseline.occlusion_texture_strength = None;
+    out.push(baseline);
+
+    let mut normal_default = MToonParams::defaults("mtoon_pbrtex_normal_default");
+    normal_default.normal_texture_scale = Some(1.0);
+    out.push(normal_default);
+
+    let mut normal_scale_2x = MToonParams::defaults("mtoon_pbrtex_normal_scale_2x");
+    normal_scale_2x.normal_texture_scale = Some(2.0);
+    out.push(normal_scale_2x);
+
+    let mut occlusion_default = MToonParams::defaults("mtoon_pbrtex_occlusion_default");
+    occlusion_default.occlusion_texture_strength = Some(1.0);
+    out.push(occlusion_default);
+
+    let mut occlusion_strength_half = MToonParams::defaults("mtoon_pbrtex_occlusion_strength_half");
+    occlusion_strength_half.occlusion_texture_strength = Some(0.5);
+    out.push(occlusion_strength_half);
+
+    let mut combined = MToonParams::defaults("mtoon_pbrtex_combined");
+    combined.normal_texture_scale = Some(1.0);
+    combined.occlusion_texture_strength = Some(1.0);
+    out.push(combined);
+
+    out
+}
+
 /// MToon `outlineWidthMultiplyTexture` sweep: 5 variants exercising
 /// per-vertex outline-width modulation. Per the MToon spec (README.md
 /// :710-715): the texture's **G-channel** (not R) is read and
@@ -1785,5 +1830,36 @@ mod outline_width_multiply_texture_sweep_tests {
             .unwrap();
         assert!(n.outline_width_multiply_texture);
         assert!(matches!(n.outline_width_mode, OutlineWidthMode::None));
+    }
+}
+
+#[cfg(test)]
+mod pbr_textures_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn pbr_textures_sweep_has_6_variants_with_unique_ids() {
+        let s = mtoon_pbr_textures_sweep();
+        assert_eq!(s.len(), 6);
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), s.len());
+    }
+
+    #[test]
+    fn baseline_omits_both_pbr_textures() {
+        let s = mtoon_pbr_textures_sweep();
+        let b = s.iter().find(|p| p.id == "mtoon_pbrtex_baseline").unwrap();
+        assert!(b.normal_texture_scale.is_none());
+        assert!(b.occlusion_texture_strength.is_none());
+    }
+
+    #[test]
+    fn combined_variant_sets_both() {
+        let s = mtoon_pbr_textures_sweep();
+        let c = s.iter().find(|p| p.id == "mtoon_pbrtex_combined").unwrap();
+        assert!(c.normal_texture_scale.is_some());
+        assert!(c.occlusion_texture_strength.is_some());
     }
 }

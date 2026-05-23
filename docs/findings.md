@@ -2137,6 +2137,35 @@ The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera 
 
 **For the firstPerson question**: godot's failure to differentiate the 4 variants is consistent with the avatar not being meaningfully rendered to begin with — there's nothing for `perform_head_hiding()` to cull because the mesh isn't visibly present. Diagnosing godot's MToon-shader pipeline is the right next thread, not a corpus retune.
 
+## glTF-core PBR textures on MToon — `occlusionTexture` industry-wide ignored; `normalTexture` partial on VMK
+
+**Date**: 2026-05-23. Surfaced on the first run of the PBR-textures sweep.
+
+`mtoon_pbr_textures_sweep` (6 variants) attaches glTF-core `normalTexture` (tangent-space normal map at texture index 1) and `occlusionTexture` (R-channel AO modulation, reuses checkerboard at index 0) to MToon materials. The question it answers: do MToon renderers integrate with the glTF-core PBR texture pipeline, or does the MToon shader override the entire textureInfo handling?
+
+| test_id | vrm-metal-kit (size) | three-vrm (size) | godot-vrm (size) |
+|---|---|---|---|
+| `mtoon_pbrtex_baseline` (no PBR textures) | `5d8cf17... 50K` | `6ff1f56... 58K` | `4587bf3... 11K` |
+| `mtoon_pbrtex_occlusion_default` (strength=1) | `5d8cf17... 50K` | `6ff1f56... 58K` | `4587bf3... 11K` |
+| `mtoon_pbrtex_occlusion_strength_half` (0.5) | `5d8cf17... 50K` | `6ff1f56... 58K` | `4587bf3... 11K` |
+| `mtoon_pbrtex_normal_default` (scale=1) | `a599ae8... 69K` | `cb5eec9... 71K` | `4587bf3... 11K` |
+| `mtoon_pbrtex_normal_scale_2x` (scale=2) | `a599ae8... 69K` | `d81b15e... 83K` | `4587bf3... 11K` |
+| `mtoon_pbrtex_combined` (both) | `a599ae8... 69K` | `cb5eec9... 71K` | `4587bf3... 11K` |
+
+### Three distinct findings
+
+**(1) `occlusionTexture` is industry-wide ignored on MToon materials.** VMK's `occlusion_default` (strength=1) and `occlusion_strength_half` (strength=0.5) both render byte-identical to baseline `5d8cf17...`. three-vrm: same — both occlusion variants match its baseline `6ff1f56...`. The MToon spec (`docs/upstream-specs/vrm-specification/specification/VRMC_materials_mtoon-1.0/README.md`) explicitly declares MToon a non-PBR toon shader, so the absence of `occlusionTexture` honoring is likely *intentional* across the MToon ecosystem rather than a bug. Worth confirming with Pixiv before filing — this might be a methodology gap (add to `docs/methodology.md` as "MToon materials don't honor glTF-core occlusionTexture; conformance suite should not assert on it") rather than an upstream issue.
+
+**(2) `normalTexture` is partially honored on VMK: read but `scale` ignored.** VMK's `normal_default` (scale=1) and `normal_scale_2x` (scale=2) both hash `a599ae8...` — different from baseline (so VMK *does* read the normal map and apply per-vertex perturbation) but identical to each other (so the `scale` field on the textureInfo isn't being threaded through to the shader's tangent-space normal computation). `combined` matches `normal_default` exactly, consistent with occlusion having no effect on VMK either. This is a VMK#289-shape gap: codepath runs but ignores a per-binding parameter. Smaller scope than #289 (only the scale axis); could be filed as its own VMK issue if priorities allow.
+
+**(3) `normalTexture` is fully conformant on three-vrm.** `normal_default` (`cb5eec9...`) and `normal_scale_2x` (`d81b15e...`) produce distinct hashes — three-vrm applies the per-binding `scale` correctly. The file-size jump from default (71K) to scale_2x (83K) is consistent with the amplified normal perturbation producing more pixel variation across the rendered sphere.
+
+**godot-vrm**: blocked as expected — every variant hashes `4587bf323df1`.
+
+### Methodology recommendation
+
+Before filing VMK issues for occlusion: confirm with Pixiv (or via three-vrm-animation source code) whether MToon is intended to honor glTF-core `occlusionTexture` at all. If not, document in `docs/methodology.md` as a "non-applicable conformance axis for MToon materials" rather than treating it as a bug. The conformance suite should still emit the sweep (renderers might add support in the future, and the test acts as a tripwire) but the consensus diff should not assert on it.
+
 ## MToon outlineWidthMultiplyTexture — VMK partial-broken (new gap); three-vrm conformant
 
 **Date**: 2026-05-23. Surfaced on the first run of the new outlineWidthMultiplyTexture sweep.

@@ -142,25 +142,47 @@ pub fn emit_vrm_with_custom_expressions(
         || params.matcap_texture
         || params.shading_shift_texture_scale.is_some()
         || params.rim_multiply_texture
-        || params.outline_width_multiply_texture;
+        || params.outline_width_multiply_texture
+        || params.normal_texture_scale.is_some()
+        || params.occlusion_texture_strength.is_some();
+    let needs_normal_map = params.normal_texture_scale.is_some();
     if needs_texture {
         let img = crate::texture::quadrant_checkerboard_16();
         let data_uri = crate::texture::image_as_data_uri(&img);
-        doc["images"] = json!([{
+        let mut images = vec![json!({
             "name": format!("{}_checkerboard", params.id),
             "uri": data_uri,
             "mimeType": "image/png",
-        }]);
-        doc["samplers"] = json!([{
-            "wrapS": 10497,        // REPEAT
-            "wrapT": 10497,        // REPEAT
-            "magFilter": 9729,     // LINEAR
-            "minFilter": 9729,     // LINEAR (no mipmap to keep math testable)
-        }]);
-        doc["textures"] = json!([{
-            "source": 0,
-            "sampler": 0,
-        }]);
+        })];
+        let sampler = json!({
+            "wrapS": 10497,    // REPEAT
+            "wrapT": 10497,    // REPEAT
+            "magFilter": 9729, // LINEAR
+            "minFilter": 9729, // LINEAR (no mipmap to keep math testable)
+        });
+        let mut samplers = vec![sampler.clone()];
+        let mut textures = vec![json!({ "source": 0, "sampler": 0 })];
+
+        // glTF-core `normalTexture` needs a tangent-space normal map
+        // (distinct RGB encoding from the color checkerboard), so we
+        // append a second image/texture pair at index 1. Same REPEAT
+        // sampler — normal maps don't need a special filter for our
+        // test corpus.
+        if needs_normal_map {
+            let normal_img = crate::texture::quadrant_normal_map_16();
+            let normal_uri = crate::texture::image_as_data_uri(&normal_img);
+            images.push(json!({
+                "name": format!("{}_normal_map", params.id),
+                "uri": normal_uri,
+                "mimeType": "image/png",
+            }));
+            samplers.push(sampler);
+            textures.push(json!({ "source": 1, "sampler": 1 }));
+        }
+
+        doc["images"] = Value::Array(images);
+        doc["samplers"] = Value::Array(samplers);
+        doc["textures"] = Value::Array(textures);
     }
 
     // Apply the firstPerson.meshAnnotations[0].type override when the

@@ -129,6 +129,12 @@ else
     rm -rf "$OUTLINETEX_DIR"; mkdir -p "$OUTLINETEX_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-outline-width-multiply-texture-sweep \
         --output-dir "$OUTLINETEX_DIR" --json >/dev/null
+
+    echo "==> Emitting glTF-core PBR textures sweep (6 plans, normalTexture + occlusionTexture)"
+    PBRTEX_DIR="$GOLDENS_DIR/_assets_pbrtex"
+    rm -rf "$PBRTEX_DIR"; mkdir -p "$PBRTEX_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-pbr-textures-sweep \
+        --output-dir "$PBRTEX_DIR" --json >/dev/null
     echo "==> Emitting spring-bone settle sweep"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-sweep \
         --output-dir "$ASSETS_DIR" --json >/dev/null

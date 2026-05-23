@@ -110,6 +110,27 @@ pub struct MToonParams {
     /// `false` (default) keeps the corpus unchanged.
     pub outline_width_multiply_texture: bool,
 
+    /// When `Some(scale)`, attaches the procedural quadrant-normal-
+    /// map texture to glTF-core `material.normalTexture` with the
+    /// given `scale` value. Per the glTF 2.0 spec (`material.normal-
+    /// TextureInfo.schema.json`): `scaledNormal = normalize(
+    /// (<sampled normal> * 2 - 1) * vec3(scale, scale, 1.0))`. The
+    /// procedural map uses index 1 (distinct from index 0 which
+    /// carries the quadrant checkerboard for color/shading bindings)
+    /// because normal maps require different RGB encoding semantics.
+    /// `None` (default) keeps the corpus unchanged.
+    pub normal_texture_scale: Option<f32>,
+
+    /// When `Some(strength)`, attaches the procedural quadrant-
+    /// checkerboard (index 0, reused — its R-channel doubles as an
+    /// AO multiplier) to glTF-core `material.occlusionTexture` with
+    /// the given `strength`. Per the glTF 2.0 spec (`material.occlu-
+    /// sionTextureInfo.schema.json`): `finalOcclusion = 1.0 +
+    /// strength * (<sampled occlusion> - 1.0)`. So `strength=0`
+    /// disables AO; `strength=1` applies full texture-driven AO;
+    /// values in [0,1] interpolate. `None` (default) unchanged.
+    pub occlusion_texture_strength: Option<f32>,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -152,6 +173,8 @@ impl MToonParams {
             shading_shift_texture_scale: None,
             rim_multiply_texture: false,
             outline_width_multiply_texture: false,
+            normal_texture_scale: None,
+            occlusion_texture_strength: None,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,
