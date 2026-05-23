@@ -69,3 +69,9 @@ assets/humanoid/
 # Python bytecode cache (vrma-pose-consensus.py + future python helpers)
 __pycache__/
 *.pyc
+
+# Upstream spec mirrors (vrm-c/vrm-specification + KhronosGroup/glTF,
+# checked out locally for offline grep). Re-fetched via
+# scripts/install-upstream-specs.sh or the README in that directory.
+docs/upstream-specs/vrm-specification/
+docs/upstream-specs/glTF/
