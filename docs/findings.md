@@ -2161,12 +2161,9 @@ The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera 
 
 **godot-vrm: blocked by import-time root cause.** All 5 hash `4587bf323df1` — the no-content render.
 
-### Recommended VMK upstream issue (VMK#289 placeholder)
+### Filed upstream
 
-Different shape from #287/#288:
-- Title: `MToon: outlineWidthMultiplyTexture renders a degraded uniform outline that ignores G-channel modulation, outlineWidthFactor, AND outlineWidthMode`
-- Evidence: 3 distinct sweep variants render to identical PNG hash on VMK
-- Severity: stronger than #287/#288 because the texture *is* read (different hash from baseline) but applied incorrectly — suggests the codepath exists but is mis-implemented
+[VMK#289](https://github.com/arkavo-org/VRMMetalKit/issues/289). Different shape from #287/#288 — those two are pure no-ops (extension silently dropped), here the texture *is* read but the outline pipeline goes degraded and ignores per-vertex G modulation, `outlineWidthFactor`, AND `outlineWidthMode`. Three distinct sweep variants render to identical PNG hash on VMK. Issue body archived locally at `docs/upstream/VMK-outline-width-multiply-texture.md`.
 
 ## MToon shadingShiftTexture + rimMultiplyTexture — VMK + three-vrm both conformant; cumulative MToon-texture story closes
 
