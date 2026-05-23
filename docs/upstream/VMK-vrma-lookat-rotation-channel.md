@@ -59,15 +59,21 @@ if let extensionDict = document.extensions?["VRMC_vrm_animation"] as? [String: A
 
 `nodeTracks[lookAtNodeIndex]` for a rotation-encoded gaze contains `["rotation": KeyTrack]` but no `"translation"` key, so the entire block is skipped without warning.
 
-## Spec interpretation
+## Spec is unambiguous — rotation is mandatory
 
-The VRMC_vrm_animation-1.0 README phrases the gaze as "the difference between the head position and the position of the node specified by `node`", which reads as a translation-driven semantics. But:
+The VRMC_vrm_animation-1.0 spec README explicitly mandates the rotation-channel form (https://github.com/vrm-c/vrm-specification/blob/master/specification/VRMC_vrm_animation-1.0/README.md, "LookAt → Eye gaze direction" section):
 
-- `@pixiv/three-vrm-animation`'s `VRMAnimationLoaderPlugin` consumes the rotation channel of the lookAt node and applies it to a forward vector to derive the gaze direction. This is the de-facto interpretation in the reference Pixiv stack.
-- Pixiv's own published VRMA samples (e.g., the avatar-sample VRMAs distributed with `three-vrm`) use rotation channels, not translation channels.
-- The conformance suite generator's `vrma_lookat_*` corpus uses rotation channels for the same reason — to match what the Pixiv tooling and other consumers expect.
+> `VRMC_vrm_animation/lookAt/node` specifies the glTF node that has the rotation as the eye gaze direction.
+> The rotation in the local space of the specified node is treated as the animation data for the eye gaze direction.
+> In glTF, the rotation is defined as a quaternion.
+> However, when applying it to the LookAt component of the `VRMC_vrm`, it is converted to the yaw-pitch Euler angle.
+> The rotation order of the Euler angle must be interpreted as Extrinsic ZXY, and the rotation around the Y axis is yaw and the rotation around the X axis is pitch.
 
-So the spec text is ambiguous in practice; the rotation-channel form is what gets distributed in the wild, and any loader claiming VRMA support needs to accept it.
+The translation-only path in the current loader is non-conformant. Corroborating evidence:
+
+- `@pixiv/three-vrm-animation`'s `VRMAnimationLoaderPlugin` consumes the rotation channel and applies it to a forward vector.
+- Pixiv's own published VRMA samples (e.g., the avatar-sample VRMAs distributed with `three-vrm`) use rotation channels.
+- The vrm-conformance asset generator's `vrma_lookat_*` corpus uses rotation channels per the spec wording above.
 
 ## Suggested fix
 

@@ -1997,9 +1997,13 @@ if … let lookAtTracks = nodeTracks[lookAtNodeIndex],
 }
 ```
 
-The vrm-conformance asset generator (`crates/vrm-asset-generator/src/vrma_emit.rs:129-151`) emits the gaze as a **rotation** channel on the lookAt node (`"animation[0] channels: [{sampler: 0, target: {node: 0, path: 'rotation'}}]"`). The VRMC_vrm_animation spec text describes the gaze as "the difference between the head position and the position of the node specified by `node`", which reads as translation-driven; but rotation-driven gaze is what `@pixiv/three-vrm-animation` and the other peer adapters accept in practice, and Pixiv's own VRMA samples use rotation channels too. So either the spec is incomplete or VMK's loader is.
+**The VRMC_vrm_animation-1.0 spec is unambiguous on this point** (`docs/upstream-specs/vrm-specification/specification/VRMC_vrm_animation-1.0/README.md:175-182`):
 
-The image-level pass is real (gaze barely shifts pixels), but a future pose-level diff layer in `consensus-report` will flag this — at which point the VMK upstream fix becomes a hard requirement. Until then, this is tracked as a known-yet-quiet correctness gap on VMK's VRMA loader. Filed upstream as [VMK#286](https://github.com/arkavo-org/VRMMetalKit/issues/286); issue body archived locally at `docs/upstream/VMK-vrma-lookat-rotation-channel.md`.
+> `VRMC_vrm_animation/lookAt/node` specifies the glTF node that has the **rotation** as the eye gaze direction. The rotation in the local space of the specified node is treated as the animation data for the eye gaze direction. In glTF, the rotation is defined as a quaternion. However, when applying it to the LookAt component of the `VRMC_vrm`, it is converted to the yaw-pitch Euler angle. The rotation order of the Euler angle must be interpreted as **Extrinsic ZXY**, and the rotation around the Y axis is yaw and the rotation around the X axis is pitch.
+
+So this is a clear non-conformance in VMK's loader, not a spec-interpretation gray area. (An earlier draft of this finding mischaracterised the spec as ambiguous — that was incorrect; the local spec mirror confirms rotation-driven is mandatory.) The vrm-conformance generator emits rotation channels per spec; `@pixiv/three-vrm-animation` and Pixiv's published VRMA samples use rotation channels; the adapter's `dump_look_at_state` derives yaw/pitch via `qY * qX` (Extrinsic ZXY with roll=0), which matches the spec's decomposition exactly.
+
+The image-level pass is real (gaze barely shifts pixels), but a future pose-level diff layer in `consensus-report` will flag this — at which point the VMK upstream fix becomes a hard requirement. Filed upstream as [VMK#286](https://github.com/arkavo-org/VRMMetalKit/issues/286); issue body archived locally at `docs/upstream/VMK-vrma-lookat-rotation-channel.md`.
 
 (The corpus also doubled in size since the rc.1 verification — 575 plans today vs ~235 in yesterday's baseline manifest — driven by the VRMA sweeps newly emitted by `vrm-asset-generator`. Numerator/denominator framing matters when comparing the two days.)
 
