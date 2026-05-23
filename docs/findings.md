@@ -1999,7 +1999,7 @@ if … let lookAtTracks = nodeTracks[lookAtNodeIndex],
 
 The vrm-conformance asset generator (`crates/vrm-asset-generator/src/vrma_emit.rs:129-151`) emits the gaze as a **rotation** channel on the lookAt node (`"animation[0] channels: [{sampler: 0, target: {node: 0, path: 'rotation'}}]"`). The VRMC_vrm_animation spec text describes the gaze as "the difference between the head position and the position of the node specified by `node`", which reads as translation-driven; but rotation-driven gaze is what `@pixiv/three-vrm-animation` and the other peer adapters accept in practice, and Pixiv's own VRMA samples use rotation channels too. So either the spec is incomplete or VMK's loader is.
 
-The image-level pass is real (gaze barely shifts pixels), but a future pose-level diff layer in `consensus-report` will flag this — at which point the VMK upstream fix becomes a hard requirement. Until then, this is tracked as a known-yet-quiet correctness gap on VMK's VRMA loader. File upstream as a follow-up.
+The image-level pass is real (gaze barely shifts pixels), but a future pose-level diff layer in `consensus-report` will flag this — at which point the VMK upstream fix becomes a hard requirement. Until then, this is tracked as a known-yet-quiet correctness gap on VMK's VRMA loader. Filed upstream as [VMK#286](https://github.com/arkavo-org/VRMMetalKit/issues/286); issue body archived locally at `docs/upstream/VMK-vrma-lookat-rotation-channel.md`.
 
 (The corpus also doubled in size since the rc.1 verification — 575 plans today vs ~235 in yesterday's baseline manifest — driven by the VRMA sweeps newly emitted by `vrm-asset-generator`. Numerator/denominator framing matters when comparing the two days.)
 
