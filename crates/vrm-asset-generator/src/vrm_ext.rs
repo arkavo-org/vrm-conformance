@@ -181,6 +181,28 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
         mtoon["matcapTexture"] = json!({ "index": 0 });
     }
 
+    // `shadingShiftTexture` per VRMC_materials_mtoon-1.0: the
+    // texture's R-channel value, multiplied by the `scale` field,
+    // is ADDED to `shadingShiftFactor` to give per-pixel modulation
+    // of the lit/shaded boundary position. The dedicated
+    // `shadingShiftTextureInfo` schema carries the extra `scale`
+    // field on the textureInfo (default 1.0 per spec).
+    if let Some(scale) = p.shading_shift_texture_scale {
+        mtoon["shadingShiftTexture"] = json!({
+            "index": 0,
+            "scale": scale,
+        });
+    }
+
+    // `rimMultiplyTexture` per VRMC_materials_mtoon-1.0: a plain
+    // textureInfo whose RGB multiplies into the parametric rim
+    // contribution. Only emits visible signal when the asset also
+    // sets a non-zero `parametricRimColorFactor` and a meaningful
+    // `rimLightingMixFactor` — the sweep handles that.
+    if p.rim_multiply_texture {
+        mtoon["rimMultiplyTexture"] = json!({ "index": 0 });
+    }
+
     mtoon
 }
 

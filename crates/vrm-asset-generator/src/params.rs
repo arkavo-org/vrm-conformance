@@ -82,6 +82,24 @@ pub struct MToonParams {
     /// unchanged.
     pub matcap_texture: bool,
 
+    /// When `Some(scale)`, attaches the procedural quadrant-
+    /// checkerboard to MToon's `VRMC_materials_mtoon.shadingShiftTexture`
+    /// with the given `scale` value. Per the spec, the texture's
+    /// R-channel value is multiplied by `scale` and ADDED to
+    /// `shadingShiftFactor`, so per-pixel modulation of where the
+    /// lit/shaded boundary falls becomes visible on the sphere.
+    /// `None` (default) keeps the corpus unchanged.
+    pub shading_shift_texture_scale: Option<f32>,
+
+    /// When `true`, attaches the procedural quadrant-checkerboard
+    /// to MToon's `VRMC_materials_mtoon.rimMultiplyTexture`. Per
+    /// spec, the texture's RGB multiplies into the parametric rim
+    /// contribution. For the signal to be visible the asset must
+    /// also set non-zero `parametricRimColorFactor` and a meaningful
+    /// `rimLightingMixFactor`; the sweep variants drive those.
+    /// `false` (default) keeps the corpus unchanged.
+    pub rim_multiply_texture: bool,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -121,6 +139,8 @@ impl MToonParams {
             texture_transform: None,
             shade_multiply_texture: false,
             matcap_texture: false,
+            shading_shift_texture_scale: None,
+            rim_multiply_texture: false,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,

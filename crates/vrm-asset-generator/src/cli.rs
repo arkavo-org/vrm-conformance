@@ -108,6 +108,30 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the MToon shadingShiftTexture sweep (5 assets covering
+    /// per-pixel shading-boundary modulation: the texture's R-channel
+    /// value, multiplied by `scale`, is ADDED to shadingShiftFactor).
+    /// Baseline + 4 textured variants crossing scale (1.0, 0.5, 2.0)
+    /// and one combined-factor case to test additive composition.
+    EmitShadingShiftTextureSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Emit the MToon rimMultiplyTexture sweep (4 assets covering
+    /// per-pixel modulation of the parametric rim contribution: the
+    /// texture's RGB multiplies into the rim term). Baseline + 3
+    /// textured variants crossing rim color (white, red) and
+    /// rimLightingMixFactor (1.0, 0.5).
+    EmitRimMultiplyTextureSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit one `.vrm` carrying both default MToon material and a default
     /// VRMC_springBone chain attached to the head.
     EmitSpringbone {
@@ -338,6 +362,82 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string(&summary)?);
             } else {
                 println!("emitted {} assets to {}", emitted.len(), output_dir);
+            }
+            Ok(())
+        }
+        Cmd::EmitShadingShiftTextureSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::sweep::mtoon_shading_shift_texture_sweep;
+            std::fs::create_dir_all(&output_dir)?;
+            let assets = mtoon_shading_shift_texture_sweep();
+            let total = assets.len();
+            let mut emitted = Vec::new();
+            for (i, p) in assets.iter().enumerate() {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-shading-shift-texture-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": p.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+                }
+                let stem = output_dir.join(&p.id);
+                emit_with_sidecars(p, &stem)?;
+                emitted.push(stem);
+            }
+            if emit_json {
+                let summary = json!({"ok": true, "count": emitted.len(), "output_dir": output_dir, "assets": emitted});
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} shadingShiftTexture sweep assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
+        Cmd::EmitRimMultiplyTextureSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::sweep::mtoon_rim_multiply_texture_sweep;
+            std::fs::create_dir_all(&output_dir)?;
+            let assets = mtoon_rim_multiply_texture_sweep();
+            let total = assets.len();
+            let mut emitted = Vec::new();
+            for (i, p) in assets.iter().enumerate() {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-rim-multiply-texture-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": p.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+                }
+                let stem = output_dir.join(&p.id);
+                emit_with_sidecars(p, &stem)?;
+                emitted.push(stem);
+            }
+            if emit_json {
+                let summary = json!({"ok": true, "count": emitted.len(), "output_dir": output_dir, "assets": emitted});
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} rimMultiplyTexture sweep assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
             }
             Ok(())
         }

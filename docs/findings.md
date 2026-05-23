@@ -2137,6 +2137,44 @@ The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera 
 
 **For the firstPerson question**: godot's failure to differentiate the 4 variants is consistent with the avatar not being meaningfully rendered to begin with — there's nothing for `perform_head_hiding()` to cull because the mesh isn't visibly present. Diagnosing godot's MToon-shader pipeline is the right next thread, not a corpus retune.
 
+## MToon shadingShiftTexture + rimMultiplyTexture — VMK + three-vrm both conformant; cumulative MToon-texture story closes
+
+**Date**: 2026-05-23. Surfaced on the first run of two new sweeps.
+
+`mtoon_shading_shift_texture_sweep` (5 variants, spec `README.md:282-289`: texture R-channel × scale ADDED to `shadingShiftFactor`) and `mtoon_rim_multiply_texture_sweep` (4 variants, RGB multiplies into parametric rim) round out the MToon-spec texture-binding coverage.
+
+```
+shadingShiftTexture sweep            vmk            three-vrm      godot-vrm
+  baseline                           5d8cf17... (50K) 6ff1f56... (58K) 4587bf3... (11K)
+  default (scale=1.0)                6d70c6e... (49K) 8dfd4b0... (86K) 4587bf3... (11K)
+  scale_2x                           2975d85... (49K) e0a1411... (61K) 4587bf3... (11K)
+  scale_half                         ec803b2... (50K) f8f8d97... (63K) 4587bf3... (11K)
+  with_factor (factor=-0.3)          274be90... (38K) 61992f3... (66K) 4587bf3... (11K)
+
+rimMultiplyTexture sweep             vmk            three-vrm      godot-vrm
+  baseline                           2272ed4... (48K) 86eb695... (35K) 4587bf3... (11K)
+  default                            bcc058f... (76K) ca05efa... (88K) 4587bf3... (11K)
+  red_rim                            ea5939c... (89K) 9804435... (83K) 4587bf3... (11K)
+  half_mix                           115da5d... (83K) 42aabe9... (89K) 4587bf3... (11K)
+```
+
+Both renderers conformant on both bindings. Godot blocked by the import-time root cause (every variant hashes `4587bf323df1` — the no-content render).
+
+### Complete MToon-texture conformance matrix (final)
+
+| MToon texture binding | three-vrm | vrm-metal-kit | godot-vrm |
+|---|---|---|---|
+| `baseColorTexture` (read) | ✅ | ✅ | ❌ blocked |
+| `KHR_texture_transform` on textureInfo | ✅ | ❌ ([VMK#288](https://github.com/arkavo-org/VRMMetalKit/issues/288)) | ⚠️ partial |
+| `shadeMultiplyTexture` | ✅ | ✅ | ❌ blocked |
+| `matcapTexture` | ✅ | ✅ | ❌ blocked |
+| `shadingShiftTexture` | ✅ | ✅ | ❌ blocked |
+| `rimMultiplyTexture` | ✅ | ✅ | ❌ blocked |
+
+**The final MToon-texture story for VMK:** reads every per-MToon texture binding correctly (5 of 5 covered today: shade, matcap, shadingShift, rim). The ONLY remaining gap is `KHR_texture_transform` on textureInfo (already filed as VMK#288). One issue, one well-scoped shader fix, closes VMK's MToon-texture conformance gap entirely.
+
+**The final story for godot:** every texture binding is blocked by the same root cause (addon import-time vs runtime mismatch). No partial signal observable until that's fixed.
+
 ## MToon matcapTexture — VMK + three-vrm both conformant; godot blocked
 
 **Date**: 2026-05-23. Surfaced on the first run of the new matcapTexture sweep.

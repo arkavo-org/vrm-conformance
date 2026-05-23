@@ -194,6 +194,110 @@ pub fn mtoon_emissive_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// MToon `shadingShiftTexture` sweep: 5 variants exercising the spec's
+/// per-pixel shading-boundary modulation. Per the MToon spec
+/// (`shadingShiftTexture` section): the texture's R-channel value,
+/// multiplied by `scale`, is ADDED to `shadingShiftFactor` to shift
+/// the lit/shaded boundary per-pixel. The checkerboard's RGB values
+/// give a clear per-quadrant R signal (red=220, green=30, blue=30,
+/// yellow=220) — boundary should land at four distinct positions on
+/// the sphere depending on which quadrant the surface point UV-samples.
+///
+/// Variants:
+/// - `mtoon_shadingshifttex_baseline` — no texture; clean
+///   `shadingShiftFactor` baseline. Diff target.
+/// - `mtoon_shadingshifttex_default` — texture, `scale=1.0` (spec
+///   default). R-channel directly added to factor.
+/// - `mtoon_shadingshifttex_scale_half` — `scale=0.5`. Half-intensity
+///   per-pixel shift; verifies multiplicative scale axis.
+/// - `mtoon_shadingshifttex_scale_2x` — `scale=2.0`. Double-intensity.
+/// - `mtoon_shadingshifttex_with_factor` — `scale=1.0` plus a
+///   non-zero `shadingShiftFactor=-0.3`. Tests the spec's additive
+///   composition (`final_shift = factor + texture.r * scale`).
+pub fn mtoon_shading_shift_texture_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    let mut baseline = MToonParams::defaults("mtoon_shadingshifttex_baseline");
+    baseline.shading_shift_texture_scale = None;
+    out.push(baseline);
+
+    let mut default_texture = MToonParams::defaults("mtoon_shadingshifttex_default");
+    default_texture.shading_shift_texture_scale = Some(1.0);
+    out.push(default_texture);
+
+    let mut scale_half = MToonParams::defaults("mtoon_shadingshifttex_scale_half");
+    scale_half.shading_shift_texture_scale = Some(0.5);
+    out.push(scale_half);
+
+    let mut scale_2x = MToonParams::defaults("mtoon_shadingshifttex_scale_2x");
+    scale_2x.shading_shift_texture_scale = Some(2.0);
+    out.push(scale_2x);
+
+    let mut with_factor = MToonParams::defaults("mtoon_shadingshifttex_with_factor");
+    with_factor.shading_shift_texture_scale = Some(1.0);
+    with_factor.shading_shift_factor = -0.3;
+    out.push(with_factor);
+
+    out
+}
+
+/// MToon `rimMultiplyTexture` sweep: 4 variants exercising the spec's
+/// per-pixel parametric-rim modulation. Per the MToon spec
+/// (`rimMultiplyTexture` section): the texture's RGB multiplies into
+/// the parametric rim contribution. For the multiplication to produce
+/// visible signal the asset must set non-zero `parametricRimColorFactor`
+/// and a non-zero `rimLightingMixFactor`; every variant here does so.
+///
+/// Variants:
+/// - `mtoon_rimtex_baseline` — texture absent, parametric rim active
+///   (white rim color, lift=0). Diff target proves "renderer reads
+///   rimMultiplyTexture" by showing colour difference when present.
+/// - `mtoon_rimtex_default` — texture present, same rim params as
+///   baseline. Conformant render: rim colour modulated per-pixel by
+///   the checkerboard RGB.
+/// - `mtoon_rimtex_red_rim` — `parametricRimColorFactor=[1,0,0]`
+///   (red rim), textured. Tests the multiplicative blending of the
+///   texture RGB against a non-white rim colour.
+/// - `mtoon_rimtex_half_mix` — `rimLightingMixFactor=0.5`. Halves
+///   the rim blend strength to verify the mix factor is applied
+///   after the texture multiplication.
+pub fn mtoon_rim_multiply_texture_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    // Rim contribution depends on parametricRimColor + lift +
+    // fresnelPower; defaults to all-zero, which would make rim
+    // invisible. Helper closure to set the rim baseline for every
+    // variant.
+    let with_rim = |id: &str| -> MToonParams {
+        let mut p = MToonParams::defaults(id);
+        p.parametric_rim_color_factor = [1.0, 1.0, 1.0];
+        p.parametric_rim_fresnel_power_factor = 3.0;
+        p.parametric_rim_lift_factor = 0.0;
+        p.rim_lighting_mix_factor = 1.0;
+        p
+    };
+
+    let mut baseline = with_rim("mtoon_rimtex_baseline");
+    baseline.rim_multiply_texture = false;
+    out.push(baseline);
+
+    let mut default_texture = with_rim("mtoon_rimtex_default");
+    default_texture.rim_multiply_texture = true;
+    out.push(default_texture);
+
+    let mut red_rim = with_rim("mtoon_rimtex_red_rim");
+    red_rim.rim_multiply_texture = true;
+    red_rim.parametric_rim_color_factor = [1.0, 0.0, 0.0];
+    out.push(red_rim);
+
+    let mut half_mix = with_rim("mtoon_rimtex_half_mix");
+    half_mix.rim_multiply_texture = true;
+    half_mix.rim_lighting_mix_factor = 0.5;
+    out.push(half_mix);
+
+    out
+}
+
 /// MToon `matcapTexture` sweep: 5 variants exercising the spec's rim-
 /// lighting matcap contribution
 /// (`rim += matcapFactor.rgb * texture(matcapTexture, matcapUv).rgb`,
@@ -1260,6 +1364,79 @@ mod multichain_sweep_tests {
                     "share_all variants must point all chains at the same group"
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod shading_shift_texture_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn shading_shift_sweep_has_5_variants_with_unique_ids() {
+        let s = mtoon_shading_shift_texture_sweep();
+        assert_eq!(s.len(), 5);
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), s.len());
+    }
+
+    #[test]
+    fn baseline_omits_shading_shift_texture() {
+        let s = mtoon_shading_shift_texture_sweep();
+        let b = s
+            .iter()
+            .find(|p| p.id == "mtoon_shadingshifttex_baseline")
+            .unwrap();
+        assert!(b.shading_shift_texture_scale.is_none());
+    }
+
+    #[test]
+    fn non_baseline_variants_carry_a_scale() {
+        let s = mtoon_shading_shift_texture_sweep();
+        for p in &s {
+            if p.id == "mtoon_shadingshifttex_baseline" {
+                continue;
+            }
+            assert!(
+                p.shading_shift_texture_scale.is_some(),
+                "{}: must set shading_shift_texture_scale to exercise the binding",
+                p.id
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod rim_multiply_texture_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn rim_multiply_sweep_has_4_variants_with_unique_ids() {
+        let s = mtoon_rim_multiply_texture_sweep();
+        assert_eq!(s.len(), 4);
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), s.len());
+    }
+
+    #[test]
+    fn every_variant_has_visible_rim_contribution() {
+        let s = mtoon_rim_multiply_texture_sweep();
+        for p in &s {
+            assert_ne!(
+                p.parametric_rim_color_factor,
+                [0.0, 0.0, 0.0],
+                "{}: parametricRimColorFactor must be non-zero or rim contribution is invisible",
+                p.id
+            );
+            assert!(
+                p.rim_lighting_mix_factor > 0.0,
+                "{}: rimLightingMixFactor must be > 0 or rim doesn't blend in",
+                p.id
+            );
         }
     }
 }

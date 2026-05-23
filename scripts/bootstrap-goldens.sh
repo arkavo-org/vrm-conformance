@@ -111,6 +111,18 @@ else
     rm -rf "$MATCAP_DIR"; mkdir -p "$MATCAP_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-matcap-texture-sweep \
         --output-dir "$MATCAP_DIR" --json >/dev/null
+
+    echo "==> Emitting MToon shadingShiftTexture sweep (5 plans, per-pixel boundary)"
+    SHADINGSHIFTTEX_DIR="$GOLDENS_DIR/_assets_shadingshifttex"
+    rm -rf "$SHADINGSHIFTTEX_DIR"; mkdir -p "$SHADINGSHIFTTEX_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-shading-shift-texture-sweep \
+        --output-dir "$SHADINGSHIFTTEX_DIR" --json >/dev/null
+
+    echo "==> Emitting MToon rimMultiplyTexture sweep (4 plans, parametric rim)"
+    RIMTEX_DIR="$GOLDENS_DIR/_assets_rimtex"
+    rm -rf "$RIMTEX_DIR"; mkdir -p "$RIMTEX_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-rim-multiply-texture-sweep \
+        --output-dir "$RIMTEX_DIR" --json >/dev/null
     echo "==> Emitting spring-bone settle sweep"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-sweep \
         --output-dir "$ASSETS_DIR" --json >/dev/null

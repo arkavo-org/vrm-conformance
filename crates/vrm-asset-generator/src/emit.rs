@@ -135,10 +135,13 @@ pub fn emit_vrm_with_custom_expressions(
     //
     // Triggered by any of the texture-needing params; the texture is
     // shared across binding points (baseColorTexture +
-    // shadeMultiplyTexture + matcapTexture all reference index 0).
+    // shadeMultiplyTexture + matcapTexture + shadingShiftTexture +
+    // rimMultiplyTexture all reference index 0).
     let needs_texture = params.texture_transform.is_some()
         || params.shade_multiply_texture
-        || params.matcap_texture;
+        || params.matcap_texture
+        || params.shading_shift_texture_scale.is_some()
+        || params.rim_multiply_texture;
     if needs_texture {
         let img = crate::texture::quadrant_checkerboard_16();
         let data_uri = crate::texture::image_as_data_uri(&img);
