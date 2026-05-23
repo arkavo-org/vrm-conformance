@@ -114,6 +114,15 @@ pub fn emit_vrm_with_custom_expressions(
 
     doc["extensions"]["VRMC_vrm"]["expressions"]["preset"] = viseme_preset_binds(mesh_node_index);
 
+    // Apply the firstPerson.meshAnnotations[0].type override when the
+    // caller wants something other than the canonical "auto" default
+    // (which is what `vrmc_vrm` writes). The annotation node index is
+    // already the mesh-bearing node so we only need to flip `type`.
+    if let Some(t) = params.first_person_type {
+        doc["extensions"]["VRMC_vrm"]["firstPerson"]["meshAnnotations"][0]["type"] =
+            serde_json::json!(t.as_spec_str());
+    }
+
     if !custom_expression_names.is_empty() {
         let mut custom_map = serde_json::Map::new();
         for name in custom_expression_names {

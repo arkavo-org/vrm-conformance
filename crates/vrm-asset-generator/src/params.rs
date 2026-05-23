@@ -45,6 +45,13 @@ pub struct MToonParams {
     /// glTF default if extension omitted is implicit multiplier=1.
     pub emissive_multiplier: f32,
 
+    /// `VRMC_vrm.firstPerson.meshAnnotations[*].type` override for the
+    /// avatar's mesh-bearing node. `None` keeps the canonical default
+    /// (`auto`) so existing assets stay byte-identical. The four valid
+    /// spec values (per VRMC_vrm-1.0 firstPerson.md) are surfaced via
+    /// the `FirstPersonType` enum so the sweep can drive each path.
+    pub first_person_type: Option<FirstPersonType>,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -80,6 +87,7 @@ impl MToonParams {
             uv_animation_rotation_speed_factor: 0.0,
             emissive_factor: [0.0, 0.0, 0.0],
             emissive_multiplier: 1.0,
+            first_person_type: None,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,
@@ -103,4 +111,36 @@ pub enum AlphaMode {
     Opaque,
     Mask,
     Blend,
+}
+
+/// `VRMC_vrm.firstPerson.meshAnnotations[*].type` values per the
+/// VRMC_vrm-1.0 spec (`firstPerson.md` enum table). camelCase serde
+/// because that matches the spec wire form exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FirstPersonType {
+    /// Renderer splits the mesh by head-bone weight (default when
+    /// `meshAnnotations` is absent or missing for a node).
+    Auto,
+    /// Visible from every camera. The "no culling" baseline.
+    Both,
+    /// Hidden from first-person (HMD) camera; visible from third-person.
+    /// Standard for the head/hair/face meshes of avatars used in VR.
+    ThirdPersonOnly,
+    /// Visible only from first-person camera; hidden from third-person.
+    /// Conventionally used for UI overlays attached to the avatar.
+    FirstPersonOnly,
+}
+
+impl FirstPersonType {
+    /// String value matching the spec's enum (lowerCamelCase). Used by
+    /// the generator and by adapters that key off the raw string.
+    pub fn as_spec_str(self) -> &'static str {
+        match self {
+            FirstPersonType::Auto => "auto",
+            FirstPersonType::Both => "both",
+            FirstPersonType::ThirdPersonOnly => "thirdPersonOnly",
+            FirstPersonType::FirstPersonOnly => "firstPersonOnly",
+        }
+    }
 }

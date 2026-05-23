@@ -87,6 +87,12 @@ else
     rm -rf "$EMISSIVE_DIR"; mkdir -p "$EMISSIVE_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-emissive-sweep \
         --output-dir "$EMISSIVE_DIR" --json >/dev/null
+
+    echo "==> Emitting VRMC_vrm.firstPerson sweep (4 plans, third-person camera)"
+    FIRSTPERSON_DIR="$GOLDENS_DIR/_assets_firstperson"
+    rm -rf "$FIRSTPERSON_DIR"; mkdir -p "$FIRSTPERSON_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-first-person-sweep \
+        --output-dir "$FIRSTPERSON_DIR" --json >/dev/null
     echo "==> Emitting spring-bone settle sweep"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-sweep \
         --output-dir "$ASSETS_DIR" --json >/dev/null

@@ -1,7 +1,7 @@
 //! MToon basic parameter sweep: ~50 assets, one per axis-value pair, all
 //! other parameters held at `MToonParams::defaults()`.
 
-use crate::params::{AlphaMode, MToonParams, OutlineWidthMode};
+use crate::params::{AlphaMode, FirstPersonType, MToonParams, OutlineWidthMode};
 use crate::spring_bone::{
     ColliderAttach, ColliderGroupParams, ColliderParams, ColliderShape, SpringBoneParams,
     SpringBoneSceneParams,
@@ -191,6 +191,50 @@ pub fn mtoon_emissive_sweep() -> Vec<MToonParams> {
     zero.emissive_multiplier = 4.0;
     out.push(zero);
 
+    out
+}
+
+/// VRMC_vrm.firstPerson sweep: 4 variants, one per spec-defined
+/// `meshAnnotations[*].type` enum value (`auto`, `both`,
+/// `thirdPersonOnly`, `firstPersonOnly`). All other parameters at
+/// MToon defaults so the only axis under test is the firstPerson
+/// annotation on the avatar's single mesh node.
+///
+/// Expected third-person rendering signal (the suite's standard camera
+/// is third-person at `[0, 1.4, 1.5]` looking at `[0, 1.4, 0]`):
+///
+/// | firstPerson.type   | head mesh in third-person render | rationale                                      |
+/// |--------------------|----------------------------------|------------------------------------------------|
+/// | `auto`             | visible                          | sphere isn't bone-weighted to head → defaults to renderable (most adapters) |
+/// | `both`             | visible                          | "visible from every camera"                    |
+/// | `thirdPersonOnly`  | visible                          | exactly what third-person camera should show   |
+/// | `firstPersonOnly`  | culled                           | hidden from non-first-person cameras per spec  |
+///
+/// Conformance signal: renderers that correctly implement firstPerson
+/// culling produce a distinct (mostly-empty) `firstPersonOnly` PNG and
+/// roughly-identical PNGs for the other three. Renderers that ignore
+/// firstPerson annotations produce four identical PNGs — a clear
+/// non-conformance.
+///
+/// Note: this sweep exercises the third-person rendering path only.
+/// First-person culling (the reverse case, where `thirdPersonOnly`
+/// should be culled and `firstPersonOnly` should be visible) requires
+/// a camera-mode field on `set_camera` that we don't have yet — that's
+/// a follow-up RFC. For now the third-person path alone is the
+/// minimum-viable signal.
+pub fn mtoon_first_person_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+    for t in [
+        FirstPersonType::Auto,
+        FirstPersonType::Both,
+        FirstPersonType::ThirdPersonOnly,
+        FirstPersonType::FirstPersonOnly,
+    ] {
+        let id = format!("mtoon_firstperson_{}", t.as_spec_str());
+        let mut p = MToonParams::defaults(id);
+        p.first_person_type = Some(t);
+        out.push(p);
+    }
     out
 }
 
@@ -968,6 +1012,34 @@ mod multichain_sweep_tests {
                     "share_all variants must point all chains at the same group"
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod first_person_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn first_person_sweep_emits_one_variant_per_spec_enum() {
+        let s = mtoon_first_person_sweep();
+        assert_eq!(s.len(), 4, "VRMC_vrm.firstPerson has 4 enum values");
+        let ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        assert!(ids.contains(&"mtoon_firstperson_auto"));
+        assert!(ids.contains(&"mtoon_firstperson_both"));
+        assert!(ids.contains(&"mtoon_firstperson_thirdPersonOnly"));
+        assert!(ids.contains(&"mtoon_firstperson_firstPersonOnly"));
+    }
+
+    #[test]
+    fn every_first_person_variant_sets_the_field() {
+        let s = mtoon_first_person_sweep();
+        for p in &s {
+            assert!(
+                p.first_person_type.is_some(),
+                "{}: first_person_type must be Some so the emitter overrides the default 'auto'",
+                p.id
+            );
         }
     }
 }

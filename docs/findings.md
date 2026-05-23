@@ -2067,3 +2067,34 @@ UniVRM not yet rendered against the sweep (batched-execution path, separate run)
 ### Net signal
 
 The gap analysis was right to call out the emissive multiplier — but the failure isn't a single-renderer issue. **Two out of three real adapters fail to apply MToon emissive correctly** on the conformance corpus, in different ways. The sweep produces clean falsifiable signal for each renderer's failure mode on first render, which is the right outcome for a conformance test.
+
+## VRMC_vrm.firstPerson — three-vrm + godot-vrm ignore mesh annotations; only VMK is conformant
+
+**Date**: 2026-05-23. Surfaced on the first run of the new firstPerson sweep.
+
+The newly-added `mtoon_first_person_sweep` (`crates/vrm-asset-generator/src/sweep.rs::mtoon_first_person_sweep`, 4 variants) emits one .vrm per spec enum value of `VRMC_vrm.firstPerson.meshAnnotations[*].type` (`auto`, `both`, `thirdPersonOnly`, `firstPersonOnly`) and renders each through the suite's standard third-person camera. Per the VRMC_vrm-1.0 firstPerson spec, the third-person camera should:
+
+- render `auto`, `both`, `thirdPersonOnly` (head visible — non-VR camera)
+- cull `firstPersonOnly` (only visible from first-person/HMD camera per spec)
+
+Direct `vrm-runner execute-test-plan` against all three real renderers:
+
+| test_id | vrm-metal-kit | three-vrm | godot-vrm |
+|---|---|---|---|
+| `mtoon_firstperson_auto` | `5d8cf1789282` (49634 B) | `6ff1f5687375` | `4587bf323df1` |
+| `mtoon_firstperson_both` | `5d8cf1789282` (49634 B) | `6ff1f5687375` | `4587bf323df1` |
+| `mtoon_firstperson_thirdPersonOnly` | `5d8cf1789282` (49634 B) | `6ff1f5687375` | `4587bf323df1` |
+| `mtoon_firstperson_firstPersonOnly` | **`0c167e74f194` (20611 B)** | `6ff1f5687375` | `4587bf323df1` |
+
+**vrm-metal-kit is the only conformant renderer.** The `firstPersonOnly` PNG is less than half the byte size of the other three (20.6 kB vs 49.6 kB) — the sphere mesh is genuinely culled and the rendered image is mostly background, which PNG compresses much smaller. The other three variants produce a byte-identical visible-head render.
+
+**three-vrm**: all 4 variants hash identically (`6ff1f5687375`). The renderer ignores `firstPerson.meshAnnotations.type` entirely in this rendering path. Likely the three-vrm plugin treats `firstPerson` data as opt-in via a separate camera-mode API and the conformance adapter doesn't toggle it. Worth filing on the three-vrm side (or working around in our `adapters/three-vrm/` wrapper if pixiv supports opt-in third-person culling).
+
+**godot-vrm**: same diagnosis as three-vrm — all 4 identical (`4587bf323df1`). Either the godot-vrm addon doesn't expose firstPerson culling at all, or the conformance adapter doesn't engage it.
+
+Note: this sweep tests only the **third-person rendering path** (the suite's standard camera). The reverse case (first-person camera, where `thirdPersonOnly` should be culled and `firstPersonOnly` should be visible) requires a camera-mode field on `set_camera` that the op contract doesn't have yet. That's a follow-up RFC. For now the third-person path alone is enough to surface the gap — the four "type" enum values produce clean test signal on the existing camera.
+
+To file:
+- Upstream three-vrm: clarify whether firstPerson culling is expected from `VRMLoaderPlugin` output or requires explicit camera-mode integration. If the latter, conformance adapter needs the integration.
+- Upstream godot-vrm: same question.
+- VMK gets a small commendation in this finding (one of the rare cases where it leads, not lags, the peers).
