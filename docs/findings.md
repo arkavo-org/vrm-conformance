@@ -2136,3 +2136,40 @@ The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera 
 **Refined conclusion**: the corpus produces meaningful signal for VMK + three-vrm comparisons. godot-vrm is the outlier — it renders only sparse highlights, not the full MToon-shaded sphere. The earlier consensus pair-stats SSIM (~0.90 godot vs VMK) is somewhat inflated by mostly-dark-vs-mostly-dark correlation, but the headline "godot doesn't render the avatar fully on this corpus" stands. The 10.6 kB godot PNG size reflects sparse rendered content + RGB (no alpha), not a corpus methodology problem.
 
 **For the firstPerson question**: godot's failure to differentiate the 4 variants is consistent with the avatar not being meaningfully rendered to begin with — there's nothing for `perform_head_hiding()` to cull because the mesh isn't visibly present. Diagnosing godot's MToon-shader pipeline is the right next thread, not a corpus retune.
+
+### Root cause for godot's sparse rendering — VRM addon import-time vs runtime mismatch
+
+Captured Godot stderr during a single `mtoon_default` render (via `vrm-runner execute-test-plan --adapter-bin vrm-godot-shim`) shows two cascading errors in the addon's VRM import path, before any MToon-shader code runs:
+
+```
+ERROR: Bug: Dictionary::operator[] used when there was no value for the given key "vrm/already_processed". Please report.
+   at: operator[] (core/variant/dictionary.cpp:136)
+   GDScript backtrace:
+       [0] _import_preflight (res://addons/vrm/1.0/VRMC_vrm.gd:957)
+       [1] load_vrm (res://src/session.gd:42)
+
+SCRIPT ERROR: Trying to assign value of type 'Skeleton3D' to a variable of type 'ImporterMeshInstance3D'.
+          at: _VRMC_vrm._create_animation_player (res://addons/vrm/1.0/VRMC_vrm.gd:387)
+          GDScript backtrace:
+              [0] _create_animation_player (res://addons/vrm/1.0/VRMC_vrm.gd:387)
+              [1] _import_post (res://addons/vrm/1.0/VRMC_vrm.gd:1034)
+              [2] load_vrm (res://src/session.gd:46)
+```
+
+`ImporterMeshInstance3D` is Godot's editor-time abstract class that normally gets resolved into runtime types (`MeshInstance3D` + `Skeleton3D`) during editor-side glTF import. The godot-vrm addon's `VRMC_vrm.gd:_import_post` was written against the editor-time scene graph and assumes those resolutions have already happened. When we call it from runtime code via `GLTFDocument.append_from_file` + `generate_scene` (`session.gd:42-46`), the `ImporterMeshInstance3D` types are still present — and the addon's animation-player builder tries to assign a `Skeleton3D` to one of them, failing the type check.
+
+So the cascading effect is:
+1. `_import_preflight` partially fails (missing `vrm/already_processed` initialisation).
+2. `_import_post` then errors out on the editor/runtime type mismatch.
+3. The scene gets handed to the rest of `session.gd` in a partially-constructed state.
+4. The MToon material setup may not even attach to any meshes that survived.
+5. The viewport renders only the skeleton-debug-render fragments + sparse highlights from whatever did materialise.
+
+**This isn't an MToon shader bug, an adapter wiring bug, or a firstPerson-culling bug.** It's that the godot-vrm addon (`V-Sekai/godot-vrm` lineage in `adapters/godot-vrm/addons/vrm/`) is designed for editor-time import and not for runtime headless loading. Every previous godot-vrm finding in this document inherits from this root cause.
+
+Properly fixing this is **multi-session work** with three plausible paths:
+1. **Adapt the addon for runtime** — audit `VRMC_vrm.gd`'s `_import_*` callbacks and replace `ImporterMeshInstance3D` references with runtime equivalents; not a small change.
+2. **Bypass the addon's `_import_post`** — call `gltf.generate_scene()` first, then walk the resulting runtime scene graph and apply VRM data ourselves. Loses VRM-specific features but gives a clean baseline render.
+3. **Upstream** — file with `V-Sekai/godot-vrm` (the addon source) asking for a documented runtime-loading API.
+
+For now, **mark every godot-vrm finding in this document as inheriting from the addon import-time root cause** and stop chasing godot-specific symptoms until the import path is fixed. Godot remains in the manifest for completeness (consensus diffs against it still pass via mostly-black-vs-mostly-black correlation), but its renders should not be trusted as a conformance reference.
