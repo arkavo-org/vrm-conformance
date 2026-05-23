@@ -139,6 +139,35 @@ pub fn spring_bone_basic_sweep() -> Vec<SpringBoneParams> {
     out
 }
 
+/// VMK#162 coupling-detection sweep. Emits a focused 4-variant set whose
+/// purpose is to surface the load-bearing equilibrium between the parser
+/// substitution at `VRMExtensionParser.swift:1061` (`gravityPower=0 → 1.0`)
+/// and the inertia compensation in `SpringBonePredict.metal:107-142`.
+///
+/// Methodology: the parser silently rewrites author-specified `gravityPower=0`
+/// to `1.0` internally. So `vmk162_gravity_0` (asset value `0.0`) and
+/// `vmk162_gravity_1` (asset value `1.0`) produce **identical internal
+/// dynamics** when the substitution is active. If a future PR removes the
+/// substitution in isolation, `vmk162_gravity_0` decouples from
+/// `vmk162_gravity_1` (chain hangs only by stiffness with no downward force)
+/// and the coupling matrix will surface a non-zero per-joint drift between
+/// those two perturbations.
+///
+/// Values intentionally include 1.0 and 2.0 (outside the main sweep's
+/// `{0.0, 0.02, 0.05, 0.10, 0.20}` discrimination range). Those values
+/// saturate three-vrm/godot-vrm in *visual* comparison — that's fine here
+/// because the matrix runner reads bone positions, not pixel SSIM.
+pub fn spring_bone_coupling_sweep() -> Vec<SpringBoneParams> {
+    let mut out = Vec::new();
+    out.push(SpringBoneParams::defaults("vmk162_baseline"));
+    for &g in &[0.0_f32, 1.0, 2.0] {
+        let mut p = SpringBoneParams::defaults(format!("vmk162_gravity_{}", fmt_num(g)));
+        p.gravity_power = g;
+        out.push(p);
+    }
+    out
+}
+
 pub fn fmt_num(v: f32) -> String {
     let s = format!("{v:.3}").replace('.', "p").replace('-', "neg");
     s.trim_end_matches('0').trim_end_matches('p').to_string()

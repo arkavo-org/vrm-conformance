@@ -1,0 +1,72 @@
+# VMK#162 swing-coupling regression matrix — the calibrated detector.
+#
+# What this guards against: a future commit that touches the parser
+# substitution at `VRMExtensionParser.swift:1061`
+# (`joint.gravityPower = rawGravityPower > 0 ? rawGravityPower : 1.0`) or
+# the inertia compensation at `SpringBonePredict.metal:107-142` in
+# *isolation*. The two pieces are load-bearing for AvatarSample_A's hair
+# tuning (stiffness=0.85 / gravityPower=0 / dragForce=0.4); removing
+# either independently breaks the equilibrium per the VMK#162 issue body.
+#
+# How it works: vmk162_gravity_0.vrm carries author intent `gravityPower=0`
+# (which the parser silently rewrites to `1.0` internally). vmk162_gravity_1.vrm
+# carries literal `gravityPower=1.0`. Under the substitution, the two
+# produce identical chain dynamics — drift between them is ≈ 0. If a future
+# commit removes the substitution in isolation, gravity_0 decouples (chain
+# hangs only by stiffness, no downward force) and the per-joint drift
+# vector between gravity_0 and gravity_1 grows.
+#
+# The matrix targets the swing variant (animate_root_transform-driven)
+# because static settle on a stiff 4-joint chain barely moves under gravity
+# — only animated excitation surfaces the gravity_power axis at the
+# millimetre per-joint scale the matrix is designed to detect.
+#
+# Threshold calibration (see docs/upstream/VMK-162-suite-side-detector.md):
+#   - three-vrm + godot-vrm (well-behaved baselines): expected max drift
+#     between gravity_0 and gravity_1 perturbations is materially large
+#     (they don't have the substitution; gravity_0 hangs by stiffness only).
+#   - VMK 0.16.0 (substitution active): expected drift ≈ 0 between
+#     gravity_0 and gravity_1.
+#   - Threshold set conservatively above VMK's noise floor; intent is that
+#     the matrix *passes* on VMK while the substitution holds, and starts
+#     *failing* the moment the substitution is removed in isolation
+#     without compensating inertia changes.
+
+base_plan: ../../../goldens-cache/_assets_vmk162/swing_vmk162_baseline.test.yaml
+baseline_asset: swing_vmk162_baseline.vrm
+perturbations:
+  - name: gravity_0_parser_substitution_trigger
+    asset: swing_vmk162_gravity_0.vrm
+    description: |
+      author-intent gravity_power=0.0 — parser at
+      VRMExtensionParser.swift:1061 silently rewrites to 1.0. Should
+      land in the same chain-dynamics neighborhood as gravity_1 under
+      the substitution.
+  - name: gravity_1_substitution_target
+    asset: swing_vmk162_gravity_1.vrm
+    description: |
+      literal gravity_power=1.0 — the value the parser substitutes 0
+      into. Reference for the substitution test.
+  - name: gravity_2_high_reference
+    asset: swing_vmk162_gravity_2.vrm
+    description: |
+      literal gravity_power=2.0 — separate reference for the high end
+      of the gravity axis (no substitution path; just confirms axis
+      differentiates at all).
+# Calibrated 2026-05-23 against VMK 0.16.0 + three-vrm 3.5.0 (Apple M4
+# Max / macOS 26.5). Calibration measurements:
+#
+#   VMK 0.16.0   gravity_0=0.144 m  gravity_1=0.001 m  gravity_2=0.001 m
+#   three-vrm    gravity_0=0.071 m  gravity_1=0.023 m  gravity_2=0.039 m
+#   godot-vrm    all 0.000 m  (import-time bug — excluded from calibration)
+#
+# Threshold set conservatively above VMK's observed max so the matrix
+# *passes* under the current parser-substitution + inertia-compensation
+# equilibrium and starts *failing* if any perturbation's drift exceeds
+# 0.20 m — a catastrophic-only detector at this resolution.
+#
+# A finer-grained "is the equilibrium intact" detector — comparing the
+# observed signature to the locked per-renderer reference values above —
+# lives in `docs/upstream/VMK-162-suite-side-detector.md` (manual diff
+# against the reference table at the bottom of this file's tracker stub).
+coupling_threshold_m: 0.20

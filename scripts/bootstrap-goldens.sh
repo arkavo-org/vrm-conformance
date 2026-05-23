@@ -199,6 +199,12 @@ else
     rm -rf "$VRMA_LOOKAT_DIR"; mkdir -p "$VRMA_LOOKAT_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-vrma-lookat-sweep \
         --output-dir "$VRMA_LOOKAT_DIR" --json >/dev/null
+
+    echo "==> Emitting VMK#162 coupling sweep (4 variants × settle + swing = 8 plans)"
+    VMK162_DIR="$GOLDENS_DIR/_assets_vmk162"
+    rm -rf "$VMK162_DIR"; mkdir -p "$VMK162_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-springbone-coupling-sweep \
+        --output-dir "$VMK162_DIR" --json >/dev/null
 fi
 
 # mapfile -t TEST_PLANS isn't available on macOS's bundled bash 3.2.
@@ -365,7 +371,8 @@ if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
             "${SHADINGSHIFTTEX_DIR:-}" \
             "${RIMTEX_DIR:-}" \
             "${OUTLINETEX_DIR:-}" \
-            "${PBRTEX_DIR:-}"; do
+            "${PBRTEX_DIR:-}" \
+            "${VMK162_DIR:-}"; do
             [ -z "$src" ] && continue
             [ ! -d "$src" ] && continue
             for f in "$src"/*.test.yaml "$src"/*.vrm "$src"/*.vrma; do
@@ -438,6 +445,47 @@ for name, n in sorted(c.items()):
 "
 else
     echo "==> No entries written (all adapters skipped or all renders failed)"
+fi
+
+# VMK#162 coupling-matrix detector. Runs per-adapter against the
+# coupling sweep emitted above. Failing this matrix means a per-joint
+# drift exceeded the calibrated threshold — investigate before merging.
+# Locked per-renderer signatures live in
+# `docs/upstream/VMK-162-suite-side-detector.md`.
+VMK162_MATRIX="$ROOT/test-plans/manual/coupling/vmk162_swing_coupling.matrix.yaml"
+VMK162_ASSETS="${VMK162_DIR:-$GOLDENS_DIR/_assets_vmk162}"
+if [ -f "$VMK162_MATRIX" ] && [ -d "$VMK162_ASSETS" ]; then
+    echo
+    echo "==> VMK#162 coupling matrix (per-adapter)"
+    matrix_for_adapter() {
+        local label="$1" bin="$2" args="$3"
+        local outdir="$GOLDENS_DIR/_vmk162_matrix/$label"
+        mkdir -p "$outdir"
+        local run_args=(execute-test-plan-matrix --matrix "$VMK162_MATRIX"
+            --adapter-bin "$bin" --asset-dir "$VMK162_ASSETS"
+            --output-dir "$outdir" --renderer-name "$label" --json)
+        [ -n "$args" ] && run_args+=(--adapter-args "$args")
+        local result
+        result=$(cargo run --release -q -p vrm-runner -- "${run_args[@]}" 2>/dev/null | tail -1)
+        echo "$result" | python3 -c "
+import json, sys
+try: d = json.loads(sys.stdin.read())
+except: print('    $label: parse failed'); sys.exit(0)
+status = 'PASS' if d.get('overall_passed') else 'FAIL'
+print(f'    {status} $label (threshold={d.get(\"coupling_threshold_m\", 0):.3f} m):')
+for o in d.get('outcomes', []):
+    print(f'      {o[\"name\"]:45s} max_drift={o.get(\"max_drift_m\", 0):.4f} m')
+"
+    }
+    if [ "${SKIP_VRM_METAL_KIT:-0}" != "1" ] && [ -x "${VMK_BIN:-}" ]; then
+        matrix_for_adapter "vrm-metal-kit" "$VMK_BIN" ""
+    fi
+    if [ "${SKIP_THREE_VRM:-0}" != "1" ] && [ -f "${TVM_BIN:-}" ]; then
+        matrix_for_adapter "three-vrm" "$(command -v node)" "$TVM_BIN"
+    fi
+    if [ "${SKIP_GODOT_VRM:-0}" != "1" ] && [ -x "${GVRM_BIN:-}" ] && command -v godot >/dev/null 2>&1; then
+        matrix_for_adapter "godot-vrm" "$GVRM_BIN" ""
+    fi
 fi
 
 if [ "$PUSH_MODE" = "local" ]; then

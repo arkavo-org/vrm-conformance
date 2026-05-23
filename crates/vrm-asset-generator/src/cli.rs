@@ -199,6 +199,23 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the VMK#162 coupling-detection sweep (8 assets = 4 variants
+    /// × settle + swing). Variants: vmk162_baseline + vmk162_gravity_{0,1,2}.
+    /// Designed to surface the parser substitution `gravityPower=0 → 1.0`
+    /// at `VRMExtensionParser.swift:1061` via the matrix runner: under
+    /// substitution, gravity_0 (asset value 0.0) and gravity_1 (asset
+    /// value 1.0) produce identical chain dynamics. Without it, gravity_0
+    /// decouples from gravity_1 and the matrix surfaces a per-joint drift.
+    /// Emit both settle (`vmk162_*`) and swing (`swing_vmk162_*`) plans;
+    /// the swing variant is the load-bearing one for matrix runner usage
+    /// because static settle on a 4-joint stiff chain barely moves.
+    EmitSpringboneCouplingSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the spring-bone sequence-mode sweep (~20 assets). Each asset's
     /// `.test.yaml` carries a `render_sequence:` block instead of an
     /// `animation:` block, dispatching the runner's render_sequence path
@@ -943,6 +960,85 @@ pub fn run(cli: Cli) -> Result<()> {
             } else {
                 println!(
                     "emitted {} swing spring-bone assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
+        Cmd::EmitSpringboneCouplingSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::{emit_with_sidecars_spring_bone, emit_with_sidecars_spring_bone_swing};
+            use crate::spring_bone::spring_bone_coupling_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = spring_bone_coupling_sweep();
+            let total = variants.len() * 2;
+
+            let mut emitted = Vec::new();
+            for (i, spring) in variants.iter().enumerate() {
+                // Settle variant.
+                if emit_json {
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "event": "progress",
+                            "op": "emit-springbone-coupling-sweep",
+                            "index": i * 2,
+                            "total": total,
+                            "id": spring.id
+                        }))?
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i * 2 + 1, total, spring.id);
+                }
+                let stem = output_dir.join(&spring.id);
+                let mtoon = MToonParams::defaults(&spring.id);
+                emit_with_sidecars_spring_bone(&mtoon, spring, &stem)?;
+                emitted.push(stem);
+
+                // Swing variant (load-bearing for the matrix runner —
+                // static settle on a stiff 4-joint chain doesn't excite
+                // gravity enough to differentiate gravity_0 from gravity_1).
+                let swing_id = format!("swing_{}", spring.id);
+                if emit_json {
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "event": "progress",
+                            "op": "emit-springbone-coupling-sweep",
+                            "index": i * 2 + 1,
+                            "total": total,
+                            "id": swing_id
+                        }))?
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i * 2 + 2, total, swing_id);
+                }
+                let mut prefixed = spring.clone();
+                prefixed.id = swing_id.clone();
+                prefixed.spring_name = format!("{swing_id}_chain");
+                let stem = output_dir.join(&swing_id);
+                let mtoon = MToonParams::defaults(&swing_id);
+                emit_with_sidecars_spring_bone_swing(&mtoon, &prefixed, &stem)?;
+                emitted.push(stem);
+            }
+
+            if emit_json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&json!({
+                        "ok": true,
+                        "count": emitted.len(),
+                        "output_dir": output_dir,
+                        "assets": emitted
+                    }))?
+                );
+            } else {
+                println!(
+                    "emitted {} coupling-sweep assets (4 variants × settle + swing) to {}",
                     emitted.len(),
                     output_dir
                 );

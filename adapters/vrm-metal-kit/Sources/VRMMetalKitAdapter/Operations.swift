@@ -1221,6 +1221,12 @@ final class Operations: @unchecked Sendable {
             let point = sampler(time)
             session.lastLookAtHeadLocalPoint = point
             session.renderer.lookAtController?.target = .headLocalPoint(point)
+            // VMK 0.16.0-rc.4 (VMK#294 closure) added applyImmediately() to
+            // resolve the queued target into bone rotations or expression
+            // weights without waiting for the next frame-rate-dependent tick.
+            // The offline render path doesn't tick the controller, so without
+            // this call the gaze stays buffered and the render misses it.
+            session.renderer.lookAtController?.applyImmediately()
             lookAtApplied = true
         } else {
             session.lastLookAtHeadLocalPoint = nil

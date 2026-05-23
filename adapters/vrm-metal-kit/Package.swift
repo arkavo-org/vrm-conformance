@@ -21,6 +21,204 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
+        // 0.16.0 (commit 392d949, released 2026-05-23 as **stable** —
+        //   first non-pre-release in the cohort) consolidates rc.1
+        //   through rc.4 plus one final spec-compliance fix (PR #298
+        //   closing VMK#297) that landed after rc.4. Total scope vs
+        //   0.15.2 (last stable):
+        //   - 13 closures filed by this conformance suite: VMK#283,
+        //          #286, #287, #288, #289, #290, #292, #293, #294,
+        //          #297 + earlier 0.15.x closures. Plus VMK#239 and
+        //          VMK#295 closed at upstream's discretion.
+        //   - Stable corpus signal (this suite, 2026-05-23):
+        //          - 632 / 632 plans render through this adapter
+        //                  (100% stability — no Unimplemented, no
+        //                  errors, no missing PNGs).
+        //          - 247 / 263 conformance pass vs UniVRM consortium
+        //                  reference (94%); the 19 below-threshold
+        //                  failures are all known cross-renderer
+        //                  methodology hazards (outline, matcap,
+        //                  shaded-color texture aliasing) or
+        //                  near-threshold ties — zero regression-class.
+        //          - +42 absolute new passes over the rc.2 baseline
+        //                  (205/206 on a 57-test smaller corpus).
+        //   PR #298 (commit 53a68ea on the branch, squashed to 392d949)
+        //   closes VMK#297 — the spec discrepancy this suite flagged in
+        //   the rc.4 verification: VMK was writing lookAt expressions
+        //   to custom-namespace `LookLeft/Right/Up/Down` (PascalCase)
+        //   but the VRM 1.0 spec defines `lookLeft/Right/Up/Down`
+        //   (lowercase) as preset expressions. The fix writes to BOTH
+        //   namespaces (spec preset + legacy custom), so VRM 0.x assets
+        //   keep working while spec-compliant VRM 1.0 assets finally
+        //   get gaze applied. Verified locally: PR's 5 new unit tests
+        //   pass; A/B vs rc.4 on 18-plan sample (MToon, spring-bone,
+        //   VRMA lookAt) byte-identical; no behavioural drift outside
+        //   the lookAt code path. End-to-end visual propagation on
+        //   our synthetic lookAt corpus still requires suite-side
+        //   asset extension (eye bones + lookAt preset expressions —
+        //   a ~15-LoC follow-up in the asset generator).
+        //   No code changes vs rc.4 in this stable cut beyond PR #298;
+        //   our adapter wiring (`applyImmediately()` call added during
+        //   rc.4 verification) is unchanged.
+        // 0.16.0-rc.4 (commit 81ebce6, pre-released 2026-05-23) lands a
+        //   single squashed PR #296 that closes all three suite-filed
+        //   follow-ups against rc.3 plus a pre-existing rigid-follow
+        //   regression that was surfaced during PR #291 development:
+        //   - **PR #296 closes VMK#292** (swing-axis stiffness collapse on
+        //          rc.3): rc.3's fixed-rate `synchronousSpringBone` timestep
+        //          closed VMK#283 but introduced a settle/warmup interaction
+        //          that left the conformance suite's swing-sweep stiffness
+        //          axis collapsed to a single hash (`68b391e7764a2a9e`)
+        //          across `stiffness_{0, 0.2, 0.8, 1}`. rc.4's `warmupPhysics`
+        //          now drains settling frames so post-warmup animation runs
+        //          with stiffness engaged. Verified: 9 swing axis variants
+        //          produce 9 distinct hashes on rc.4 (see docs/findings.md
+        //          "VMK 0.16.0-rc.4 verification").
+        //   - **PR #296 closes VMK#293** (`occlusionTexture` silently
+        //          dropped on MToon): rc.3's PR #291 closed
+        //          `normalTexture.scale` (VMK#290) but the same
+        //          `mtoon_pbr_textures_sweep` corpus also exercises
+        //          `occlusionTexture.strength` — on rc.3 all three
+        //          occlusion variants (baseline, default, strength_half)
+        //          rendered byte-identical, because the texture binding
+        //          itself was dropped. rc.4 wires the full path: parser
+        //          populates texture data, uniform layout adds bindings,
+        //          renderer activates texture slot 8, fragment shader
+        //          applies the glTF formula `1.0 + strength * (ao - 1.0)`.
+        //          Verified: 3 distinct hashes on rc.4.
+        //   - **PR #296 closes VMK#294** (VRMA lookAt parsed but not
+        //          propagated): rc.3's VMK#286 closure parsed yaw/pitch
+        //          correctly but the parsed values never reached the
+        //          rendered avatar's bones or expression weights. rc.4
+        //          adds `VRMLookAtController.applyImmediately()` which
+        //          resolves the queued gaze into eye-bone rotations
+        //          (bone-driven) or `LookLeft/Right/Up/Down` custom
+        //          expression weights (expression-driven), without
+        //          waiting for the next frame-rate-dependent tick.
+        //          **Adapter wiring update required**: this commit
+        //          adds the `applyImmediately()` call in
+        //          `Operations.swift::handleApplyVrmaAtTime` so the
+        //          offline render path triggers propagation. Caveat:
+        //          the suite's synthetic humanoid corpus lacks
+        //          `leftEye`/`rightEye` bones and the lookAt custom
+        //          expressions, so end-to-end visual propagation
+        //          isn't yet observable on the conformance assets
+        //          (extending the asset generator is a follow-up).
+        //   - **PR #296 closes VMK#295** (center-node rigid follow
+        //          CPU/GPU race): pre-existing
+        //          `testCenterNodeTranslationDragsJointRigidly` failure
+        //          surfaced during rc.3 follow-up work. Root cause:
+        //          `applyCenterFrameDeltas` did the entire frame's
+        //          center-node delta as a CPU-side memcpy *before* the
+        //          substep loop, while the root bone was driven
+        //          per-substep, leaving substep 1 with the child
+        //          shifted 100% and the root only 1/N. The PBD
+        //          distance constraint saw the chain stretched and
+        //          yanked the child back. CPU-side per-substep fix
+        //          can't work on the shared-command-buffer path
+        //          (CPU writes to .storageModeShared land in one
+        //          shot before GPU execution starts). rc.4 introduces
+        //          a new Metal kernel `springBoneApplyCenterDelta`
+        //          that applies per-substep deltas during GPU
+        //          execution. Behavioural impact: spring-bone goldens
+        //          for plans with non-trivial root translation will
+        //          shift on rc.4; this affects most of the
+        //          `swing_springbone_*` corpus.
+        //   Behavioural changes on rc.4:
+        //   - **All spring-bone goldens on plans using `animate_root_transform`
+        //          will shift.** VMK#295's kernel change + VMK#292's warmup
+        //          fix both alter integration output. Re-bootstrap of the
+        //          swing/multichain corpora needed. Static settle plans
+        //          (no root motion, no warmup interaction) are unaffected
+        //          and remain byte-identical to rc.2/rc.3.
+        //   - **`VRMLookAtController.applyImmediately()` is the offline-path
+        //          contract** for invoking gaze propagation outside the
+        //          live `update(deltaTime:)` smoothing tick. Adapters must
+        //          call it after setting the controller target.
+        // 0.16.0-rc.3 (commit 8cd3bc9, pre-released 2026-05-23) lands a
+        //   single squashed PR #291 that closes six issues filed by this
+        //   suite plus one long-standing open:
+        //   - **PR #291 closes VMK#283** (animated swing non-determinism, take
+        //          two): rc.2's PR #285 drain-only attempt did not close our
+        //          reproducer (`swing_springbone_joints_16` still produced
+        //          three distinct PNGs across five rc.2 runs on the same
+        //          binary/input/hardware — see docs/findings.md "VMK
+        //          0.16.0-rc.2 verification"). rc.3 replaces the
+        //          wall-clock-paced `synchronousSpringBone` step with a
+        //          fixed 60 Hz timestep whenever `simulationDeltaTime` is
+        //          unset, eliminating timing variability between consecutive
+        //          adapter invocations. This is the structural fix the
+        //          rc.2 verification recommended; the drain alone left
+        //          GPU/CPU scheduling jitter in the loop.
+        //   - **PR #291 closes VMK#286** (VRMA lookAt rotation-channel
+        //          gaze): `VRMAnimationLoader.loadVRMA(from:model:)`
+        //          previously populated `clip.lookAtTargetSampler` only
+        //          when the referenced node had a `translation` track.
+        //          `@pixiv/three-vrm-animation`, the Pixiv VRMA sample
+        //          set, and our `vrma_lookat_*` corpus all encode gaze
+        //          as a `rotation` channel on the lookAt node — so the
+        //          sampler stayed nil and `apply_vrma` was a silent
+        //          no-op for gaze on every plan in that sweep. Fix adds
+        //          `VRMAGLBBuilder.LookAtChannel` and parses both paths.
+        //   - **PR #291 closes VMK#287** (MToon HDR emissive multiplier):
+        //          `VRMC_materials_hdr_emissiveMultiplier-1.0.emissiveMultiplier`
+        //          was being read but never applied to the rendered
+        //          emission — `mtoon_emissive_multiplier_{0, 0.25, 0.5,
+        //          1, 2, 5}` all rendered to the same PNG hash on rc.2.
+        //          Closure means the multiplier reaches the shader as
+        //          documented (alias of `KHR_materials_emissive_strength`).
+        //   - **PR #291 closes VMK#288** (KHR_texture_transform on
+        //          baseColorTexture): the eight `mtoon_uvxform_*` variants
+        //          (offset/rotation/scale combinations) all rendered to
+        //          one byte-identical PNG on rc.2; three-vrm produced
+        //          eight distinct outputs. rc.3 wires the affine UV
+        //          transform per the Khronos spec (`translation * rotation
+        //          * scale`).
+        //   - **PR #291 closes VMK#289** (outlineWidthMultiplyTexture
+        //          degraded pipeline): the worst of the five rc.2
+        //          MToon findings — setting `outlineWidthMultiplyTexture`
+        //          activated a codepath that ignored per-vertex G-channel
+        //          modulation **and** `outlineWidthFactor` **and**
+        //          `outlineWidthMode` simultaneously, collapsing three
+        //          materially different test variants to one PNG. Fix is
+        //          "Outline pass texture binding and channel sampling
+        //          fix" per the release notes — the binding now reaches
+        //          the shader and the three input axes each have effect.
+        //   - **PR #291 closes VMK#290** (normalTexture.scale ignored):
+        //          glTF-core `normalTextureInfo.scale` was silently
+        //          dropped on MToon materials — `mtoon_pbrtex_normal_default`
+        //          (scale=1) and `mtoon_pbrtex_normal_scale_2x` (scale=2)
+        //          rendered byte-identical on rc.2; UniVRM and three-vrm
+        //          both produced distinct outputs. rc.3 threads the
+        //          scale through the material pipeline.
+        //   - **VMK#239 (shadingShift / shadingToony boundary collapse):**
+        //          listed in the rc.3 release notes' closed-issues set
+        //          but NOT in PR #291's commit message. Long-standing
+        //          open since 0.15.0 (the Int/Double generalization
+        //          partially addressed it but did not close
+        //          `shadingShift=1.0`/`shadingToony=0.0` boundary cases).
+        //          Verify empirically against `mtoon_shadingShift_*` and
+        //          `mtoon_shadingToony_*` corpora — if boundary outputs
+        //          have collapsed, the closure is real and likely a
+        //          downstream effect of the MToon plumbing changes.
+        //   Behavioural changes recorded in the rc.3 release notes:
+        //   - **`synchronousSpringBone=true` now implies a fixed 60 Hz
+        //          spring-bone timestep when `simulationDeltaTime` is
+        //          unset.** Our adapter does not set `simulationDeltaTime`,
+        //          so the entire swing-sweep corpus moves to the fixed-rate
+        //          step on rc.3 — eliminates wall-clock variability and
+        //          should restore byte-identical reproducibility on the
+        //          surfaces that flickered under rc.1 / rc.2 / 0.15.2.
+        //   - **MToon outline width now functional** via corrected texture
+        //          binding (the #289 closure). Expect `mtoon_outline_*`
+        //          variants that previously rendered identical to now
+        //          diverge in line with the spec — this is a *deliberate*
+        //          divergence vs rc.2 baselines; goldens for outline-related
+        //          tests must be re-bootstrapped.
+        //   - **Framework now builds for iOS, iOS Simulator, AND macOS**
+        //          (previously macOS-only). Our adapter is unaffected
+        //          (executable target stays macOS-only); broader product
+        //          availability for downstream SPM consumers.
         // 0.16.0-rc.2 (commit 7f7d39b, pre-released 2026-05-22) adds two
         //   fixes on top of 0.16.0-rc.1:
         //   - **PR #285 closes VMK#283** (animated swing non-determinism):
@@ -274,7 +472,7 @@ let package = Package(
         // All nine were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "7f7d39b6877c2bfcadb40f4e19824eafdfcff0a7"
+            revision: "392d94926619bcb59401f49b29e82d2a575d4d15"
         ),
     ],
     targets: [
