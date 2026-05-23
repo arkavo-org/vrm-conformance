@@ -2121,24 +2121,18 @@ Post-fix re-render (same 4 plans, same hardware):
 
 Conformance count delta: **1 of 3 peer renderers moved from non-conformant to conformant** on this surface with a 10-line adapter change. VMK + three-vrm now both pass; godot-vrm still needs investigation.
 
-### Methodology hazard surfaced during the godot debug
+### Methodology investigation — godot-specific rendering, not a corpus issue
 
-While digging into godot's "10.6 kB renders" behaviour, raw-pixel inspection of `mtoon_default` across all three renderers revealed something more general than expected:
+(Note: an earlier draft of this section claimed the conformance corpus had a 1–4% pixel-coverage methodology hazard affecting all renderers. That claim was wrong and is corrected below. The original measurement counted RGB=0 pixels as "empty" without accounting for the MToon shader writing legitimately dark colors for the shaded portion of the sphere, plus alpha-channel quirks that varied per renderer.)
 
-| renderer | non-black RGB pixels | non-transparent alpha pixels |
-|---|---|---|
-| `vrm-metal-kit` | 17 466 (1.67% of frame) | 262 (0.025%) |
-| `three-vrm` | 39 902 (3.81%) | 1 024 (0.098%) |
-| `godot-vrm` | 2 657 (0.25%) | n/a — no alpha channel |
+ASCII visualization of `mtoon_default` across the three renderers (32× downsample, `:` = non-zero RGB with alpha=0, `M` = magenta background, blank = exact (0,0,0) pixel) confirms the avatar IS rendered visibly on VMK and three-vrm:
 
-The synthetic avatar's sphere mesh (`sphere(0.3 m radius, 24, 48)` attached to head at world y≈1.36 m) should subtend ≈22° at 30° FOV and a 1.5 m camera distance — covering roughly 770 px of the 1024² frame vertically. **Actual coverage on every renderer is 1–4% non-black**, with most of those pixels having `alpha = 0` in the destination buffer. Center-row sampling on `mtoon_default`:
+- **three-vrm**: clear sphere silhouette at rows 8–15 spanning cols 7–24 of the 32-row downsample (~512×288 px of original) — recognisable avatar head shape. Pixel count 3.81% non-black is consistent with MToon-shaded sphere where the shaded half reads as RGB=(0,0,0) due to default shading.
+- **vrm-metal-kit**: sparse pixels in roughly the same area, mostly the sphere's lit edge.
+- **godot-vrm**: just a few isolated bright pixels at scattered positions, no recognisable shape.
 
-- vrm-metal-kit: 24 non-black pixels at columns 783–897 (right side of frame, not centered)
-- three-vrm: 43 non-black pixels spread across columns 126–833
-- godot-vrm: 1 non-black pixel at column 897
+The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera (0, 1.4, 1.5), FOV 30°, distance ≈ 1.5005 m) predicts the sphere should subtend ≈ 22.6° = 75% of frame height = ~764 px diameter. three-vrm matches this prediction; godot does not render anything close to it.
 
-So the corpus-wide consensus SSIM scores (~0.90 mean) are inflated by mostly-black-vs-mostly-black correlations rather than measuring meaningful pixel-content overlap. The renderers aren't agreeing on a vibrant rendered avatar — they're agreeing on mostly-empty frames with the avatar represented as small sparse clusters in slightly different locations. The 10.6 kB vs 50 kB file-size disparity between godot-vrm and VMK is mostly RGB-vs-RGBA encoding (5.6× difference is dominated by godot's lack of an alpha channel) plus minor compression differences from how each renderer lays out its sparse output.
+**Refined conclusion**: the corpus produces meaningful signal for VMK + three-vrm comparisons. godot-vrm is the outlier — it renders only sparse highlights, not the full MToon-shaded sphere. The earlier consensus pair-stats SSIM (~0.90 godot vs VMK) is somewhat inflated by mostly-dark-vs-mostly-dark correlation, but the headline "godot doesn't render the avatar fully on this corpus" stands. The 10.6 kB godot PNG size reflects sparse rendered content + RGB (no alpha), not a corpus methodology problem.
 
-This is a **bigger methodology issue worth filing as its own follow-up**: the synthetic-avatar corpus's mesh + camera setup is producing low-signal renders across the board, which masks real renderer differences and inflates SSIM agreement. A corpus retune (larger avatar mesh, closer camera, or different background color so non-rendered pixels are distinguishable from rendered-but-dark pixels) would unlock much sharper conformance signal — and would likely make the godot "firstPerson culling silent" finding visibly different from the surface it currently looks like.
-
-The original "godot ignores firstPerson culling" headline is technically true (3 of 4 godot variants ARE identical at the byte level so no culling is observable), but the diagnostic depth needed to call it a godot bug vs a corpus-setup confound is more than this session can reach. Marking for a separate debug thread.
+**For the firstPerson question**: godot's failure to differentiate the 4 variants is consistent with the avatar not being meaningfully rendered to begin with — there's nothing for `perform_head_hiding()` to cull because the mesh isn't visibly present. Diagnosing godot's MToon-shader pipeline is the right next thread, not a corpus retune.
