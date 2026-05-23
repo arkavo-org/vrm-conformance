@@ -13,6 +13,7 @@ pub mod params;
 pub mod sidecar;
 pub mod spring_bone;
 pub mod sweep;
+pub mod texture;
 pub mod vrm_ext;
 pub mod vrma_emit;
 pub mod vrma_params;

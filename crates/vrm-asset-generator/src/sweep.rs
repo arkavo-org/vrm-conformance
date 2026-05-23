@@ -1,7 +1,7 @@
 //! MToon basic parameter sweep: ~50 assets, one per axis-value pair, all
 //! other parameters held at `MToonParams::defaults()`.
 
-use crate::params::{AlphaMode, FirstPersonType, MToonParams, OutlineWidthMode};
+use crate::params::{AlphaMode, FirstPersonType, MToonParams, OutlineWidthMode, TextureTransform};
 use crate::spring_bone::{
     ColliderAttach, ColliderGroupParams, ColliderParams, ColliderShape, SpringBoneParams,
     SpringBoneSceneParams,
@@ -191,6 +191,96 @@ pub fn mtoon_emissive_sweep() -> Vec<MToonParams> {
     zero.emissive_multiplier = 4.0;
     out.push(zero);
 
+    out
+}
+
+/// KHR_texture_transform sweep: 8 variants exercising the spec's three
+/// transform axes (offset, rotation, scale) on a textured MToon
+/// material. The texture itself is a 16×16 quadrant checkerboard
+/// (red TL, green TR, blue BL, yellow BR) added by `emit_vrm` when
+/// `texture_transform` is `Some` — the four distinct colors make
+/// transform effects visually unambiguous (e.g., a rotation that
+/// swaps red→bottom would have been silently identical with a uniform
+/// texture).
+///
+/// Variant ID conventions match other sweeps:
+/// - `mtoon_uvxform_identity` — textured material, no transform (the
+///   "extension absent" baseline; verifies textures-themselves work
+///   independently from KHR_texture_transform).
+/// - `mtoon_uvxform_offset_x_0p5` — half-tile UV shift along X.
+/// - `mtoon_uvxform_offset_y_0p5` — half-tile UV shift along Y.
+/// - `mtoon_uvxform_rotation_quarter` — π/2 rad rotation (90° ccw).
+/// - `mtoon_uvxform_rotation_eighth` — π/4 rad rotation (45° ccw).
+/// - `mtoon_uvxform_scale_2x` — 2× tile (each quadrant appears 4×).
+/// - `mtoon_uvxform_scale_half` — 0.5× tile (one quadrant fills the UV).
+/// - `mtoon_uvxform_combined` — offset + rotation + scale stacked,
+///   exercises the multiplication order in the spec's example shader.
+pub fn mtoon_texture_transform_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+    let variants: &[(&str, TextureTransform)] = &[
+        ("identity", TextureTransform::identity()),
+        (
+            "offset_x_0p5",
+            TextureTransform {
+                offset: [0.5, 0.0],
+                rotation: 0.0,
+                scale: [1.0, 1.0],
+            },
+        ),
+        (
+            "offset_y_0p5",
+            TextureTransform {
+                offset: [0.0, 0.5],
+                rotation: 0.0,
+                scale: [1.0, 1.0],
+            },
+        ),
+        (
+            "rotation_quarter",
+            TextureTransform {
+                offset: [0.0, 0.0],
+                rotation: std::f32::consts::FRAC_PI_2,
+                scale: [1.0, 1.0],
+            },
+        ),
+        (
+            "rotation_eighth",
+            TextureTransform {
+                offset: [0.0, 0.0],
+                rotation: std::f32::consts::FRAC_PI_4,
+                scale: [1.0, 1.0],
+            },
+        ),
+        (
+            "scale_2x",
+            TextureTransform {
+                offset: [0.0, 0.0],
+                rotation: 0.0,
+                scale: [2.0, 2.0],
+            },
+        ),
+        (
+            "scale_half",
+            TextureTransform {
+                offset: [0.0, 0.0],
+                rotation: 0.0,
+                scale: [0.5, 0.5],
+            },
+        ),
+        (
+            "combined",
+            TextureTransform {
+                offset: [0.25, 0.25],
+                rotation: std::f32::consts::FRAC_PI_4,
+                scale: [2.0, 2.0],
+            },
+        ),
+    ];
+    for (suffix, tt) in variants {
+        let mut p = MToonParams::defaults(format!("mtoon_uvxform_{suffix}"));
+        p.texture_transform = Some(*tt);
+        out.push(p);
+    }
     out
 }
 
@@ -1010,6 +1100,64 @@ mod multichain_sweep_tests {
                 assert_eq!(
                     sg, first,
                     "share_all variants must point all chains at the same group"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod texture_transform_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn texture_transform_sweep_emits_8_variants_with_unique_ids() {
+        let s = mtoon_texture_transform_sweep();
+        assert_eq!(s.len(), 8);
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            s.len(),
+            "all texture-transform sweep IDs must be unique"
+        );
+    }
+
+    #[test]
+    fn identity_variant_emits_no_extension_at_emit_time() {
+        // Regression guard: the identity TextureTransform should round-
+        // trip without producing a KHR_texture_transform extension entry
+        // in the textureInfo (base_material's `is_identity()` gate). This
+        // is the conformance-test equivalent for "extension absent when
+        // it would be a no-op", matching the conditional-emit pattern
+        // for the emissive multiplier sweep.
+        let s = mtoon_texture_transform_sweep();
+        let id_var = s.iter().find(|p| p.id == "mtoon_uvxform_identity").unwrap();
+        assert!(id_var.texture_transform.is_some());
+        assert!(id_var.texture_transform.unwrap().is_identity());
+    }
+
+    #[test]
+    fn every_non_identity_variant_has_a_distinct_transform() {
+        let s = mtoon_texture_transform_sweep();
+        let non_identity: Vec<_> = s
+            .iter()
+            .filter(|p| !p.texture_transform.unwrap().is_identity())
+            .collect();
+        // Each non-identity variant must vary at least one axis.
+        for p in &non_identity {
+            let t = p.texture_transform.unwrap();
+            let varies = t.offset != [0.0, 0.0] || t.rotation != 0.0 || t.scale != [1.0, 1.0];
+            assert!(varies, "{}: non-identity variant must vary an axis", p.id);
+        }
+        // And every pair must be distinguishable to keep sweep signal sharp.
+        for i in 0..non_identity.len() {
+            for j in (i + 1)..non_identity.len() {
+                assert_ne!(
+                    non_identity[i].texture_transform, non_identity[j].texture_transform,
+                    "{} and {} produce identical transforms",
+                    non_identity[i].id, non_identity[j].id
                 );
             }
         }

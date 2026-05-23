@@ -17,6 +17,8 @@ glam.workspace = true
 camino.workspace = true
 blake3.workspace = true
 hex.workspace = true
+image.workspace = true
+base64.workspace = true
 
 vrm-test-plan = { path = "../vrm-test-plan" }
 vrm-validator-wrap = { path = "../vrm-validator-wrap" }

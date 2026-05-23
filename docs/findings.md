@@ -2137,6 +2137,35 @@ The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera 
 
 **For the firstPerson question**: godot's failure to differentiate the 4 variants is consistent with the avatar not being meaningfully rendered to begin with — there's nothing for `perform_head_hiding()` to cull because the mesh isn't visibly present. Diagnosing godot's MToon-shader pipeline is the right next thread, not a corpus retune.
 
+## KHR_texture_transform — three distinct conformance patterns
+
+**Date**: 2026-05-23. Surfaced on the first run of the new texture-transform sweep.
+
+`crates/vrm-asset-generator/src/sweep.rs::mtoon_texture_transform_sweep` emits 8 textured MToon assets (procedural 16×16 quadrant checkerboard: red/green/blue/yellow) crossing offset, rotation, scale, and combined transforms per the [`KHR_texture_transform`](https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_texture_transform/README.md) extension. Renders direct via `vrm-runner execute-test-plan`:
+
+| test_id | vrm-metal-kit | three-vrm | godot-vrm |
+|---|---|---|---|
+| `mtoon_uvxform_identity` | `5b8077fbe8a4` | `fcd41570e763` | `31baf5da3260` |
+| `mtoon_uvxform_offset_x_0p5` | `5b8077fbe8a4` | `d8aed98253e2` | `a1b70cab9d48` |
+| `mtoon_uvxform_offset_y_0p5` | `5b8077fbe8a4` | `147fd12b206b` | `8a1bf9c5439e` |
+| `mtoon_uvxform_rotation_eighth` (π/4) | `5b8077fbe8a4` | `c416ef51b768` | `31baf5da3260` |
+| `mtoon_uvxform_rotation_quarter` (π/2) | `5b8077fbe8a4` | `6a6992a5755a` | `31baf5da3260` |
+| `mtoon_uvxform_scale_2x` | `5b8077fbe8a4` | `33ac4596423c` | `c4672144a2cc` |
+| `mtoon_uvxform_scale_half` | `5b8077fbe8a4` | `2ec50ff90eb9` | `05a8a21860a1` |
+| `mtoon_uvxform_combined` | `5b8077fbe8a4` | `0d7e9f3ccbf2` | `0917bf8b0882` |
+
+**three-vrm: fully spec-conformant.** All 8 variants render to distinct hashes, including the eighth/quarter rotation pair (proving the rotation axis is applied independently). Reference behavior.
+
+**vrm-metal-kit: ignores `KHR_texture_transform` entirely.** All 8 variants produce the same `5b8077fbe8a4` PNG. Verification: that hash differs from VMK's no-texture `mtoon_default` render (`5d8cf1789282`), so VMK **does** read the `baseColorTexture` — it just doesn't consult `extensions.KHR_texture_transform`. The MToon shader pipeline applies the texture with the raw UV coordinates from the mesh.
+
+**godot-vrm: partial — applies offset and scale, ignores rotation.** Five distinct hashes across the 8 variants. `identity`, `rotation_eighth`, and `rotation_quarter` all hash to `31baf5da3260`, indicating the rotation axis is silently dropped. `offset_x`, `offset_y`, `scale_2x`, `scale_half`, and `combined` all produce unique outputs. (Bear in mind godot-vrm's "rendered output" on this corpus is sparse fragments per the [VRM addon import-time vs runtime mismatch](#root-cause-for-godots-sparse-rendering--vrm-addon-import-time-vs-runtime-mismatch) finding, so the partial conformance claim should be re-verified once that root cause is closed.)
+
+### To file upstream
+
+- **VMK**: new issue — `MToon material parser ignores extensions.KHR_texture_transform on baseColorTexture`. Same shape as the emissive-multiplier issue (VMK#287): a per-textureInfo extension that needs to be threaded into the MToon shader's UV computation. Spec citation already grep-ready in `docs/upstream-specs/glTF/extensions/2.0/Khronos/KHR_texture_transform/README.md`.
+
+- **godot-vrm**: needs the import-time root cause closed first (per the godot-vrm findings entry above). After that, the rotation-axis gap can be diagnosed separately.
+
 ### Root cause for godot's sparse rendering — VRM addon import-time vs runtime mismatch
 
 Captured Godot stderr during a single `mtoon_default` render (via `vrm-runner execute-test-plan --adapter-bin vrm-godot-shim`) shows two cascading errors in the addon's VRM import path, before any MToon-shader code runs:

@@ -74,6 +74,17 @@ pub fn emit_vrm_with_custom_expressions(
     if emits_emissive_multiplier {
         extensions_used.push("VRMC_materials_hdr_emissiveMultiplier");
     }
+    // KHR_texture_transform is referenced on every textureInfo whose
+    // material carries the extension. We only emit it when the
+    // transform is non-identity (see base_material), so the
+    // extensionsUsed entry follows the same condition.
+    let emits_texture_transform = params
+        .texture_transform
+        .map(|t| !t.is_identity())
+        .unwrap_or(false);
+    if emits_texture_transform {
+        extensions_used.push("KHR_texture_transform");
+    }
 
     // 4) Build the glTF JSON document
     let mut doc = json!({
@@ -113,6 +124,33 @@ pub fn emit_vrm_with_custom_expressions(
     });
 
     doc["extensions"]["VRMC_vrm"]["expressions"]["preset"] = viseme_preset_binds(mesh_node_index);
+
+    // Attach the procedural quadrant-checkerboard texture (16x16 RGBA
+    // PNG, encoded inline as a data URI) when any sweep variant has
+    // requested a textured material. Stays out of the GLB binary
+    // chunk to avoid touching the pack_mesh accessor maths — the
+    // image lives in JSON. samplers[0] uses REPEAT wrap mode so
+    // KHR_texture_transform variants with non-[0,1] UVs (offset > 0,
+    // scale > 1) display the tiling.
+    if params.texture_transform.is_some() {
+        let img = crate::texture::quadrant_checkerboard_16();
+        let data_uri = crate::texture::image_as_data_uri(&img);
+        doc["images"] = json!([{
+            "name": format!("{}_checkerboard", params.id),
+            "uri": data_uri,
+            "mimeType": "image/png",
+        }]);
+        doc["samplers"] = json!([{
+            "wrapS": 10497,        // REPEAT
+            "wrapT": 10497,        // REPEAT
+            "magFilter": 9729,     // LINEAR
+            "minFilter": 9729,     // LINEAR (no mipmap to keep math testable)
+        }]);
+        doc["textures"] = json!([{
+            "source": 0,
+            "sampler": 0,
+        }]);
+    }
 
     // Apply the firstPerson.meshAnnotations[0].type override when the
     // caller wants something other than the canonical "auto" default

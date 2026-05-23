@@ -52,6 +52,14 @@ pub struct MToonParams {
     /// the `FirstPersonType` enum so the sweep can drive each path.
     pub first_person_type: Option<FirstPersonType>,
 
+    /// `KHR_texture_transform` applied to the material's
+    /// `baseColorTexture`. `None` (default) keeps every existing asset
+    /// untextured (raw `baseColorFactor` only) so the corpus stays
+    /// byte-identical. `Some(...)` adds the procedural quadrant
+    /// checkerboard texture to the material AND attaches the
+    /// requested transform extension to the textureInfo.
+    pub texture_transform: Option<TextureTransform>,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -88,6 +96,7 @@ impl MToonParams {
             emissive_factor: [0.0, 0.0, 0.0],
             emissive_multiplier: 1.0,
             first_person_type: None,
+            texture_transform: None,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,
@@ -142,5 +151,42 @@ impl FirstPersonType {
             FirstPersonType::ThirdPersonOnly => "thirdPersonOnly",
             FirstPersonType::FirstPersonOnly => "firstPersonOnly",
         }
+    }
+}
+
+/// `KHR_texture_transform` extension payload for a textureInfo. Per the
+/// Khronos extension README: applies an affine transform to UV
+/// coordinates before sampling — `uv' = translation · rotation · scale · uv`.
+/// Defaults: `offset=[0,0]`, `rotation=0`, `scale=[1,1]` produce the
+/// identity transform; the spec says renderers should omit the extension
+/// entirely when all three match defaults so the JSON stays clean.
+/// Rotation is in radians, counter-clockwise around the UV origin
+/// (upper-left of the source image per glTF convention).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TextureTransform {
+    pub offset: [f32; 2],
+    pub rotation: f32,
+    pub scale: [f32; 2],
+}
+
+impl TextureTransform {
+    /// Identity transform: `offset=[0,0]`, `rotation=0`, `scale=[1,1]`.
+    /// Used by sweep variants that exercise the baseColorTexture path
+    /// without applying any UV transform — surfaces "renderer reads the
+    /// texture at all" separately from "renderer applies the transform".
+    pub fn identity() -> Self {
+        Self {
+            offset: [0.0, 0.0],
+            rotation: 0.0,
+            scale: [1.0, 1.0],
+        }
+    }
+
+    /// True when this transform would emit identical UVs to omitting
+    /// the extension entirely. Callers can use this to decide whether
+    /// to emit the extension JSON or skip it (matches the spec's
+    /// "omit when all-defaults" advice in the extension README).
+    pub fn is_identity(&self) -> bool {
+        self.offset == [0.0, 0.0] && self.rotation == 0.0 && self.scale == [1.0, 1.0]
     }
 }

@@ -191,6 +191,26 @@ pub fn base_material(p: &MToonParams) -> Value {
         material["alphaCutoff"] = json!(p.alpha_cutoff);
     }
 
+    // Attach baseColorTexture (with optional KHR_texture_transform)
+    // when the caller wants a textured material. The texture index is
+    // hardcoded to 0 because emit_vrm appends exactly one texture
+    // (the procedural quadrant checkerboard) when texture_transform
+    // is Some — both sides of this contract are gated on the same
+    // condition so the index can't drift.
+    if let Some(tt) = p.texture_transform {
+        let mut tex_info = json!({ "index": 0 });
+        if !tt.is_identity() {
+            tex_info["extensions"] = json!({
+                "KHR_texture_transform": {
+                    "offset": tt.offset,
+                    "rotation": tt.rotation,
+                    "scale": tt.scale,
+                }
+            });
+        }
+        material["pbrMetallicRoughness"]["baseColorTexture"] = tex_info;
+    }
+
     // Emit `emissiveFactor` only when non-zero — the glTF default is
     // [0,0,0] and a zero emissive contributes nothing visually, so leaving
     // the field absent keeps the MToon-default material JSON identical to

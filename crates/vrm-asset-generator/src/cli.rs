@@ -63,6 +63,21 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the KHR_texture_transform sweep (8 assets covering offset,
+    /// rotation, scale, and combined transforms). Each asset uses the
+    /// same procedural 16x16 quadrant checkerboard texture (red/green/
+    /// blue/yellow) on the MToon baseColorTexture; conformant renderers
+    /// produce 8 visually-distinct PNGs corresponding to the declared
+    /// UV transforms. Renderers that ignore KHR_texture_transform
+    /// produce 7 identical PNGs (the 7 non-identity variants render
+    /// like identity) plus the identity baseline.
+    EmitTextureTransformSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit one `.vrm` carrying both default MToon material and a default
     /// VRMC_springBone chain attached to the head.
     EmitSpringbone {
@@ -293,6 +308,49 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string(&summary)?);
             } else {
                 println!("emitted {} assets to {}", emitted.len(), output_dir);
+            }
+            Ok(())
+        }
+        Cmd::EmitTextureTransformSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::sweep::mtoon_texture_transform_sweep;
+            std::fs::create_dir_all(&output_dir)?;
+            let assets = mtoon_texture_transform_sweep();
+            let total = assets.len();
+            let mut emitted = Vec::new();
+            for (i, p) in assets.iter().enumerate() {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-texture-transform-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": p.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+                }
+                let stem = output_dir.join(&p.id);
+                emit_with_sidecars(p, &stem)?;
+                emitted.push(stem);
+            }
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} texture-transform sweep assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
             }
             Ok(())
         }
