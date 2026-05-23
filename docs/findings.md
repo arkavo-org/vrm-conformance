@@ -2033,4 +2033,37 @@ Rendering 3 of the 14 variants through vrm-metal-kit 0.16.0-rc.2 + the conforman
 
 The spec is marked "Archived" with "Superseded by KHR_materials_emissive_strength", but is still in the VRM 1.0 spec tree and present in real-world VRM 1.0 assets, so VMK should support it for spec-conformance on legacy avatars. Either implementing it directly or treating the extension as an alias for the equivalent KHR_materials_emissive_strength behaviour would close the gap.
 
-To file as a VMK upstream follow-up once an issue can be opened. Conformance suite tracks via this sweep — peer renderers (three-vrm, godot-vrm, univrm) haven't been rendered against these assets yet; doing so will establish whether the gap is VMK-specific or industry-wide.
+### Cross-renderer comparison (three-vrm + godot-vrm + vmk on all 14 variants)
+
+`sha256[:12]` per renderer per test_id, rendered directly via `vrm-runner execute-test-plan`:
+
+| test_id | vrm-metal-kit | three-vrm | godot-vrm |
+|---|---|---|---|
+| `mtoon_emissive_multiplier_0` | `9d5a8a62ccb8` | `adc93c4ebafb` | `45cd99e6205f` |
+| `mtoon_emissive_multiplier_0p25` | `9d5a8a62ccb8` | `56d40fc9d08d` | `45cd99e6205f` |
+| `mtoon_emissive_multiplier_0p5` | `9d5a8a62ccb8` | `720eabd652fc` | `45cd99e6205f` |
+| `mtoon_emissive_multiplier_0p75` | `9d5a8a62ccb8` | `86eb695a20fb` | `45cd99e6205f` |
+| `mtoon_emissive_multiplier_1` | `9d5a8a62ccb8` | `86eb695a20fb` | `45cd99e6205f` |
+| `mtoon_emissive_multiplier_2` | `9d5a8a62ccb8` | `86eb695a20fb` | `45cd99e6205f` |
+| `mtoon_emissive_multiplier_4` | `9d5a8a62ccb8` | `86eb695a20fb` | `45cd99e6205f` |
+| `mtoon_emissive_r_x1` | `c8e62ed8cb7a` | `fa8554db3c2f` | `45cd99e6205f` |
+| `mtoon_emissive_r_x2` | `c8e62ed8cb7a` | `fa8554db3c2f` | `45cd99e6205f` |
+| `mtoon_emissive_g_x1` | `770f3e900379` | `7b97b4310f19` | `45cd99e6205f` |
+| `mtoon_emissive_g_x2` | `770f3e900379` | `7b97b4310f19` | `45cd99e6205f` |
+| `mtoon_emissive_b_x1` | `2f554fa91511` | `768c230f1596` | `45cd99e6205f` |
+| `mtoon_emissive_b_x2` | `2f554fa91511` | `768c230f1596` | `45cd99e6205f` |
+| `mtoon_emissive_zero_factor` | `5d8cf1789282` | `6ff1f5687375` | `4587bf323df1` |
+
+### Per-renderer diagnosis
+
+**three-vrm: spec-correct application; sweep needs lower `base_color` to expose HDR.** `multiplier_{0, 0p25, 0p5}` produce three distinct outputs (linear scaling visible in the [0, 0.5] range). `multiplier_{0p75, 1, 2, 4}` all converge to the same hash — this is correct UNORM framebuffer clamping at the renderer's output stage: with `base_color = [0.3, 0.3, 0.3]` and `emissive_factor = [1, 1, 1]`, the total radiance at multiplier=0.75 is `0.3 + 1.0 × 0.75 ≈ 1.05`, which already saturates the 8-bit channel. Above multiplier=0.75, every variant clips to `1.0` per channel and renders identically. Per-channel variants `r/g/b_x1` and `r/g/b_x2` show the same clamp behavior (red at multiplier=1 is already `[1,0.3,0.3]` saturated in the red channel). **Sweep refinement** to file: drop `base_color` to `[0.05, 0.05, 0.05]` or `[0.0, 0.0, 0.0]` so high-multiplier variants stay below saturation and the HDR axis is observable. Three-vrm's behavior on the [0, 0.5] range proves it correctly applies the multiplier.
+
+**vrm-metal-kit: extension ignored, raw `emissiveFactor` used.** Every `multiplier_*` variant renders to the same hash (`9d5a8a62ccb8`), proving the multiplier value never reaches the shader. Per-channel variants (r/g/b at any multiplier) DO produce distinct hashes — confirming VMK reads `emissiveFactor` but doesn't consult `extensions.VRMC_materials_hdr_emissiveMultiplier.emissiveMultiplier`. To file as a new VMK issue: VMK#TBD.
+
+**godot-vrm: emissive entirely absent from the rendered output.** All 13 non-zero-factor variants produce hash `45cd99e6205f` — irrespective of channel, multiplier, or extension presence. Only `zero_factor` differs (`4587bf323df1`), and even that diff is small. Either the godot-vrm adapter doesn't pass emissive through to the Godot MToon shader, or the Godot MToon shader implementation discards emissive when the material is also `KHR_materials_unlit` (a known interaction worth investigating — unlit conventionally means "no lighting", which some renderers extend to mean "no emission" since emission is a form of self-lighting). Worth filing on the godot-vrm side.
+
+UniVRM not yet rendered against the sweep (batched-execution path, separate run). When it lands, the matrix completes.
+
+### Net signal
+
+The gap analysis was right to call out the emissive multiplier — but the failure isn't a single-renderer issue. **Two out of three real adapters fail to apply MToon emissive correctly** on the conformance corpus, in different ways. The sweep produces clean falsifiable signal for each renderer's failure mode on first render, which is the right outcome for a conformance test.
