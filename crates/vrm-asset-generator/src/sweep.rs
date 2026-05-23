@@ -112,6 +112,65 @@ pub fn mtoon_basic_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// MToon `outlineWidthMultiplyTexture` sweep: 5 variants exercising
+/// per-vertex outline-width modulation. Per the MToon spec (README.md
+/// :710-715): the texture's **G-channel** (not R) is read and
+/// multiplied into the outline width.
+///
+/// Our procedural checkerboard's G values give a clear per-quadrant
+/// G signal: red=30, green=200, blue=30, yellow=220. Conformant
+/// renderers display thicker outlines on the green+yellow portions
+/// of the sphere and thinner outlines on the red+blue portions.
+///
+/// Variants:
+/// - `mtoon_outlinewidthtex_baseline` — outline_width_mode=world
+///   + width=0.05, no texture. Diff target.
+/// - `mtoon_outlinewidthtex_world` — texture + world-coord outline.
+/// - `mtoon_outlinewidthtex_screen` — texture + screen-coord outline.
+/// - `mtoon_outlinewidthtex_width_2x` — wider base outline (0.1).
+/// - `mtoon_outlinewidthtex_mode_none` — texture present but
+///   `outline_width_mode=none`. Regression guard: must NOT produce
+///   visible outlines (gating must check mode, not just texture).
+pub fn mtoon_outline_width_multiply_texture_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    let mut baseline = MToonParams::defaults("mtoon_outlinewidthtex_baseline");
+    baseline.outline_width_mode = OutlineWidthMode::WorldCoordinates;
+    baseline.outline_width_factor = 0.05;
+    baseline.outline_color_factor = [0.0, 0.0, 0.0];
+    baseline.outline_width_multiply_texture = false;
+    out.push(baseline);
+
+    let mut world_textured = MToonParams::defaults("mtoon_outlinewidthtex_world");
+    world_textured.outline_width_mode = OutlineWidthMode::WorldCoordinates;
+    world_textured.outline_width_factor = 0.05;
+    world_textured.outline_color_factor = [0.0, 0.0, 0.0];
+    world_textured.outline_width_multiply_texture = true;
+    out.push(world_textured);
+
+    let mut screen_textured = MToonParams::defaults("mtoon_outlinewidthtex_screen");
+    screen_textured.outline_width_mode = OutlineWidthMode::ScreenCoordinates;
+    screen_textured.outline_width_factor = 0.05;
+    screen_textured.outline_color_factor = [0.0, 0.0, 0.0];
+    screen_textured.outline_width_multiply_texture = true;
+    out.push(screen_textured);
+
+    let mut wider = MToonParams::defaults("mtoon_outlinewidthtex_width_2x");
+    wider.outline_width_mode = OutlineWidthMode::WorldCoordinates;
+    wider.outline_width_factor = 0.10;
+    wider.outline_color_factor = [0.0, 0.0, 0.0];
+    wider.outline_width_multiply_texture = true;
+    out.push(wider);
+
+    let mut mode_none = MToonParams::defaults("mtoon_outlinewidthtex_mode_none");
+    mode_none.outline_width_mode = OutlineWidthMode::None;
+    mode_none.outline_width_factor = 0.05;
+    mode_none.outline_width_multiply_texture = true;
+    out.push(mode_none);
+
+    out
+}
+
 /// MToon emissive sweep covering `material.emissiveFactor` +
 /// `VRMC_materials_hdr_emissiveMultiplier-1.0`. Held-constant axes:
 /// base color is mid-gray ([0.3,0.3,0.3,1]) so the emissive contribution
@@ -1686,5 +1745,45 @@ mod emissive_sweep_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod outline_width_multiply_texture_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn outline_width_sweep_has_5_variants_with_unique_ids() {
+        let s = mtoon_outline_width_multiply_texture_sweep();
+        assert_eq!(s.len(), 5);
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), s.len());
+    }
+
+    #[test]
+    fn baseline_omits_texture_and_uses_world_outline() {
+        let s = mtoon_outline_width_multiply_texture_sweep();
+        let b = s
+            .iter()
+            .find(|p| p.id == "mtoon_outlinewidthtex_baseline")
+            .unwrap();
+        assert!(!b.outline_width_multiply_texture);
+        assert!(matches!(
+            b.outline_width_mode,
+            OutlineWidthMode::WorldCoordinates
+        ));
+    }
+
+    #[test]
+    fn mode_none_variant_is_regression_guard() {
+        let s = mtoon_outline_width_multiply_texture_sweep();
+        let n = s
+            .iter()
+            .find(|p| p.id == "mtoon_outlinewidthtex_mode_none")
+            .unwrap();
+        assert!(n.outline_width_multiply_texture);
+        assert!(matches!(n.outline_width_mode, OutlineWidthMode::None));
     }
 }

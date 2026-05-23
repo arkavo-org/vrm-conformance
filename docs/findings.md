@@ -2137,6 +2137,37 @@ The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera 
 
 **For the firstPerson question**: godot's failure to differentiate the 4 variants is consistent with the avatar not being meaningfully rendered to begin with — there's nothing for `perform_head_hiding()` to cull because the mesh isn't visibly present. Diagnosing godot's MToon-shader pipeline is the right next thread, not a corpus retune.
 
+## MToon outlineWidthMultiplyTexture — VMK partial-broken (new gap); three-vrm conformant
+
+**Date**: 2026-05-23. Surfaced on the first run of the new outlineWidthMultiplyTexture sweep.
+
+`mtoon_outline_width_multiply_texture_sweep` (5 variants) exercises per-vertex outline-width modulation per the MToon spec (README.md:710-715): the texture's **G-channel** (not R) is read and multiplied into the outline width. Render through all 3 adapters:
+
+| test_id | vrm-metal-kit | three-vrm | godot-vrm |
+|---|---|---|---|
+| `mtoon_outlinewidthtex_baseline` (no texture) | `d3cd8b8733f5` | `1626b6a23782` | `4587bf323df1` |
+| `mtoon_outlinewidthtex_mode_none` (texture + mode=none — regression guard) | `5d8cf1789282` | `6ff1f5687375` | `4587bf323df1` |
+| `mtoon_outlinewidthtex_world` (texture + world outline) | `acc8b45afb2b` | `76ae39623713` | `4587bf323df1` |
+| `mtoon_outlinewidthtex_screen` (texture + screen outline) | `acc8b45afb2b` | `e8db0ad6c981` | `4587bf323df1` |
+| `mtoon_outlinewidthtex_width_2x` (texture + 2× base width) | `acc8b45afb2b` | `45aacfe46425` | `4587bf323df1` |
+
+**vrm-metal-kit: partial-broken on a new axis.**
+
+1. ✅ **Regression guard passes**: `mode_none` with a texture set renders to `5d8cf1789282` — byte-identical to no-texture `mtoon_default`. VMK correctly gates the binding on `outlineWidthMode != none`.
+2. ❌ **Three different textured variants produce one hash**: `world`, `screen`, and `width_2x` all render to `acc8b45afb2b` despite varying both `outline_width_mode` (world vs screen) **and** `outline_width_factor` (0.05 vs 0.1). VMK's outline pipeline is in a degraded state when the multiply texture is attached — it ignores per-vertex G-channel modulation **and** the base width factor **and** the coordinate-mode distinction, but does render *some* outline (different hash from baseline).
+3. This is a different failure pattern from VMK#287 (emissive multiplier ignored, no effect) and VMK#288 (texture transform ignored, no effect). Here the texture *does* change the render path — just incorrectly. Worth filing as its own VMK upstream issue (different code site than #287/#288, different diagnosis shape).
+
+**three-vrm: fully spec-conformant.** All 5 variants distinct. World vs screen produce different outputs, width_2x produces a third, mode_none correctly suppresses outlines.
+
+**godot-vrm: blocked by import-time root cause.** All 5 hash `4587bf323df1` — the no-content render.
+
+### Recommended VMK upstream issue (VMK#289 placeholder)
+
+Different shape from #287/#288:
+- Title: `MToon: outlineWidthMultiplyTexture renders a degraded uniform outline that ignores G-channel modulation, outlineWidthFactor, AND outlineWidthMode`
+- Evidence: 3 distinct sweep variants render to identical PNG hash on VMK
+- Severity: stronger than #287/#288 because the texture *is* read (different hash from baseline) but applied incorrectly — suggests the codepath exists but is mis-implemented
+
 ## MToon shadingShiftTexture + rimMultiplyTexture — VMK + three-vrm both conformant; cumulative MToon-texture story closes
 
 **Date**: 2026-05-23. Surfaced on the first run of two new sweeps.

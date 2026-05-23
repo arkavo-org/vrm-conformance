@@ -203,6 +203,15 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
         mtoon["rimMultiplyTexture"] = json!({ "index": 0 });
     }
 
+    // `outlineWidthMultiplyTexture` per VRMC_materials_mtoon-1.0
+    // (README.md:710-715): the texture's G-channel (not R) is
+    // multiplied into the outline width per vertex. Only emits
+    // visible signal when `outlineWidthMode != none` and
+    // `outlineWidthFactor > 0` — the sweep handles that.
+    if p.outline_width_multiply_texture {
+        mtoon["outlineWidthMultiplyTexture"] = json!({ "index": 0 });
+    }
+
     mtoon
 }
 

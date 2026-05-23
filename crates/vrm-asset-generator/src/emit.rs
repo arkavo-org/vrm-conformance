@@ -141,7 +141,8 @@ pub fn emit_vrm_with_custom_expressions(
         || params.shade_multiply_texture
         || params.matcap_texture
         || params.shading_shift_texture_scale.is_some()
-        || params.rim_multiply_texture;
+        || params.rim_multiply_texture
+        || params.outline_width_multiply_texture;
     if needs_texture {
         let img = crate::texture::quadrant_checkerboard_16();
         let data_uri = crate::texture::image_as_data_uri(&img);

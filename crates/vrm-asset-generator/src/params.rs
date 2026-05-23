@@ -100,6 +100,16 @@ pub struct MToonParams {
     /// `false` (default) keeps the corpus unchanged.
     pub rim_multiply_texture: bool,
 
+    /// When `true`, attaches the procedural quadrant-checkerboard
+    /// to MToon's `VRMC_materials_mtoon.outlineWidthMultiplyTexture`.
+    /// Per spec (README.md:710-715), the texture's **G-channel**
+    /// (not R) is read and multiplied into the per-vertex outline
+    /// width. For the signal to be visible the asset must also set
+    /// `outline_width_mode != None` and a non-zero
+    /// `outline_width_factor`; sweep variants drive those.
+    /// `false` (default) keeps the corpus unchanged.
+    pub outline_width_multiply_texture: bool,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -141,6 +151,7 @@ impl MToonParams {
             matcap_texture: false,
             shading_shift_texture_scale: None,
             rim_multiply_texture: false,
+            outline_width_multiply_texture: false,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,

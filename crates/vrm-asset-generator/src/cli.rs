@@ -132,6 +132,18 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the MToon outlineWidthMultiplyTexture sweep (5 assets
+    /// covering per-vertex outline-width modulation by the texture's
+    /// G-channel, per spec). Baseline + 3 textured variants (world
+    /// outline / screen outline / wider base width) + 1 regression
+    /// guard with mode=none that must NOT produce outlines.
+    EmitOutlineWidthMultiplyTextureSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit one `.vrm` carrying both default MToon material and a default
     /// VRMC_springBone chain attached to the head.
     EmitSpringbone {
@@ -362,6 +374,44 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string(&summary)?);
             } else {
                 println!("emitted {} assets to {}", emitted.len(), output_dir);
+            }
+            Ok(())
+        }
+        Cmd::EmitOutlineWidthMultiplyTextureSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::sweep::mtoon_outline_width_multiply_texture_sweep;
+            std::fs::create_dir_all(&output_dir)?;
+            let assets = mtoon_outline_width_multiply_texture_sweep();
+            let total = assets.len();
+            let mut emitted = Vec::new();
+            for (i, p) in assets.iter().enumerate() {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-outline-width-multiply-texture-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": p.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+                }
+                let stem = output_dir.join(&p.id);
+                emit_with_sidecars(p, &stem)?;
+                emitted.push(stem);
+            }
+            if emit_json {
+                let summary = json!({"ok": true, "count": emitted.len(), "output_dir": output_dir, "assets": emitted});
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} outlineWidthMultiplyTexture sweep assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
             }
             Ok(())
         }
