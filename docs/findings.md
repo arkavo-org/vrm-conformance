@@ -2162,7 +2162,7 @@ The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera 
 
 ### To file upstream
 
-- **VMK**: new issue — `MToon material parser ignores extensions.KHR_texture_transform on baseColorTexture`. Same shape as the emissive-multiplier issue (VMK#287): a per-textureInfo extension that needs to be threaded into the MToon shader's UV computation. Spec citation already grep-ready in `docs/upstream-specs/glTF/extensions/2.0/Khronos/KHR_texture_transform/README.md`.
+- **VMK**: filed as [VMK#288](https://github.com/arkavo-org/VRMMetalKit/issues/288). Same shape as the emissive-multiplier issue (VMK#287): a per-textureInfo extension that needs to be threaded into the MToon shader's UV computation. Spec citation in `docs/upstream-specs/glTF/extensions/2.0/Khronos/KHR_texture_transform/README.md`. Issue body archived locally at `docs/upstream/VMK-khr-texture-transform.md`.
 
 - **godot-vrm**: needs the import-time root cause closed first (per the godot-vrm findings entry above). After that, the rotation-axis gap can be diagnosed separately.
 
