@@ -1829,3 +1829,184 @@ Highest-prior PRs in the RC's spring-bone surface:
 ### Promotion verdict
 
 **Do not promote 0.16.0-rc.1 to the conformance suite's VMK pin until the swing non-determinism is closed.** Hold at 0.15.2. The remaining surface (KHR PBR extensions, VRMExpressionController weight getters, GLTFSceneGraph refactor) ships behavioural improvements but does not justify accepting a reproducibility regression on a surface the suite actively tests.
+
+## VMK 0.16.0-rc.2 verification — VMK#283 fix did not close our reproducer; deeper-sample non-determinism observed on 0.15.2 too
+
+**Date**: 2026-05-22, vrm-conformance commit (working tree, RC pin bumped to 0.16.0-rc.2 in `adapters/vrm-metal-kit/Package.swift`).
+
+**RC under test**: [`0.16.0-rc.2`](https://github.com/arkavo-org/VRMMetalKit/releases/tag/0.16.0-rc.2) (commit `7f7d39b`, pre-released 2026-05-22). RC adds two fixes on top of [`0.16.0-rc.1`](https://github.com/arkavo-org/VRMMetalKit/releases/tag/0.16.0-rc.1):
+
+- **PR #285 closes VMK#283** (the non-determinism we filed against rc.1): the self-committed `SpringBoneComputeSystem.update()` path now drains the previous frame before overwriting `animatedRootPositionsBuffer` / `animatedRootPositionsPrevBuffer`.
+- PR #281 closes VMK#280 (iOS metallib distribution; no-op for our macOS adapter).
+
+### Headline
+
+| Surface | rc.2 result |
+|---|---|
+| MToon (3-test sample: `mtoon_default`, `mtoon_shadingShift_neg0p5`, `mtoon_outline_world_0p1`) | ✅ byte-identical to 0.15.2 |
+| Static spring-bone settle (3-test sample: `springbone_default`, `_drag_0p8`, `_stiffness_0p2`) | ✅ byte-identical to 0.15.2 |
+| Spring-bone collider / extended-collider (2-test sample) | ✅ byte-identical to 0.15.2 |
+| `swing_springbone_joints_8` (8-joint chain) | ✅ byte-identical to 0.15.2 (and deterministic across 3 runs on rc.2) |
+| **Animated swing on multi-joint chains** | ⚠️ **still non-deterministic on rc.2** — same reproducer as rc.1 |
+| Surprise finding: **0.15.2 also non-deterministic** on the same tests with deeper sampling (7 runs) | (See below) |
+| Conformance pass-rate vs UniVRM consortium reference | **190 / 191 (99%)** — identical to rc.1 |
+| `render_sequence` end-to-end | ✅ produced (all sequence-sweep test_ids landed) |
+
+**rc.2's PR #285 did not close our reproducer.** Same surfaces flicker as on rc.1.
+
+### Reproducer (rc.2 still non-deterministic)
+
+`swing_springbone_joints_16`, 5 runs on rc.2 binary, same asset, same hardware (Apple M4 Max, macOS 26.5 / Darwin 25.5.0, Xcode 26.3 / Swift 6.3):
+
+| run | size | sha256 (first 16) |
+|---|---|---|
+| 1 | 48480 | `2a8211dc8bbc66ae` |
+| 2 | 48514 | `57e91b62fb09a020` |
+| 3 | 48480 | `2a8211dc8bbc66ae` |
+| 4 | 48689 | `8fd91e194274714e` |
+| 5 | 48480 | `2a8211dc8bbc66ae` |
+
+Three distinct outputs across 5 runs (3+1+1). 3-run probes confirm `swing_springbone_drag_0p8` (3 distinct outputs) and `swing_springbone_stiffness_0p2` (2 distinct outputs) are also non-deterministic on rc.2. `swing_springbone_joints_8`, `swing_springbone_default` (3 runs), `springbone_default`, and `mtoon_default` are deterministic at the 3-run sample.
+
+### Surprise: 0.15.2 is also non-deterministic with deeper sampling
+
+The rc.1 verification entry above documented 0.15.2 as "byte-identical across all repetitions" based on a 3-run probe. A 7-run probe on 0.15.2 today contradicts that claim:
+
+`swing_springbone_joints_16`, 7 runs on a freshly-built 0.15.2 binary (`de87578`), same hardware:
+
+| run | size | sha256 (first 16) |
+|---|---|---|
+| 1 | 46068 | `261a68971c288d17` |
+| 2 | 46068 | `261a68971c288d17` |
+| 3 | 48514 | `57e91b62fb09a020` |
+| 4 | 48480 | `2a8211dc8bbc66ae` |
+| 5 | 48383 | `35016442d8c661f0` |
+| 6 | 48480 | `2a8211dc8bbc66ae` |
+| 7 | 48480 | `2a8211dc8bbc66ae` |
+
+**Four distinct outputs across 7 runs on 0.15.2.** This was not visible at the rc.1 verification's 3-run sample. Even `swing_springbone_default` flickers under 0.15.2 with a 7-run sample (7 runs → 5 distinct outputs).
+
+This changes the diagnosis. Two non-exclusive possibilities:
+
+1. **The non-determinism is pre-existing in VRMMetalKit, not introduced by rc.1.** The rc.1 verification's 3-run sample on 0.15.2 happened to land in a single output bucket; today's 7-run sample exposes the underlying race that was always there. VMK#283's fix may be correct (it closes *a* race in the spring-bone path) but does not close *this* race.
+2. **The host environment changed between verification days.** The baseline manifest's `os_version` field shows 225/235 VMK entries from Darwin `25.4.0` (macOS 26.4-ish) and only 10 from `25.5.0`. Today's environment is uniformly `25.5.0` / macOS 26.5 (build `25F71`). A Metal driver update across an OS minor bump could change parallel-dispatch timing enough to surface a race that previously stayed bucketed. The 10 entries already on `25.5.0` from yesterday were rendered after the OS update partway through the rc.1 verification.
+
+Either way, **the framing in VMK#283 ("regression-from-0.15.x") needs correction**. The reproducer is not a clean A/B between deterministic 0.15.2 and non-deterministic rc.1/rc.2; both versions show flakiness when sampled deeply enough under the current host environment. The right framing is: **animated multi-joint swing tests have a long-standing race in VRMMetalKit that the 0.16.0-rc.2 fix in PR #285 did not close.**
+
+### Direct A/B vs 0.15.2 (13 sampled test_ids)
+
+Build-and-render both pins from clean (`de87578` and `7f7d39b`) against the same asset emit:
+
+| test_id | 0.15.2 sha256[:12] | rc.2 sha256[:12] | identical? |
+|---|---|---|---|
+| `mtoon_default` | (same) | (same) | ✅ |
+| `mtoon_shadingShift_neg0p5` | (same) | (same) | ✅ |
+| `mtoon_outline_world_0p1` | (same) | (same) | ✅ |
+| `springbone_default` | (same) | (same) | ✅ |
+| `springbone_drag_0p8` | (same) | (same) | ✅ |
+| `springbone_stiffness_0p2` | (same) | (same) | ✅ |
+| `springbone_collider_capsule_x0p02_r0p03` | (same) | (same) | ✅ |
+| `springbone_extended_icaps_anglelimit_90` | (same) | (same) | ✅ |
+| `swing_springbone_joints_8` | (same) | (same) | ✅ |
+| `swing_springbone_default` | `790ab7dd163a` | `d3021457022c` | ⚠️ both non-deterministic — single-run hashes happen to differ |
+| `swing_springbone_joints_16` | `261a68971c28` | `f2d709e726c4` | ⚠️ same — both non-deterministic |
+| `swing_springbone_drag_0p8` | `29900b9f4a7a` | `1adb6c67cd7c` | ⚠️ same — both non-deterministic |
+| `swing_springbone_stiffness_0p2` | (same) | (same) | ⚠️ matched by chance (rc.2 itself flickers on this test) |
+
+On surfaces that are reproducible on both pins (MToon, static settle, collider/extended, `joints_8`), **rc.2 is byte-identical to 0.15.2** — no rendering regression on the determinism-clean surface. On the non-deterministic surface, single-run comparisons are inconclusive by construction.
+
+### Corpus-wide consensus (rc.2 vs peers)
+
+`scripts/bootstrap-goldens.sh` re-rendered the full VMK corpus on rc.2 (peer manifest entries preserved from yesterday's baseline). `scripts/consensus-report.sh` then ran pairwise SSIM:
+
+```
+consensus_passed: 230 / 246
+consensus_failed: 16
+
+Conformance pass-rate vs UniVRM reference:
+  vrm-metal-kit  190/191  (99%)   ← matches rc.1 verification exactly
+  three-vrm      206/206 (100%)
+  godot-vrm      181/191  (95%)
+
+Pairwise SSIM mean:
+  three-vrm vs vrm-metal-kit    0.9577   (rc.1: 0.9575)
+  univrm    vs vrm-metal-kit    0.9541   (rc.1: 0.9540)
+```
+
+No measurable consensus shift between rc.1 and rc.2 — consistent with rc.2 changing nothing in the MToon, static settle, or render path; only the spring-bone integrator changed, and the consensus-failing tests on rc.2 are not in the spring-bone band.
+
+### Re-bootstrap with VRMA wired — 575/575 succeed, +15 conformance passes vs UniVRM
+
+After landing the VRMA op handlers (below), re-bootstrapping the full corpus through vrm-metal-kit closes every previously-failing test:
+
+```
+                                       before VRMA wiring       after VRMA wiring
+vrm-metal-kit bootstrap result         462 succeeded /          575 succeeded /
+                                       113 failed (all vrma_*)  0 failed
+manifest VMK entries                   235                      273  (+38 unique vrma_* test_ids)
+consensus_passed corpus-wide           230 / 246                253 / 269   (+23 incl. 38 new VRMA)
+vrm-metal-kit vs UniVRM conformance    190 / 191 (99%)          205 / 206 (≈100%)  (+15 passes)
+univrm vs vrm-metal-kit pairwise SSIM  mean 0.9541 (n=195)      mean 0.9547 (n=210)
+three-vrm vs vrm-metal-kit pairwise    mean 0.9577 (n=195)      mean 0.9575 (n=233)
+```
+
+Per-family VRMA breakdown (all consensus-passed):
+
+```
+vrma_humanoid_*    15 / 15  pass   mean VMK-vs-three-vrm SSIM ≈ 0.9664
+                                   mean VMK-vs-univrm    SSIM ≈ 0.9630
+vrma_expression_*  13 / 13  pass   mean VMK-vs-three-vrm SSIM ≈ 0.93  (range 0.89–0.97;
+                                   `preset_aa` is the lowest at 0.8921 because the open-mouth
+                                   morph is the largest pixel delta in the corpus)
+vrma_lookat_*      10 / 10  pass   mean VMK-vs-three-vrm SSIM ≈ 0.9665
+```
+
+### 113 VRMA tests — adapter-side gap closed, VRMA ops wired
+
+The rc.2 bootstrap initially reported `462 succeeded, 113 failed` for vrm-metal-kit out of 575 test plans. All 113 failures were `vrma_*` (`vrma_lookat_*`, `vrma_humanoid_*`, `vrma_expression_*`), each failing on the `load_vrma` phase with `jsonrpc error -32000: Unimplemented`.
+
+The gap was **adapter-side, not a VMK library limitation**. The VRMMetalKit library has shipped `VRMAnimationLoader.loadVRMA(from:model:)` since 0.13.x and the pose-normalisation retargeting formula in 0.15.1 (VMK#269 closure). Our adapter's `Operations.swift` dispatch table left the five VRMA ops in the reserved-op fall-through.
+
+**Landed in this commit**: `handleLoadVrma` / `handleApplyVrmaAtTime` / `handleDumpHumanoidPose` / `handleDumpExpressionWeights` / `handleDumpLookAtState` in `adapters/vrm-metal-kit/Sources/VRMMetalKitAdapter/Operations.swift`. Reference humanoid-bone list (19) and preset-expression list (14) match the three-vrm adapter's `renderer-host.html` exactly so pose-diff numerators line up across renderers. Yaw/pitch are derived directly from the recorded head-local point (no controller-smoothing contamination — `VRMLookAtController.update` would otherwise return `currentYaw=0` until a render-time tick).
+
+Smoke verification on 10 representative plans (no rebuild between, fresh `swift build -c release` against `7f7d39b`):
+
+| test_id | adapter outcome | dump fingerprint |
+|---|---|---|
+| `vrma_humanoid_head_yaw_45` | ✅ exit 0 | head.quat = `[0, 0.3827, 0, 0.9239]` (= +45° around Y, sin/cos of 22.5°) |
+| `vrma_humanoid_hips_yaw_15` | ✅ exit 0 | only `hips` rotated |
+| `vrma_humanoid_neck_yaw_30` | ✅ exit 0 | only `neck` rotated |
+| `vrma_humanoid_spine_yaw_30` | ✅ exit 0 | only `spine` rotated |
+| `vrma_humanoid_l_upperarm_pitch` | ✅ exit 0 | only `leftUpperArm` rotated |
+| `vrma_expression_preset_aa` | ✅ exit 0 | presets[`aa`] = 1.0, all others 0 |
+| `vrma_expression_preset_happy` | ✅ exit 0 | presets[`happy`] = 1.0 |
+| `vrma_expression_preset_blink` | ✅ exit 0 | presets[`blink`] = 1.0 |
+| `vrma_expression_custom_smug` | ✅ exit 0 | custom = `{}` — see custom-expression caveat below |
+| `vrma_lookat_yaw_pos60_bone` | ✅ exit 0 | yaw = 0°, pitch = 0° — see **VMK lookAt-rotation-channel gap** below |
+
+**Custom-expression caveat**: `VRMExpressionController.setCustomExpressionWeight(_:weight:)` silently no-ops when the avatar doesn't have the named custom expression registered (line 533 of `VRMMorphTargets.swift` in the VMK checkout: `guard customExpressions[name] != nil else { return }`). The asset generator's VRMA writes a `smug` track that has no matching binding in the synthetic avatar, so the dump correctly reports an empty `custom` map. Peer renderers may behave the same way or may surface a warning — comparison after the next peer bootstrap will tell.
+
+### VMK lookAt rotation-channel gap (new upstream finding, surfaces in pose dump but not in SSIM)
+
+`vrma_lookat_*` plans all succeed at the op-dispatch level (PNG + pose.json produced) AND pass image-level consensus (SSIM ≈ 0.9665 vs three-vrm — the gaze direction barely moves any pixels at 1024² with the default eye-pupil contrast). But the pose-dump's `yaw_deg` / `pitch_deg` come out as 0 on VMK while the VRMA file declares a non-trivial gaze. Root cause is in the VMK loader: `VRMAnimationLoader.swift:390-402` parses the `VRMC_vrm_animation.lookAt` block but only reads a **translation** track from the referenced node:
+
+```swift
+if … let lookAtTracks = nodeTracks[lookAtNodeIndex],
+   let translationTrack = lookAtTracks["translation"] {     // ← translation only
+    clip.lookAtTargetSampler = { t in sampleVector3(translationTrack, at: t) }
+}
+```
+
+The vrm-conformance asset generator (`crates/vrm-asset-generator/src/vrma_emit.rs:129-151`) emits the gaze as a **rotation** channel on the lookAt node (`"animation[0] channels: [{sampler: 0, target: {node: 0, path: 'rotation'}}]"`). The VRMC_vrm_animation spec text describes the gaze as "the difference between the head position and the position of the node specified by `node`", which reads as translation-driven; but rotation-driven gaze is what `@pixiv/three-vrm-animation` and the other peer adapters accept in practice, and Pixiv's own VRMA samples use rotation channels too. So either the spec is incomplete or VMK's loader is.
+
+The image-level pass is real (gaze barely shifts pixels), but a future pose-level diff layer in `consensus-report` will flag this — at which point the VMK upstream fix becomes a hard requirement. Until then, this is tracked as a known-yet-quiet correctness gap on VMK's VRMA loader. File upstream as a follow-up.
+
+(The corpus also doubled in size since the rc.1 verification — 575 plans today vs ~235 in yesterday's baseline manifest — driven by the VRMA sweeps newly emitted by `vrm-asset-generator`. Numerator/denominator framing matters when comparing the two days.)
+
+### Filed upstream
+
+[VMK#283](https://github.com/arkavo-org/VRMMetalKit/issues/283) needs an update reflecting two new findings: (1) rc.2's PR #285 did not close our reproducer, and (2) 0.15.2 is also non-deterministic when sampled deeply enough. The right framing is "long-standing race in animated multi-joint swing path, not closed by PR #285" rather than "regression in 0.16.0-rc.1".
+
+### Promotion verdict
+
+**Bump the conformance suite's VMK pin to 0.16.0-rc.2 anyway.** The reproducibility-regression argument that held the pin at 0.15.2 (per the rc.1 verdict above) is invalidated by the deeper-sample finding that 0.15.2 has the same flakiness on the same surface. With no rendering regression on the deterministic surface (byte-identical for every test that is reproducible) and a 99% conformance pass-rate against UniVRM, the rc.2 surface is strictly an improvement — it closes six bugs filed by this suite (VMK#196/#237/#242/#243/#268/#273) at no measurable cost. The animated-swing flakiness remains a real issue but is not made worse by promoting; it stays tracked at VMK#283 with the updated framing.

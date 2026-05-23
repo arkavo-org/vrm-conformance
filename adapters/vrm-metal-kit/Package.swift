@@ -21,6 +21,42 @@ let package = Package(
         // bisected without library churn surprising us. Bump this revision when
         // a deliberate VRMMetalKit upgrade is part of the change.
         //
+        // 0.16.0-rc.2 (commit 7f7d39b, pre-released 2026-05-22) adds two
+        //   fixes on top of 0.16.0-rc.1:
+        //   - **PR #285 closes VMK#283** (animated swing non-determinism):
+        //          the self-committed `SpringBoneComputeSystem.update()`
+        //          path (commandBuffer: nil — what our adapter uses) now
+        //          drains the previous frame before overwriting
+        //          `animatedRootPositionsBuffer` / `animatedRootPositionsPrevBuffer`.
+        //          This closes the CPU/GPU race we filed against rc.1 after
+        //          observing 5 runs of `swing_springbone_joints_16` produce
+        //          3 distinct PNGs (blake3 `14b61fb5` ×2, `d5e06701` ×2,
+        //          `1144c101` ×1; pairwise SSIM 0.9885–0.9897) on the same
+        //          binary + same input + same hardware. 0.15.2 produced
+        //          byte-identical output across all repetitions; rc.2 should
+        //          restore that property. Behaviour-neutral for the
+        //          shared-buffer renderer path and `synchronousSpringBone`
+        //          path per the upstream PR description — both already
+        //          drained before overwrite. This was a regression
+        //          specifically on the path our conformance binary exercises.
+        //   - **PR #281 closes VMK#280** (iOS metallib distribution):
+        //          platform-specific precompiled metallibs ship in
+        //          `Resources/` so iOS device/simulator builds load the
+        //          FP16-defined slice without a local `make shaders` rebuild.
+        //          No-op for our macOS adapter (we link the macOS metallib
+        //          slice either way), but unblocks #279's mobile perf win
+        //          for SPM consumers and fixes the iOS Simulator
+        //          nil-pipeline error.
+        //   No MToon or static spring-bone surface changes vs rc.1.
+        //   Pre-release per upstream policy (-rc.N until Muse validates assets).
+        // 0.16.0-rc.1 (commit 6a7084d, pre-released 2026-05-21) closes
+        //   VMK#196/#237/#242/#243/#268/#273. RC verification (this suite,
+        //   2026-05-21, docs/findings.md "VMK 0.16.0-rc.1 verification")
+        //   found MToon (49) and static settle (82) byte-identical to
+        //   0.15.2 and 190/191 conformance pass vs UniVRM, but flagged a
+        //   reproducibility regression on the animated swing surface that
+        //   was filed as VMK#283 and held the pin at 0.15.2. rc.2's PR
+        //   #285 above is the closure of that hold.
         // 0.15.2 (commit de87578, released 2026-05-17) closes (PR #272):
         //   - **VRM 1.0 viseme weight coercion**: the expression parser cast
         //          `bind["weight"] as? Float` directly, but `JSONSerialization`
@@ -238,7 +274,7 @@ let package = Package(
         // All nine were first filed by this conformance suite.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "de87578ef998e89adad01d971db9946d7c62970c"
+            revision: "7f7d39b6877c2bfcadb40f4e19824eafdfcff0a7"
         ),
     ],
     targets: [

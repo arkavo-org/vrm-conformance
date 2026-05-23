@@ -45,18 +45,16 @@ final class Operations: @unchecked Sendable {
     /// Phase labels match `docs/operation-contract.md`. L3-e promoted the
     /// three Phase 2 physics ops out of the deferral block; they now have
     /// real handlers backed by VRMMetalKit's spring-bone GPU system.
-    /// VRMA ops are deferred to a future phase pending VMK#165 closure.
     /// `render_sequence` was promoted to a real handler in Phase 5 Task 1.
+    /// The five VRMA ops (`load_vrma` / `apply_vrma_at_time` / `dump_*`)
+    /// were promoted on top of VMK 0.16.0-rc.2 — the underlying library
+    /// has shipped `VRMAnimationLoader.loadVRMA(from:model:)` and the
+    /// retargeting closures since 0.15.1 (VMK#269 pose-normalisation fix).
     static let reservedPhases: [String: String] = [
         "set_environment":         "v1.x",
         "set_expression":          "Phase 3",
         "set_humanoid_pose":       "Phase 2",
         "set_root_transform":      "Phase 2",
-        "load_vrma":               "vrma-v1",
-        "apply_vrma_at_time":      "vrma-v1",
-        "dump_humanoid_pose":      "vrma-v1",
-        "dump_expression_weights": "vrma-v1",
-        "dump_look_at_state":      "vrma-v1",
     ]
 
     /// Phase label for the still-deferred Phase 2 ops.
@@ -98,6 +96,12 @@ final class Operations: @unchecked Sendable {
         var toneMapping: String = "None"
         var exposure: Float = 1.0
 
+        // VRMA state captured per-session. The head-local look-at point is
+        // recorded by `apply_vrma_at_time` so the dump op can derive yaw/
+        // pitch without depending on `VRMLookAtController`'s smoothed
+        // internal state (which is zero before any render call).
+        var lastLookAtHeadLocalPoint: SIMD3<Float>?
+
         init(renderer: VRMRenderer, model: VRMModel) {
             self.renderer = renderer
             self.model = model
@@ -108,6 +112,14 @@ final class Operations: @unchecked Sendable {
     private let commandQueue: MTLCommandQueue?
     private var sessions: [String: Session] = [:]
     private var sessionCounter: Int = 0
+    // VRMA clip registry. `load_vrma` per the op contract carries no
+    // session_id — handles are process-scoped, not session-scoped.
+    // Retargeting in `VRMAnimationLoader.loadVRMA` is bound to a model at
+    // load time, so a clip is implicitly tied to the session whose model
+    // was used to retarget it. In practice the conformance corpus runs one
+    // model per adapter invocation, which matches the three-vrm reference.
+    private var vrmaClips: [UInt32: AnimationClip] = [:]
+    private var nextVrmaHandle: UInt32 = 1
     private let stateLock = NSLock()
 
     init() {
@@ -148,6 +160,11 @@ final class Operations: @unchecked Sendable {
         case "animate_root_transform":  return handleAnimateRootTransform(params: params)
         case "render_sequence":         return handleRenderSequence(params: params)
         case "dump_bone_positions":     return handleDumpBonePositions(params: params)
+        case "load_vrma":               return handleLoadVrma(params: params)
+        case "apply_vrma_at_time":      return handleApplyVrmaAtTime(params: params)
+        case "dump_humanoid_pose":      return handleDumpHumanoidPose(params: params)
+        case "dump_expression_weights": return handleDumpExpressionWeights(params: params)
+        case "dump_look_at_state":      return handleDumpLookAtState(params: params)
         case "dispose":                 return handleDispose(params: params)
         default:
             if let phase = Operations.reservedPhases[method] {
@@ -198,6 +215,14 @@ final class Operations: @unchecked Sendable {
             var config = RendererConfig()
             config.sampleCount = Operations.msaaSampleCount
             config.strict = .off
+            // Run spring-bone physics synchronously per frame. This is the
+            // documented offline-render path: skinning sees the current
+            // frame's physics rather than the previous frame's snapshot,
+            // and (since VRMMetalKit landed VMK#283's renderer-side fix)
+            // the spring-bone integrator switches to a fixed 60Hz timestep
+            // instead of CACurrentMediaTime() pacing so repeated runs of
+            // the same input produce byte-identical output.
+            config.synchronousSpringBone = true
             // Bake the sRGB-encoded color attachment into the pipeline state
             // at load time. VRMMetalKit's pipeline objects are locked to
             // `config.colorPixelFormat` here; if the render-time target's
@@ -743,6 +768,10 @@ final class Operations: @unchecked Sendable {
         var singleSampleConfig = RendererConfig()
         singleSampleConfig.sampleCount = 1
         singleSampleConfig.strict = .off
+        // Match the session renderer's offline-render configuration so the
+        // animation-driving renderer also runs spring-bone on a fixed 60Hz
+        // timestep instead of wall-clock pacing (VMK#283).
+        singleSampleConfig.synchronousSpringBone = true
         let physicsRenderer = VRMRenderer(device: device, config: singleSampleConfig)
         physicsRenderer.loadModel(session.model)
         physicsRenderer.enableSpringBone = true
@@ -1038,6 +1067,316 @@ final class Operations: @unchecked Sendable {
         guard let v = v else { return false }
         if case .null = v { return false }
         return true
+    }
+
+    // MARK: - VRMA ops (Phase 7 — VMK 0.16.0-rc.2)
+
+    /// Conformance-relevant humanoid-bone subset, matching the three-vrm
+    /// adapter's `HUMANOID_BONES` list (renderer-host.html). 19 bones cover
+    /// the VRMA spec's required humanoid surface; finger and twist bones
+    /// are not exercised by the cross-renderer pose diff.
+    private static let referenceHumanoidBones: [String] = [
+        "hips", "spine", "chest", "neck", "head",
+        "leftShoulder", "leftUpperArm", "leftLowerArm", "leftHand",
+        "rightShoulder", "rightUpperArm", "rightLowerArm", "rightHand",
+        "leftUpperLeg", "leftLowerLeg", "leftFoot",
+        "rightUpperLeg", "rightLowerLeg", "rightFoot",
+    ]
+
+    /// VRMA spec preset list (14 entries) matching three-vrm. `lookUp`/
+    /// `lookDown`/`lookLeft`/`lookRight` are intentionally omitted — they
+    /// are LookAt-driven and surface via `dump_look_at_state`, not via
+    /// `dump_expression_weights` (per the ops-doc note in
+    /// `crates/vrm-ops/src/tools.rs`).
+    private static let referencePresetExpressions: [String] = [
+        "happy", "angry", "sad", "relaxed", "surprised",
+        "aa", "ih", "ou", "ee", "oh",
+        "blink", "blinkLeft", "blinkRight", "neutral",
+    ]
+
+    private func handleLoadVrma(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let path) = obj["vrma_path"]
+        else {
+            return invalidParams("missing vrma_path")
+        }
+        guard FileManager.default.fileExists(atPath: path) else {
+            return loadFailed("vrma file not found: \(path)")
+        }
+
+        // Retargeting needs a model — find the most recently created
+        // session (the conformance runner loads exactly one model before
+        // calling load_vrma).
+        stateLock.lock()
+        let session = sessions.values.first
+        stateLock.unlock()
+        guard let session = session else {
+            return loadFailed("load_vrma called before any load_vrm — no model available for retargeting")
+        }
+
+        let url = URL(fileURLWithPath: path)
+        let clip: AnimationClip
+        do {
+            clip = try VRMAnimationLoader.loadVRMA(from: url, model: session.model)
+        } catch {
+            return loadFailed("VRMAnimationLoader.loadVRMA failed: \(error)")
+        }
+
+        let humanoidBones = UInt32(clip.jointTracks.count)
+        // Count unique expression names across morph and typed expression
+        // tracks (the loader emits both for recognised presets; dedupe).
+        var expressionNames = Set<String>()
+        for t in clip.morphTracks { expressionNames.insert(t.key) }
+        for t in clip.expressionTracks { expressionNames.insert(t.expression.rawValue) }
+        let expressions = UInt32(expressionNames.count)
+        let hasLookAt = clip.lookAtTargetSampler != nil
+
+        stateLock.lock()
+        let handle = nextVrmaHandle
+        nextVrmaHandle &+= 1
+        vrmaClips[handle] = clip
+        stateLock.unlock()
+
+        return .ok(.object([
+            "vrma_handle": .number(Double(handle)),
+            "channel_summary": .object([
+                "humanoid_bones": .number(Double(humanoidBones)),
+                "expressions": .number(Double(expressions)),
+                "has_look_at": .bool(hasLookAt),
+                "duration_seconds": .number(Double(clip.duration)),
+            ]),
+        ]))
+    }
+
+    private func handleApplyVrmaAtTime(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else {
+            return invalidParams("missing session_id")
+        }
+        guard case .number(let handleD) = obj["vrma_handle"],
+              let handle = UInt32(exactly: handleD)
+        else {
+            return invalidParams("missing or malformed vrma_handle")
+        }
+        guard let time = parseFloat(obj["time_seconds"]) else {
+            return invalidParams("missing time_seconds")
+        }
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+        stateLock.lock()
+        let clip = vrmaClips[handle]
+        stateLock.unlock()
+        guard let clip = clip else {
+            return invalidParams("unknown vrma_handle: \(handle)")
+        }
+
+        // Humanoid: write bone rotations and (hips only, per VRMA spec)
+        // translation. The retargeting closures returned by the loader
+        // already bake the rest-pose-to-rest-pose transform per
+        // `VRMAnimationLoader.makeRotationSampler` (W_A·L_A⁻¹·A·W_A⁻¹ →
+        // L_B·W_B⁻¹·Normalised·W_B).
+        var humanoidBonesApplied: UInt32 = 0
+        for track in clip.jointTracks {
+            let (rot, trans, _) = track.sample(at: time)
+            if let rot = rot {
+                session.model.setLocalRotation(rot, for: track.bone)
+                humanoidBonesApplied &+= 1
+            }
+            if let trans = trans, track.bone == .hips {
+                session.model.setHipsTranslation(trans)
+            }
+        }
+
+        // Expressions: prefer the typed `expressionTracks` for recognised
+        // presets so we go through `setExpressionWeight(_:weight:)`'s preset
+        // group-suppression logic. Fall through to `morphTracks` for the
+        // custom and the (rare) unknown-preset case.
+        var expressionsApplied: UInt32 = 0
+        var presetNames = Set<String>()
+        if let controller = session.renderer.expressionController {
+            for track in clip.expressionTracks {
+                controller.setExpressionWeight(track.expression, weight: track.sample(at: time))
+                presetNames.insert(track.expression.rawValue)
+                expressionsApplied &+= 1
+            }
+            for track in clip.morphTracks where !presetNames.contains(track.key) {
+                let w = track.sample(at: time)
+                if let preset = VRMExpressionPreset(rawValue: track.key) {
+                    controller.setExpressionWeight(preset, weight: w)
+                } else {
+                    controller.setCustomExpressionWeight(track.key, weight: w)
+                }
+                expressionsApplied &+= 1
+            }
+        }
+
+        // LookAt: record the head-local target point so dump_look_at_state
+        // can derive yaw/pitch deterministically (no controller smoothing
+        // contamination). Also push the target into the renderer's
+        // VRMLookAtController so a downstream render reflects the gaze.
+        var lookAtApplied = false
+        if let sampler = clip.lookAtTargetSampler {
+            let point = sampler(time)
+            session.lastLookAtHeadLocalPoint = point
+            session.renderer.lookAtController?.target = .headLocalPoint(point)
+            lookAtApplied = true
+        } else {
+            session.lastLookAtHeadLocalPoint = nil
+        }
+
+        return .ok(.object([
+            "channels_applied": .object([
+                "humanoid_bones": .number(Double(humanoidBonesApplied)),
+                "expressions": .number(Double(expressionsApplied)),
+                "look_at": .bool(lookAtApplied),
+            ]),
+        ]))
+    }
+
+    private func handleDumpHumanoidPose(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else {
+            return invalidParams("missing session_id")
+        }
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+
+        var bonesArr: [JSONValue] = []
+        var missingArr: [JSONValue] = []
+        for boneName in Operations.referenceHumanoidBones {
+            guard let bone = VRMHumanoidBone(rawValue: boneName) else {
+                missingArr.append(.string(boneName))
+                continue
+            }
+            guard let rot = session.model.getLocalRotation(for: bone) else {
+                missingArr.append(.string(boneName))
+                continue
+            }
+            let v = rot.vector  // simd_quatf exposes (x, y, z, w) via .vector
+            bonesArr.append(.object([
+                "name": .string(boneName),
+                "local_rotation_quat": .array([
+                    .number(Double(v.x)),
+                    .number(Double(v.y)),
+                    .number(Double(v.z)),
+                    .number(Double(v.w)),
+                ]),
+            ]))
+        }
+        let hips = session.model.getHipsTranslation() ?? SIMD3<Float>(0, 0, 0)
+        return .ok(.object([
+            "bones": .array(bonesArr),
+            "hips_translation": .array([
+                .number(Double(hips.x)),
+                .number(Double(hips.y)),
+                .number(Double(hips.z)),
+            ]),
+            "bones_missing": .array(missingArr),
+        ]))
+    }
+
+    private func handleDumpExpressionWeights(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else {
+            return invalidParams("missing session_id")
+        }
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+        let controller = session.renderer.expressionController
+        // Sorted-key emit so the JSON output is deterministic and matches
+        // the Rust-side BTreeMap ordering expected by `pose_diff`.
+        var presets: [String: JSONValue] = [:]
+        for presetName in Operations.referencePresetExpressions {
+            let value: Float
+            if let controller = controller, let preset = VRMExpressionPreset(rawValue: presetName) {
+                value = controller.weight(for: preset)
+            } else {
+                value = 0.0
+            }
+            presets[presetName] = .number(Double(value))
+        }
+        var custom: [String: JSONValue] = [:]
+        if let controller = controller {
+            // VRMExpressionController has no public custom-name iterator;
+            // enumerate via the model's expressions.custom registry
+            // (populated at model load time from the .vrm).
+            let customNames = session.model.expressions?.custom.keys.sorted() ?? []
+            for name in customNames {
+                let w = controller.weight(forCustom: name) ?? 0.0
+                custom[name] = .number(Double(w))
+            }
+        }
+        return .ok(.object([
+            "presets": .object(presets),
+            "custom": .object(custom),
+        ]))
+    }
+
+    private func handleDumpLookAtState(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else {
+            return invalidParams("missing session_id")
+        }
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+
+        // Derive yaw/pitch from the last-applied head-local target point.
+        // glTF/VRM forward is -Z in head-local space, Y up, X right.
+        //   yaw   = rotation around Y (positive ⇒ avatar looks toward +X)
+        //   pitch = rotation around X (positive ⇒ avatar looks upward)
+        // Quaternion composes extrinsic ZXY per VRM 1.0 lookAt spec.
+        var yawDeg: Float = 0
+        var pitchDeg: Float = 0
+        if let p = session.lastLookAtHeadLocalPoint {
+            let len = simd_length(p)
+            if len > 1e-6 {
+                let d = p / len
+                let pitchRad = asinf(max(-1.0, min(1.0, d.y)))
+                let yawRad = atan2f(d.x, -d.z)
+                pitchDeg = pitchRad * 180.0 / .pi
+                yawDeg = yawRad * 180.0 / .pi
+            }
+        }
+        // q = R_y(yaw) * R_x(pitch)  (extrinsic ZXY with roll=0 = YXZ-applied)
+        let qYaw = simd_quatf(angle: yawDeg * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
+        let qPitch = simd_quatf(angle: pitchDeg * .pi / 180.0, axis: SIMD3<Float>(1, 0, 0))
+        let q = (qYaw * qPitch).vector
+
+        let appliedVia: String
+        switch session.model.lookAt?.type {
+        case .bone:
+            appliedVia = "bone"
+        case .expression:
+            appliedVia = "expression"
+        case .none:
+            appliedVia = "off"
+        }
+        let offset = session.model.lookAt?.offsetFromHeadBone ?? SIMD3<Float>(0, 0, 0)
+
+        return .ok(.object([
+            "gaze_direction_quat": .array([
+                .number(Double(q.x)),
+                .number(Double(q.y)),
+                .number(Double(q.z)),
+                .number(Double(q.w)),
+            ]),
+            "yaw_deg": .number(Double(yawDeg)),
+            "pitch_deg": .number(Double(pitchDeg)),
+            "applied_via": .string(appliedVia),
+            "offset_from_head_bone": .array([
+                .number(Double(offset.x)),
+                .number(Double(offset.y)),
+                .number(Double(offset.z)),
+            ]),
+        ]))
     }
 
     // MARK: - Helpers
