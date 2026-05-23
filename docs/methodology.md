@@ -129,6 +129,16 @@ A dedicated test category covers `outline × alphaMode × transparentWithZWrite 
 
 The spec allows ignoring stored TANGENT and recomputing via MikkTSpace. Recomputation differs subtly across libraries. v1.0 generates assets both with and without explicit tangents.
 
+## glTF-core `occlusionTexture` is not applicable to MToon materials
+
+Confirmed 2026-05-23 against the UniVRM reference (`docs/findings.md` "glTF-core PBR textures on MToon"). The PBR-textures sweep's three occlusion variants (`mtoon_pbrtex_baseline`, `mtoon_pbrtex_occlusion_default`, `mtoon_pbrtex_occlusion_strength_half`) render to a byte-identical PNG on **all four reference renderers** (UniVRM `9ed71e6798c4`, vrm-metal-kit `5d8cf1789282`, three-vrm `6ff1f5687375`, godot-vrm `4587bf323df1`).
+
+UniVRM is the consortium reference and its behavior is authoritative for ambiguous spec questions. The MToon spec (`docs/upstream-specs/vrm-specification/specification/VRMC_materials_mtoon-1.0/README.md`) explicitly declares MToon a non-PBR toon shader; the absence of `occlusionTexture` honoring is intentional ecosystem-wide rather than a per-renderer bug.
+
+**Conformance treatment.** The `mtoon_pbrtex_occlusion_*` sweep variants remain in the corpus as tripwires (a renderer that suddenly starts honoring `occlusionTexture` should be flagged as having diverged from the consortium reference), but the consensus pass-rate does not penalize renderers for omitting the AO multiplier on MToon. Asset emission keeps the binding in the corpus so the suite documents what the spec allows; conformance evaluation treats per-renderer agreement-on-omission as the expected behaviour.
+
+Note: this does NOT extend to `normalTexture`. UniVRM and three-vrm both apply the normal-map `scale` field correctly on MToon materials, so `normalTexture` is on the conformance hook even though it's also a glTF-core PBR binding. See [VMK#290](https://github.com/arkavo-org/VRMMetalKit/issues/290) for the open VMK gap (texture read, but `scale` ignored).
+
 ## Apple Silicon vs other GPUs
 
 VRMMetalKit is Metal-only; cross-GPU pixel-exact comparison is a non-goal. SSIM thresholds are tuned per-pair, with stricter intra-family thresholds (same GPU vendor, same color space) and looser cross-family thresholds. **Property assertions remain strict across all pairs.**

@@ -356,7 +356,16 @@ if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
             "${MULTICHAIN_DIR:-}" \
             "${VRMA_HUMANOID_DIR:-}" \
             "${VRMA_EXPRESSION_DIR:-}" \
-            "${VRMA_LOOKAT_DIR:-}"; do
+            "${VRMA_LOOKAT_DIR:-}" \
+            "${EMISSIVE_DIR:-}" \
+            "${FIRSTPERSON_DIR:-}" \
+            "${UVXFORM_DIR:-}" \
+            "${SHADETEX_DIR:-}" \
+            "${MATCAP_DIR:-}" \
+            "${SHADINGSHIFTTEX_DIR:-}" \
+            "${RIMTEX_DIR:-}" \
+            "${OUTLINETEX_DIR:-}" \
+            "${PBRTEX_DIR:-}"; do
             [ -z "$src" ] && continue
             [ ! -d "$src" ] && continue
             for f in "$src"/*.test.yaml "$src"/*.vrm "$src"/*.vrma; do
