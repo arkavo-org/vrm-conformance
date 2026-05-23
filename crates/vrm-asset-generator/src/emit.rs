@@ -12,6 +12,23 @@ use camino::Utf8Path;
 use serde_json::{json, Value};
 
 pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
+    emit_vrm_with_custom_expressions(params, output, &[])
+}
+
+/// Like [`emit_vrm`] but pre-registers the named custom expressions on
+/// the avatar's `VRMC_vrm.expressions.custom` map with empty
+/// `morphTargetBinds`. Used by the VRMA expression sweep's custom-
+/// expression variants so `VRMExpressionController` accepts
+/// `setCustomExpressionWeight(name, …)` instead of silently no-op'ing
+/// (per `VRMMorphTargets.swift:533` and equivalents in three-vrm /
+/// godot-vrm / UniVRM). Bound morphs are intentionally empty: the test
+/// signal is the controller's `weight(forCustom:)` being non-zero, not
+/// a visible mesh deformation.
+pub fn emit_vrm_with_custom_expressions(
+    params: &MToonParams,
+    output: &Utf8Path,
+    custom_expression_names: &[&str],
+) -> Result<()> {
     // 1) Mesh + buffer + five POSITION-only morph targets for visemes
     //    (aa, ih, ou, ee, oh). Each delta produces a visually distinct
     //    deformation pattern when the corresponding expression weight is
@@ -82,6 +99,14 @@ pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
     });
 
     doc["extensions"]["VRMC_vrm"]["expressions"]["preset"] = viseme_preset_binds(mesh_node_index);
+
+    if !custom_expression_names.is_empty() {
+        let mut custom_map = serde_json::Map::new();
+        for name in custom_expression_names {
+            custom_map.insert((*name).to_string(), json!({ "morphTargetBinds": [] }));
+        }
+        doc["extensions"]["VRMC_vrm"]["expressions"]["custom"] = Value::Object(custom_map);
+    }
 
     // Splice in buffers/bufferViews/accessors from the packed mesh.
     for key in ["buffers", "bufferViews", "accessors"] {
@@ -1215,11 +1240,25 @@ pub fn emit_vrma_expression_triplet(
 
     std::fs::create_dir_all(output_dir)?;
 
-    // 1. .vrm (canonical default avatar — same as humanoid sweep).
+    // 1. .vrm avatar. For preset-expression variants we use the canonical
+    //    default avatar (which already registers the 5 viseme presets via
+    //    `viseme_preset_binds`). For custom-expression variants we use
+    //    `emit_vrm_with_custom_expressions` to pre-register the named
+    //    custom expression so `VRMExpressionController.setCustomExpressionWeight`
+    //    doesn't silently no-op (the controllers require the name to be in
+    //    `VRMC_vrm.expressions.custom` before they accept a weight write).
     let vrm_relpath = format!("{}.vrm", params.id);
     let vrm_path = output_dir.join(&vrm_relpath);
     let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
-    emit_vrm(&mtoon_defaults, &vrm_path)?;
+    if params.is_preset {
+        emit_vrm(&mtoon_defaults, &vrm_path)?;
+    } else {
+        emit_vrm_with_custom_expressions(
+            &mtoon_defaults,
+            &vrm_path,
+            &[params.expression_name.as_str()],
+        )?;
+    }
 
     // 2. .vrma: one node for the expression target + a 0→1→0 ramp.
     let mut doc = build_empty_vrma();
