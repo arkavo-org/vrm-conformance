@@ -2014,3 +2014,23 @@ The image-level pass is real (gaze barely shifts pixels), but a future pose-leve
 ### Promotion verdict
 
 **Bump the conformance suite's VMK pin to 0.16.0-rc.2 anyway.** The reproducibility-regression argument that held the pin at 0.15.2 (per the rc.1 verdict above) is invalidated by the deeper-sample finding that 0.15.2 has the same flakiness on the same surface. With no rendering regression on the deterministic surface (byte-identical for every test that is reproducible) and a 99% conformance pass-rate against UniVRM, the rc.2 surface is strictly an improvement — it closes six bugs filed by this suite (VMK#196/#237/#242/#243/#268/#273) at no measurable cost. The animated-swing flakiness remains a real issue but is not made worse by promoting; it stays tracked at VMK#283 with the updated framing.
+
+## VMK ignores `VRMC_materials_hdr_emissiveMultiplier`
+
+**Date**: 2026-05-23. Surfaced on the first run of the new emissive sweep.
+
+The newly-added MToon emissive sweep (`crates/vrm-asset-generator/src/sweep.rs::mtoon_emissive_sweep`, 14 variants) was designed to verify the spec-required behaviour of `VRMC_materials_hdr_emissiveMultiplier-1.0`: renderers should "overwrite material.emissiveFactor of the target material with the value multiplied by emissiveMultiplier" (`docs/upstream-specs/vrm-specification/specification/VRMC_materials_hdr_emissiveMultiplier-1.0/README.md`).
+
+Rendering 3 of the 14 variants through vrm-metal-kit 0.16.0-rc.2 + the conformance adapter:
+
+| test_id | effective emissive | rendered sha256[:12] |
+|---|---|---|
+| `mtoon_emissive_multiplier_0` | `[1,1,1] × 0 = [0,0,0]` (dark) | `9d5a8a62ccb8` |
+| `mtoon_emissive_multiplier_1` | `[1,1,1] × 1 = [1,1,1]` (full) | `9d5a8a62ccb8` |
+| `mtoon_emissive_multiplier_2` | `[1,1,1] × 2 = [2,2,2]` (HDR, clamped) | `9d5a8a62ccb8` |
+
+**All three byte-identical**, despite materially different `emissiveFactor * emissiveMultiplier` products. By contrast `mtoon_emissive_r_x1` (factor `[1,0,0]`, multiplier 1) renders a distinct hash — proving VMK *does* read `emissiveFactor` itself; it just doesn't apply the multiplier extension. Likely the MToon shader path uses the raw glTF `emissiveFactor` and never consults `extensions.VRMC_materials_hdr_emissiveMultiplier.emissiveMultiplier`.
+
+The spec is marked "Archived" with "Superseded by KHR_materials_emissive_strength", but is still in the VRM 1.0 spec tree and present in real-world VRM 1.0 assets, so VMK should support it for spec-conformance on legacy avatars. Either implementing it directly or treating the extension as an alias for the equivalent KHR_materials_emissive_strength behaviour would close the gap.
+
+To file as a VMK upstream follow-up once an issue can be opened. Conformance suite tracks via this sweep — peer renderers (three-vrm, godot-vrm, univrm) haven't been rendered against these assets yet; doing so will establish whether the gap is VMK-specific or industry-wide.

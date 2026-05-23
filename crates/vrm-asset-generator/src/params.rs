@@ -34,6 +34,17 @@ pub struct MToonParams {
     pub uv_animation_scroll_y_speed_factor: f32,
     pub uv_animation_rotation_speed_factor: f32,
 
+    /// glTF `material.emissiveFactor` (linear RGB, per-channel ∈ [0,1]).
+    /// Default [0,0,0] = no emission, in which case `emissive_multiplier`
+    /// has no observable effect and the extension is not emitted.
+    pub emissive_factor: [f32; 3],
+    /// `VRMC_materials_hdr_emissiveMultiplier-1.0`: when the effective
+    /// emission is `emissive_factor * emissive_multiplier`, this lets it
+    /// exceed 1.0 (HDR). The extension is emitted only when
+    /// `emissive_multiplier != 1.0` AND `emissive_factor != [0,0,0]`.
+    /// glTF default if extension omitted is implicit multiplier=1.
+    pub emissive_multiplier: f32,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -67,6 +78,8 @@ impl MToonParams {
             uv_animation_scroll_x_speed_factor: 0.0,
             uv_animation_scroll_y_speed_factor: 0.0,
             uv_animation_rotation_speed_factor: 0.0,
+            emissive_factor: [0.0, 0.0, 0.0],
+            emissive_multiplier: 1.0,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,

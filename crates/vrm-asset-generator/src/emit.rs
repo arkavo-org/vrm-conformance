@@ -61,13 +61,27 @@ pub fn emit_vrm_with_custom_expressions(
         .map(|&idx| json!({ "POSITION": idx }))
         .collect();
 
+    // Declare every extension the document actually carries. Spec-wise
+    // `extensionsUsed` is informative (renderers ignore unknowns) but
+    // validators enforce that every extension referenced in the JSON
+    // appears here. The hdr_emissiveMultiplier entry is only added when
+    // the material's effective multiplier diverges from the default 1.0,
+    // matching the conditional emission in `base_material`.
+    let mut extensions_used: Vec<&str> =
+        vec!["KHR_materials_unlit", "VRMC_vrm", "VRMC_materials_mtoon"];
+    let emits_emissive_multiplier = params.emissive_factor.iter().any(|&c| c != 0.0)
+        && (params.emissive_multiplier - 1.0).abs() > f32::EPSILON;
+    if emits_emissive_multiplier {
+        extensions_used.push("VRMC_materials_hdr_emissiveMultiplier");
+    }
+
     // 4) Build the glTF JSON document
     let mut doc = json!({
         "asset": {
             "version": "2.0",
             "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
         },
-        "extensionsUsed": ["KHR_materials_unlit", "VRMC_vrm", "VRMC_materials_mtoon"],
+        "extensionsUsed": extensions_used,
         "extensionsRequired": ["VRMC_vrm"],
         "scene": 0,
         "scenes": [

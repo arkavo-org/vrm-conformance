@@ -112,6 +112,88 @@ pub fn mtoon_basic_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// MToon emissive sweep covering `material.emissiveFactor` +
+/// `VRMC_materials_hdr_emissiveMultiplier-1.0`. Held-constant axes:
+/// base color is mid-gray ([0.3,0.3,0.3,1]) so the emissive contribution
+/// is unambiguously the dominant pixel-write at the rendered head. All
+/// other MToon parameters are at defaults.
+///
+/// 14 variants:
+/// - 7 multiplier values × white emissive [1,1,1] (the canonical signal:
+///   verifies the spec's "overwrite material.emissiveFactor with
+///   factor * multiplier" rule across the [0, 4] HDR range).
+/// - 3 color variants at multiplier=1 (red / green / blue) to verify
+///   per-channel independence.
+/// - 3 color variants at multiplier=2 to verify the multiplier scales
+///   the whole 3-vector rather than re-mapping one channel.
+/// - 1 baseline: factor=[0,0,0], multiplier=anything — emits no
+///   extension and should render identically to MToon default
+///   (regression guard: extension-emit must be conditional).
+///
+/// Methodology: `tone_mapping: none` (per `docs/methodology.md`) is
+/// required so HDR multipliers > 1 saturate the UNORM PNG channel
+/// rather than getting reshaped by ACES/Filmic. The asset's test plan
+/// inherits the suite default of `tone_mapping: None`.
+pub fn mtoon_emissive_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    // Sub-1.0 sweep where renderer differences should be linearly
+    // distinguishable in the output PNG. 1.5 / 2.0 / 4.0 verify HDR
+    // saturation behaviour (everything above 1.0 clamps in UNORM output
+    // but should still pass through the spec's multiply step before
+    // clamping — so a renderer that applied the multiplier as `min(1,…)`
+    // before the multiply would diverge from spec).
+    for m in [0.0_f32, 0.25, 0.5, 0.75, 1.0, 2.0, 4.0] {
+        let mut p = MToonParams::defaults(format!("mtoon_emissive_multiplier_{}", fmt_num(m)));
+        p.base_color_factor = [0.3, 0.3, 0.3, 1.0];
+        p.emissive_factor = [1.0, 1.0, 1.0];
+        p.emissive_multiplier = m;
+        out.push(p);
+    }
+
+    // Per-channel independence at multiplier=1 (no extension emitted —
+    // exercises plain glTF emissiveFactor).
+    for (axis, factor) in [
+        ("r", [1.0_f32, 0.0, 0.0]),
+        ("g", [0.0, 1.0, 0.0]),
+        ("b", [0.0, 0.0, 1.0]),
+    ] {
+        let mut p = MToonParams::defaults(format!("mtoon_emissive_{axis}_x1"));
+        p.base_color_factor = [0.3, 0.3, 0.3, 1.0];
+        p.emissive_factor = factor;
+        p.emissive_multiplier = 1.0;
+        out.push(p);
+    }
+
+    // Per-channel × multiplier=2: emissive_multiplier scales the
+    // 3-vector uniformly per spec ("overwrite material.emissiveFactor
+    // of the target material with the value multiplied by
+    // emissiveMultiplier"), so red×2 should produce the same colour
+    // hue as red×1 just brighter, not e.g. a chroma shift.
+    for (axis, factor) in [
+        ("r", [1.0_f32, 0.0, 0.0]),
+        ("g", [0.0, 1.0, 0.0]),
+        ("b", [0.0, 0.0, 1.0]),
+    ] {
+        let mut p = MToonParams::defaults(format!("mtoon_emissive_{axis}_x2"));
+        p.base_color_factor = [0.3, 0.3, 0.3, 1.0];
+        p.emissive_factor = factor;
+        p.emissive_multiplier = 2.0;
+        out.push(p);
+    }
+
+    // Zero-emissive baseline: even though `emissive_multiplier=4.0` is
+    // set, the extension must NOT be emitted because emissive_factor is
+    // [0,0,0] (zero × anything = zero; emitting the extension would be
+    // misleading and validators flag unused `extensionsUsed` entries).
+    let mut zero = MToonParams::defaults("mtoon_emissive_zero_factor");
+    zero.emissive_factor = [0.0, 0.0, 0.0];
+    zero.emissive_multiplier = 4.0;
+    out.push(zero);
+
+    out
+}
+
 fn fmt_num<T: std::fmt::Display + Copy + PartialOrd + Default>(v: T) -> String
 where
     f64: From<T>,
@@ -884,6 +966,68 @@ mod multichain_sweep_tests {
                 assert_eq!(
                     sg, first,
                     "share_all variants must point all chains at the same group"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod emissive_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn emissive_sweep_emits_expected_variants() {
+        let s = mtoon_emissive_sweep();
+        // 7 multiplier × white + 3 channel @ x1 + 3 channel @ x2 + 1 zero-baseline = 14
+        assert_eq!(
+            s.len(),
+            14,
+            "expected 14 emissive sweep entries, got {}",
+            s.len()
+        );
+
+        // ID uniqueness — every sweep across the suite assumes unique IDs
+        // so the runner's plan→png path doesn't collide.
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), s.len(), "emissive sweep IDs must be unique");
+
+        // Baseline at multiplier=1 must exist (this is the canonical
+        // "extension absent, plain emissiveFactor only" case).
+        assert!(
+            s.iter().any(|p| p.id == "mtoon_emissive_multiplier_1"),
+            "missing canonical multiplier=1 variant"
+        );
+
+        // Zero-emissive baseline must keep emissive_factor at zero so the
+        // material round-trip produces no extension regardless of the
+        // (intentionally != 1.0) multiplier value.
+        let zero = s
+            .iter()
+            .find(|p| p.id == "mtoon_emissive_zero_factor")
+            .expect("missing zero-factor baseline");
+        assert_eq!(zero.emissive_factor, [0.0, 0.0, 0.0]);
+        assert_ne!(
+            zero.emissive_multiplier, 1.0,
+            "zero-factor baseline must set multiplier != 1.0 to exercise the conditional-emit guard"
+        );
+    }
+
+    #[test]
+    fn emissive_sweep_per_channel_variants_are_pure_red_green_blue() {
+        let s = mtoon_emissive_sweep();
+        for axis in ["r", "g", "b"] {
+            for mult_suffix in ["x1", "x2"] {
+                let id = format!("mtoon_emissive_{axis}_{mult_suffix}");
+                let p = s.iter().find(|p| p.id == id).unwrap_or_else(|| {
+                    panic!("missing channel variant {id}");
+                });
+                let nonzero_count = p.emissive_factor.iter().filter(|&&c| c != 0.0).count();
+                assert_eq!(
+                    nonzero_count, 1,
+                    "{id} must have exactly one non-zero channel"
                 );
             }
         }

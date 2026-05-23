@@ -191,6 +191,26 @@ pub fn base_material(p: &MToonParams) -> Value {
         material["alphaCutoff"] = json!(p.alpha_cutoff);
     }
 
+    // Emit `emissiveFactor` only when non-zero — the glTF default is
+    // [0,0,0] and a zero emissive contributes nothing visually, so leaving
+    // the field absent keeps the MToon-default material JSON identical to
+    // what it has been (no goldens churn for the existing corpus).
+    if p.emissive_factor.iter().any(|&c| c != 0.0) {
+        material["emissiveFactor"] = json!(p.emissive_factor);
+
+        // VRMC_materials_hdr_emissiveMultiplier-1.0 is only meaningful
+        // when the multiplier differs from the implicit default of 1.0.
+        // Spec: the renderer overwrites `material.emissiveFactor` with
+        // `emissiveFactor * emissiveMultiplier`. Emitting the extension
+        // at multiplier=1.0 would round-trip identically and just add
+        // noise to the `extensionsUsed` array.
+        if (p.emissive_multiplier - 1.0).abs() > f32::EPSILON {
+            material["extensions"]["VRMC_materials_hdr_emissiveMultiplier"] = json!({
+                "emissiveMultiplier": p.emissive_multiplier
+            });
+        }
+    }
+
     material
 }
 
@@ -766,6 +786,82 @@ mod extended_emit_tests {
         assert!(
             j0.get("extensions").is_none() || j0["extensions"].as_object().unwrap().is_empty(),
             "joint with no angle limit must not carry extensions block, got {j0}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod emissive_emit_tests {
+    use super::*;
+    use crate::params::MToonParams;
+
+    fn defaults() -> MToonParams {
+        MToonParams::defaults("emissive_test")
+    }
+
+    #[test]
+    fn zero_emissive_factor_omits_emissive_field_and_extension() {
+        let p = defaults();
+        let m = base_material(&p);
+        assert!(
+            m.get("emissiveFactor").is_none(),
+            "emissiveFactor must be absent for default (zero) factor; got {m}"
+        );
+        let exts = m["extensions"].as_object().unwrap();
+        assert!(
+            !exts.contains_key("VRMC_materials_hdr_emissiveMultiplier"),
+            "extension must be absent for zero emissive factor; got {exts:?}"
+        );
+    }
+
+    #[test]
+    fn zero_emissive_factor_with_nonunit_multiplier_still_omits_extension() {
+        // Regression guard: per spec, multiplier is meaningless when factor
+        // is [0,0,0] (zero × anything = zero), so we must not emit the
+        // extension just because the multiplier field happens to be set.
+        let mut p = defaults();
+        p.emissive_multiplier = 4.0; // factor stays at default [0,0,0]
+        let m = base_material(&p);
+        let exts = m["extensions"].as_object().unwrap();
+        assert!(
+            !exts.contains_key("VRMC_materials_hdr_emissiveMultiplier"),
+            "extension must NOT be emitted when factor is zero, even if multiplier != 1.0"
+        );
+    }
+
+    #[test]
+    fn nonzero_emissive_at_multiplier_one_emits_field_only() {
+        let mut p = defaults();
+        p.emissive_factor = [1.0, 0.5, 0.25];
+        // emissive_multiplier stays at default 1.0
+        let m = base_material(&p);
+        let ef = m["emissiveFactor"].as_array().unwrap();
+        assert_eq!(ef.len(), 3);
+        assert_eq!(ef[0].as_f64().unwrap(), 1.0);
+        assert_eq!(ef[1].as_f64().unwrap(), 0.5);
+        assert_eq!(ef[2].as_f64().unwrap(), 0.25);
+        let exts = m["extensions"].as_object().unwrap();
+        assert!(
+            !exts.contains_key("VRMC_materials_hdr_emissiveMultiplier"),
+            "extension must be absent when multiplier is the implicit default 1.0"
+        );
+    }
+
+    #[test]
+    fn nonzero_emissive_with_nonunit_multiplier_emits_both() {
+        let mut p = defaults();
+        p.emissive_factor = [1.0, 1.0, 1.0];
+        p.emissive_multiplier = 2.5;
+        let m = base_material(&p);
+        assert!(
+            m.get("emissiveFactor").is_some(),
+            "emissiveFactor must be present"
+        );
+        let ext = &m["extensions"]["VRMC_materials_hdr_emissiveMultiplier"];
+        assert_eq!(
+            ext["emissiveMultiplier"].as_f64().unwrap(),
+            2.5,
+            "emissiveMultiplier value must round-trip"
         );
     }
 }

@@ -81,6 +81,12 @@ else
     echo "==> Emitting MToon sweep"
     cargo run --release -q -p vrm-asset-generator -- emit-sweep \
         --output-dir "$ASSETS_DIR" --json >/dev/null
+
+    echo "==> Emitting MToon emissive sweep (14 plans, VRMC_materials_hdr_emissiveMultiplier)"
+    EMISSIVE_DIR="$GOLDENS_DIR/_assets_emissive"
+    rm -rf "$EMISSIVE_DIR"; mkdir -p "$EMISSIVE_DIR"
+    cargo run --release -q -p vrm-asset-generator -- emit-emissive-sweep \
+        --output-dir "$EMISSIVE_DIR" --json >/dev/null
     echo "==> Emitting spring-bone settle sweep"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-sweep \
         --output-dir "$ASSETS_DIR" --json >/dev/null
