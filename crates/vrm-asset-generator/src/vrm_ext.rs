@@ -169,6 +169,18 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
         mtoon["shadeMultiplyTexture"] = json!({ "index": 0 });
     }
 
+    // `matcapTexture` per VRMC_materials_mtoon-1.0 (rim lighting
+    // section):
+    //   matcapContribution = matcapFactor.rgb * texture(matcapTexture, matcapUv).rgb
+    // where matcapUv is derived from the view-space surface normal,
+    // not mesh UVs. Reusing texture 0 here too — for a matcap the
+    // texture's content semantics are "what reflects at each view-
+    // facing direction", so the checkerboard quadrants will appear
+    // mapped onto the sphere by view orientation.
+    if p.matcap_texture {
+        mtoon["matcapTexture"] = json!({ "index": 0 });
+    }
+
     mtoon
 }
 

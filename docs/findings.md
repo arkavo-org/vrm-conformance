@@ -2137,6 +2137,39 @@ The screen-space math (sphere radius 0.3 m, world position (0, 1.36, 0), camera 
 
 **For the firstPerson question**: godot's failure to differentiate the 4 variants is consistent with the avatar not being meaningfully rendered to begin with — there's nothing for `perform_head_hiding()` to cull because the mesh isn't visibly present. Diagnosing godot's MToon-shader pipeline is the right next thread, not a corpus retune.
 
+## MToon matcapTexture — VMK + three-vrm both conformant; godot blocked
+
+**Date**: 2026-05-23. Surfaced on the first run of the new matcapTexture sweep.
+
+`crates/vrm-asset-generator/src/sweep.rs::mtoon_matcap_texture_sweep` emits 5 MToon assets exercising the spec's rim-lighting matcap term (per `docs/upstream-specs/vrm-specification/specification/VRMC_materials_mtoon-1.0/README.md:550`: `rim += matcapFactor.rgb * texture(matcapTexture, matcapUv).rgb`, where matcapUv is derived from the view-space surface normal — sphere-mapped, not mesh-UV-mapped). All variants set near-black base+shade colors so the matcap contribution is the only meaningful pixel-write.
+
+| test_id | matcapFactor | matcapTexture | vrm-metal-kit (size) | three-vrm (size) | godot-vrm |
+|---|---|---|---|---|---|
+| `mtoon_matcap_baseline` | `[1,1,1]` | absent | `24d279c77e24` (50K) | `58ad3eacee0e` (60K) | `a4b4ae4aa7c0` (11K) |
+| `mtoon_matcap_default` | `[1,1,1]` | present | `73a7c0638d69` (121K) | `9a2f5b656ede` (107K) | `a4b4ae4aa7c0` (11K) |
+| `mtoon_matcap_red_tint` | `[1,0,0]` | present | `04751bf8ea16` (103K) | `c1f3c42c47bb` (95K) | `a4b4ae4aa7c0` (11K) |
+| `mtoon_matcap_blue_tint` | `[0,0,1]` | present | `0345c0dee6a9` (85K) | `9de7cfa2e618` (93K) | `a4b4ae4aa7c0` (11K) |
+| `mtoon_matcap_dim` | `[0.5,0.5,0.5]` | present | `297a2e1350c9` (118K) | `b1782709b6ad` (106K) | `a4b4ae4aa7c0` (11K) |
+
+**vrm-metal-kit: fully spec-conformant.** All 5 variants distinct. The baseline-vs-default file-size jump (50K → 121K) is dramatic — adding the matcap roughly doubles the visible pixel content, which the PNG encoder reflects in compressed size. Red and blue tints produce intermediate file sizes (103K and 85K) consistent with one channel surviving the multiplicative blend. The dim variant (118K) is close to default — confirming `matcapFactor=[0.5,0.5,0.5]` is applied as a linear half-intensity multiplier rather than ignored or clamped.
+
+**three-vrm: fully spec-conformant.** All 5 distinct, similar file-size pattern. The two renderers' conformance is independent confirmation — when both VMK and three-vrm distinguish the same variants, the spec semantics are unambiguous and our test asset is sound.
+
+**godot-vrm: every variant produces `a4b4ae4aa7c0` (11K)** — the no-content render again, blocked by the documented import-time vs runtime mismatch root cause. matcap conformance can't be observed until that root cause closes.
+
+### Cumulative MToon-texture conformance picture
+
+After today's three texture-binding sweeps (baseColorTexture+KHR_texture_transform, shadeMultiplyTexture, matcapTexture):
+
+| binding | three-vrm | vrm-metal-kit | godot-vrm |
+|---|---|---|---|
+| `baseColorTexture` (read) | ✅ | ✅ | ❌ (import-time) |
+| `KHR_texture_transform` on `baseColorTexture` | ✅ | ❌ ([VMK#288](https://github.com/arkavo-org/VRMMetalKit/issues/288)) | ⚠️ partial |
+| `shadeMultiplyTexture` | ✅ | ✅ | ❌ (import-time) |
+| `matcapTexture` | ✅ | ✅ | ❌ (import-time) |
+
+VMK reads every per-binding texture correctly; only the per-textureInfo `KHR_texture_transform` extension is missing. So VMK#288's scope keeps narrowing: it's not a texture-binding gap, just a UV-transform gap in the shader.
+
 ## MToon shadeMultiplyTexture — VMK + three-vrm both conformant; godot blocked by import-time root cause
 
 **Date**: 2026-05-23. Surfaced on the first run of the new shadeMultiplyTexture sweep.

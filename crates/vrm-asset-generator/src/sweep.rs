@@ -194,6 +194,84 @@ pub fn mtoon_emissive_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// MToon `matcapTexture` sweep: 5 variants exercising the spec's rim-
+/// lighting matcap contribution
+/// (`rim += matcapFactor.rgb * texture(matcapTexture, matcapUv).rgb`,
+/// where matcapUv is derived from the view-space surface normal — not
+/// mesh UVs). To isolate the matcap signal, every variant sets
+/// `baseColorFactor` and `shadeColorFactor` to near-black so the only
+/// visible contribution to the rendered sphere is the matcap RGB
+/// (plus any parametric rim, which we leave at zero defaults).
+/// Renders should show the procedural checkerboard mapped onto the
+/// sphere by view orientation — distinctive sphere-mapping signature
+/// that's visually unambiguous when present.
+///
+/// Variants:
+/// - `mtoon_matcap_baseline` — matcapTexture absent, near-black base
+///   and shade colors. Sphere renders near-black with no matcap
+///   contribution. The diff target for "renderer reads matcapTexture".
+/// - `mtoon_matcap_default` — matcapTexture set, matcapFactor=[1,1,1]
+///   (the spec default). Sphere displays the raw checkerboard via
+///   matcap sphere-mapping.
+/// - `mtoon_matcap_red_tint` — matcapFactor=[1,0,0]. Only red channel
+///   of the matcap reaches the rendered sphere; green and blue
+///   quadrants of the texture darken to black, red and yellow
+///   (red+green) keep their red component.
+/// - `mtoon_matcap_blue_tint` — matcapFactor=[0,0,1]. Symmetric blue
+///   test; only blue and yellow (red+green has no blue) quadrants
+///   contribute visibly.
+/// - `mtoon_matcap_dim` — matcapFactor=[0.5,0.5,0.5]. Half-intensity
+///   matcap. Exercises whether renderers apply the factor as a
+///   linear multiplier (50% brightness reduction) vs ignoring or
+///   clamping.
+pub fn mtoon_matcap_texture_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    // Baseline: no matcap, near-black sphere. Render should show
+    // a barely-visible black-on-magenta sphere with no matcap RGB.
+    let mut baseline = MToonParams::defaults("mtoon_matcap_baseline");
+    baseline.matcap_texture = false;
+    baseline.base_color_factor = [0.05, 0.05, 0.05, 1.0];
+    baseline.shade_color_factor = [0.0, 0.0, 0.0];
+    out.push(baseline);
+
+    // Textured, matcapFactor=[1,1,1] default — full matcap signal.
+    let mut default_matcap = MToonParams::defaults("mtoon_matcap_default");
+    default_matcap.matcap_texture = true;
+    default_matcap.base_color_factor = [0.05, 0.05, 0.05, 1.0];
+    default_matcap.shade_color_factor = [0.0, 0.0, 0.0];
+    // matcap_factor stays at the spec default [1.0, 1.0, 1.0] from MToonParams::defaults
+    out.push(default_matcap);
+
+    // Red tint: matcapFactor=[1,0,0]. Per spec multiplicative blend,
+    // only red components of the checkerboard survive.
+    let mut red_tint = MToonParams::defaults("mtoon_matcap_red_tint");
+    red_tint.matcap_texture = true;
+    red_tint.base_color_factor = [0.05, 0.05, 0.05, 1.0];
+    red_tint.shade_color_factor = [0.0, 0.0, 0.0];
+    red_tint.matcap_factor = [1.0, 0.0, 0.0];
+    out.push(red_tint);
+
+    // Blue tint: symmetric test on the other primary axis.
+    let mut blue_tint = MToonParams::defaults("mtoon_matcap_blue_tint");
+    blue_tint.matcap_texture = true;
+    blue_tint.base_color_factor = [0.05, 0.05, 0.05, 1.0];
+    blue_tint.shade_color_factor = [0.0, 0.0, 0.0];
+    blue_tint.matcap_factor = [0.0, 0.0, 1.0];
+    out.push(blue_tint);
+
+    // Dim: linear half-intensity. Verifies that matcapFactor is
+    // applied as a multiplier rather than ignored or clamped.
+    let mut dim = MToonParams::defaults("mtoon_matcap_dim");
+    dim.matcap_texture = true;
+    dim.base_color_factor = [0.05, 0.05, 0.05, 1.0];
+    dim.shade_color_factor = [0.0, 0.0, 0.0];
+    dim.matcap_factor = [0.5, 0.5, 0.5];
+    out.push(dim);
+
+    out
+}
+
 /// MToon `shadeMultiplyTexture` sweep: 6 variants exercising the spec's
 /// shaded-color path (`shadeColorTerm = shadeColorFactor * texture(shadeMultiplyTexture, uv)`).
 /// All variants use the procedural quadrant checkerboard texture; the
@@ -1182,6 +1260,63 @@ mod multichain_sweep_tests {
                     "share_all variants must point all chains at the same group"
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod matcap_texture_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn matcap_sweep_has_5_variants_with_unique_ids() {
+        let s = mtoon_matcap_texture_sweep();
+        assert_eq!(s.len(), 5);
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), s.len(), "matcap sweep IDs must be unique");
+    }
+
+    #[test]
+    fn baseline_omits_matcap_texture_and_non_baseline_sets_it() {
+        let s = mtoon_matcap_texture_sweep();
+        let baseline = s
+            .iter()
+            .find(|p| p.id == "mtoon_matcap_baseline")
+            .expect("baseline variant missing");
+        assert!(!baseline.matcap_texture);
+        for p in &s {
+            if p.id == "mtoon_matcap_baseline" {
+                continue;
+            }
+            assert!(
+                p.matcap_texture,
+                "{}: non-baseline variant must set matcap_texture",
+                p.id
+            );
+        }
+    }
+
+    #[test]
+    fn every_matcap_variant_isolates_the_matcap_signal() {
+        // base+shade colors must be near-black for every variant so the
+        // matcap contribution dominates the rendered output. If a future
+        // edit forgets one, the diff signal degrades.
+        let s = mtoon_matcap_texture_sweep();
+        for p in &s {
+            let b = p.base_color_factor;
+            let sc = p.shade_color_factor;
+            assert!(
+                b[0] <= 0.1 && b[1] <= 0.1 && b[2] <= 0.1,
+                "{}: base_color_factor must be near-black",
+                p.id
+            );
+            assert!(
+                sc[0] == 0.0 && sc[1] == 0.0 && sc[2] == 0.0,
+                "{}: shade_color_factor must be black",
+                p.id
+            );
         }
     }
 }

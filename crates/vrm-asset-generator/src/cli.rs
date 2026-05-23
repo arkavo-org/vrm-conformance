@@ -93,6 +93,21 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the MToon matcapTexture sweep (5 assets covering the spec's
+    /// rim-lighting matcap term: matcapFactor.rgb *
+    /// texture(matcapTexture, matcapUv), where matcapUv is derived
+    /// from the view-space surface normal — distinct from mesh UVs).
+    /// Baseline (no matcap) + 4 textured variants crossing
+    /// matcapFactor (default white, red tint, blue tint, half-
+    /// intensity dim). Every variant sets near-black base and shade
+    /// colors to isolate the matcap signal in the rendered output.
+    EmitMatcapTextureSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit one `.vrm` carrying both default MToon material and a default
     /// VRMC_springBone chain attached to the head.
     EmitSpringbone {
@@ -323,6 +338,49 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string(&summary)?);
             } else {
                 println!("emitted {} assets to {}", emitted.len(), output_dir);
+            }
+            Ok(())
+        }
+        Cmd::EmitMatcapTextureSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::sweep::mtoon_matcap_texture_sweep;
+            std::fs::create_dir_all(&output_dir)?;
+            let assets = mtoon_matcap_texture_sweep();
+            let total = assets.len();
+            let mut emitted = Vec::new();
+            for (i, p) in assets.iter().enumerate() {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-matcap-texture-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": p.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+                }
+                let stem = output_dir.join(&p.id);
+                emit_with_sidecars(p, &stem)?;
+                emitted.push(stem);
+            }
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} matcapTexture sweep assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
             }
             Ok(())
         }

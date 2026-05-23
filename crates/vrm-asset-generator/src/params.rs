@@ -71,6 +71,17 @@ pub struct MToonParams {
     /// `false` (default) keeps the current corpus unchanged.
     pub shade_multiply_texture: bool,
 
+    /// When `true`, attaches the procedural quadrant-checkerboard
+    /// texture to MToon's `VRMC_materials_mtoon.matcapTexture`. Per
+    /// the MToon spec rim-lighting section, the contribution is
+    /// `matcapFactor * texture(matcapTexture, matcapUv).rgb`, where
+    /// `matcapUv` is derived from the view-space surface normal —
+    /// not mesh UVs. So a sphere renders the texture as if the
+    /// texture were the reflection on a polished sphere, regardless
+    /// of mesh UV layout. `false` (default) keeps the corpus
+    /// unchanged.
+    pub matcap_texture: bool,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -109,6 +120,7 @@ impl MToonParams {
             first_person_type: None,
             texture_transform: None,
             shade_multiply_texture: false,
+            matcap_texture: false,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,
