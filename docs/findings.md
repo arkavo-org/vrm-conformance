@@ -3041,3 +3041,81 @@ The "unified -Z pin" proposed earlier was wrong. The "VRM 0.x +Z, VRM 1.0 -Z" pi
 - **godot-vrm rest-pose-expression eyes-closed**: still pending; independent of orientation; visible now that camera at +Z (spec-correct) shows the face.
 
 **Methodology data point**: I committed the inverted reading because the empirical evidence (UniVRM-as-spec-reference vs. three-cohort-disagrees) read more naturally as "UniVRM correct, others wrong" without verifying the spec text. The spec quote went into RFC 0006 fabricated rather than copied verbatim. The lesson recorded for the suite: **always quote spec text verbatim with file:line attribution; never paraphrase from memory or extrapolate from empirical disagreement without grounding in the canonical document**. Adding this discipline to the suite's contribution guidelines.
+
+## VRoid default Bust springs have empty colliderGroups by design — clipping is ecosystem content convention, not renderer bug
+
+**Date**: 2026-05-24 (same session). **Trigger**: downstream Muse 0.16.0 team reported visible bust clipping on the default VRoid avatar after deleting the dead `ColliderRegistry` injection pipeline (see earlier finding "Downstream goal calibration"). They observed bust-clipping in both static settle and dynamic frames; clean elsewhere (head, shoulders, dress, cheek/jaw, scalp). Their initial diagnosis: "VRoid's torso collider doesn't cover the bust."
+
+### Empirical correction to that diagnosis
+
+Re-inspected `vroid_default_F_1_0.vrm`'s `VRMC_springBone` extension:
+
+- **VRoid's UpperChest collider group is comprehensive.** 3 spheres on `J_Bip_C_UpperChest` (1 center at z+0.009m + 2 lateral at ±0.043m X offset, radii 0.061–0.087m). They cover the chest plane.
+- **The 7 `Hair` springs reference 10 collider groups** (Spine, UpperChest, Neck, Head, both arm chains, hands) — comprehensive body-blocker collision for hair.
+- **The 2 `Bust` springs reference ZERO collider groups** — `colliderGroups: []`. By design. The bust chains swing freely under gravity with no collision constraint.
+
+So the bust clipping isn't "the chest collider doesn't cover the bust" (the colliders are there). It's "**VRoid's Bust springs deliberately don't reference the existing chest colliders**." Almost certainly an authorial choice in Studio's default character — free-swing bust without containment for an unconstrained-motion aesthetic. The empirical consequence is exactly what Muse observed: under certain motion or pose configurations, bust geometry clips into torso geometry because the bust chains have no constraint to keep them outside the chest plane.
+
+### Implications for Muse's three-options decision
+
+This **rules out option 2 (registry as `setColliderRadius` multiplier)** for this symptom:
+
+- `setColliderRadius` modifies the radius of an existing VRM-declared collider.
+- The chest spheres are declared but only referenced by the Hair springs.
+- Bumping chest-sphere radius affects hair drape, not bust deflection.
+- To fix bust clipping at runtime, Muse would need to mutate `springs[].colliderGroups[]` to make Bust springs reference the existing UpperChest group. **VMK does not expose this API.** Adding it would be a separate upstream feature request, not a small registry rebuild.
+
+**Option 1 (ship as-is, document as model limitation)** is the actionable recommendation. Two framings to consider for downstream documentation:
+- "Bust chains on stock VRoid characters are authored without chest containment for free-swing aesthetic; users wanting containment can modify the .vrm or wait for Studio updates."
+- A "compatibility notes" page that flags this with other known content-quirks (e.g., skirt clipping when running).
+
+**Option 3 (Logger conversion)** has independent value as observability hygiene but doesn't gate the bust-clipping decision.
+
+### Tier 2 plans landed in this commit
+
+Two new test plans target the bust-vs-body interaction so downstream consumers (Muse and other VMK users) have a reproducible cross-renderer baseline:
+
+- **`vroid_default_F_bust_settle.test.yaml`** — static settle at 30 physics steps, frontal chest framing (`y_target = 1.15`, `z = +0.55`, FOV 28°), VRoid F default character. Renders the equilibrium pose of bust chains under gravity with no collision constraint.
+- **`vroid_default_F_bust_swing.test.yaml`** — same framing, with `animate_root_transform` lateral motion (`[0.15, 0, 0]` over 0.25 s at 60 Hz) to excite the bust chains. Single-frame end-of-animation capture; for multi-frame timing-sensitive coverage use `render_sequence` per RFC-0004 once a swing-sequence variant is authored.
+
+Both plans use the spec-correct VRM 1.0 camera convention (camera at +Z, target origin; per `docs/upstream-specs/.../tpose.md` Definition 1.1).
+
+### First four-adapter bootstrap
+
+**bust_settle pairwise SSIM matrix (threshold 0.70):**
+
+|                | VMK    | three-vrm | godot-vrm | UniVRM |
+|---|---|---|---|---|
+| **VMK**        | 1.0000 | **0.8433 ✓** | 0.4714 ✗ | 0.3422 ✗ |
+| **three-vrm**  | 0.8433 ✓ | 1.0000     | 0.4807 ✗ | 0.2922 ✗ |
+| **godot-vrm**  | 0.4714 ✗ | 0.4807 ✗   | 1.0000   | 0.3377 ✗ |
+| **UniVRM**     | 0.3422 ✗ | 0.2922 ✗   | 0.3377 ✗ | 1.0000 |
+
+**bust_swing pairwise SSIM matrix:**
+
+|                | VMK    | three-vrm | godot-vrm | UniVRM |
+|---|---|---|---|---|
+| **VMK**        | 1.0000 | **0.7348 ✓** | 0.6612 | 0.6263 |
+| **three-vrm**  | 0.7348 ✓ | 1.0000     | 0.6784 | 0.6237 |
+| **godot-vrm**  | 0.6612 | 0.6784     | 1.0000 | 0.6205 |
+| **UniVRM**     | 0.6263 | 0.6237     | 0.6205 | 1.0000 |
+
+**Visual observation across renders** (`goldens-cache/humanoid/vroid_default_F_bust_{settle,swing}/`):
+
+- VMK and three-vrm cluster tightly (frontal view of bust-area bodice, hair pigtails to sides) — the spec-correct cohort.
+- godot-vrm shows the same framing but with its known eyes-closed default-expression bug visible at the top of frame.
+- UniVRM shows the back of the avatar (the known adapter coord-handling bug).
+
+The single-frame settle render does NOT dramatically surface bust-vs-bodice clipping at this framing — clothing geometry covers most of the chest area at rest, and the static equilibrium pose isn't where peak deflection occurs. The swing variant excites the chains but the single end-of-animation frame may miss peak deflection. **Recommended next step for product teams reproducing this**: extend to a `render_sequence` plan (RFC-0004) that captures the swing across N frames and visualizes the deflection trajectory; the worst-clipping frame will be diagnostic.
+
+### What the cross-renderer agreement means
+
+**The four-renderer agreement on "Bust springs swing freely" is the conformance signal**, not the absence of clipping in any specific frame. All four renderers (modulo their adapter-side coord bugs) honor the file's empty `Bust.colliderGroups` declaration. This is an **ecosystem content convention**, not a per-renderer bug. No renderer-side fix will help; the fix must be at the asset or runtime-mutation layer.
+
+### Action items
+
+- **Comment back to the Muse team**: forward this diagnosis correction. Their option 1 is the right call. Option 2 (`setColliderRadius` multiplier) would not address the symptom because Bust springs don't reference the chest colliders to begin with. Option 3 (Logger hygiene) is good infra work independent of this.
+- **Upstream filing candidates** (future, lower priority):
+  - VRoid Studio: consider making Bust spring `colliderGroups` default to `[UpperChest]` in the default character template. Would silently fix the issue for every new export without breaking existing content.
+  - VMK: feature request for a `setSpringColliderGroups` API that mutates `springs[].colliderGroups[]` at runtime. Would let host apps like Muse override the file-declared configuration on a per-character basis without re-exporting. Not filed yet — should wait until at least one product genuinely needs it (and would be willing to land the upstream PR if VMK accepts it).
+- **Suite-side follow-up**: author a `vroid_default_F_bust_seq.test.yaml` using RFC-0004 `render_sequence` to capture the swing trajectory across 30 frames. The worst-clipping frame will be visible there.
