@@ -850,8 +850,15 @@ fn make_extended_shape_with_placement(shape_name: &str, p_idx: usize) -> (Collid
             )
         }
         "isphere" => {
-            // Inside sphere: vary radius (tight=small, loose=large).
-            let radii = [0.10_f32, 0.20, 0.40];
+            // Inside-sphere: vary radius (tight=small, loose=large). All three
+            // must be smaller than the chain's deepest-joint distance from the
+            // collider node (≈0.10 m for the default 4-joint × 0.05 m chain) so
+            // the containment constraint actually engages — VMK#237 diagnostic
+            // (2026-05-24) showed earlier radii [0.10, 0.20, 0.40] only
+            // engaged at ptight=0.10, leaving the other 5 variants as physical
+            // no-ops that collapsed to a single SHA bucket. {0.04, 0.06, 0.08}
+            // produces three distinct engagement depths.
+            let radii = [0.04_f32, 0.06, 0.08];
             (
                 ColliderShape::InsideSphere {
                     radius: radii[p_idx],
@@ -860,8 +867,8 @@ fn make_extended_shape_with_placement(shape_name: &str, p_idx: usize) -> (Collid
             )
         }
         "icaps" => {
-            // Inside capsule: vary radius.
-            let radii = [0.10_f32, 0.20, 0.40];
+            // Inside-capsule: same radii rationale as isphere above.
+            let radii = [0.04_f32, 0.06, 0.08];
             (
                 ColliderShape::InsideCapsule {
                     radius: radii[p_idx],

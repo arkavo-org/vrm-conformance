@@ -3315,3 +3315,34 @@ This session produced *three* successive corrections in the diagnosis path:
 3. "Inside-shape angleLimit not propagating" diagnosis based on bucket-table pattern matching, without instrumenting to verify (corrected by the diagnostic run above).
 
 Each was a case of inferring a code-level bug from behavioral evidence without verifying through instrumentation or primary source. The shared pattern: **behavioral evidence ranks lower than instrumented data**. When a downstream team has the instrumentation, the suite should ask them to run it before posting hypotheses. Adding this to the suite's contributing guidance.
+
+### Fixture fix: extended-collider sweep now actually exercises inside-shape semantics
+
+**Date**: 2026-05-24 (same session). **Trigger**: VMK team confirmed the parser/plumbing/shader are wired correctly end-to-end (substep-ordering defensive fix landed). The bucket collapse was suite-side fixture engineering: chain extent ≤ boundary radius for most variants meant containment never engaged.
+
+**Fix**: changed inside-sphere/capsule placement radii in `crates/vrm-asset-generator/src/sweep.rs::make_extended_shape_with_placement` from `[0.10, 0.20, 0.40]` to `[0.04, 0.06, 0.08]`. The 4-joint × 0.05 m default chain has its deepest joint at distance ≈ 0.10 m from the collider node; with the new radii, all three placement values are smaller than chain extent, so containment actively engages on every variant.
+
+**Validation**: regenerated the 36-plan sweep, re-rendered the 18 swing variants through VMK 0.16.0 (with the suite's temporary diagnostic hook re-applied), measured SHA distribution.
+
+**Before fix** (radii 0.10/0.20/0.40): 18 renders → **7 unique SHAs**. 10 inside-shape variants collapsed to 1 SHA (no penetration anywhere).
+
+**After fix** (radii 0.04/0.06/0.08): 18 renders → **11 unique SHAs**. Per-variant diagnostic now shows non-zero penetration on bone 2 and/or bone 3 across all inside-shape variants (e.g., `isphere_ptight`: bone2=0.0298 m, bone3=0.0154 m; `isphere_pmed`: bone2=0.0100 m, bone3=0.0019 m).
+
+**Per-bucket post-fix:**
+
+| SHA | # | Variants | Diagnostic |
+|---|---|---|---|
+| `68f3e2b8…` | 4 | anglelimit_90 + pmed (sphere + capsule) | 90° too permissive to bind in our geometry; ≡ default |
+| `29e12b3a…` | 2 | anglelimit_30 (sphere + capsule) | sphere ≡ capsule on end-cap shared code (correct per spec) |
+| `9b3af63f…` | 2 | anglelimit_60 (sphere + capsule) | same |
+| `e03767af…` | 2 | ploose (sphere + capsule) | same |
+| `c0c9a475…` | 2 | plane_anglelimit_60 + plane_pmed | plane default ≈ 60° (unchanged from before) |
+| `fa85b095…` | 1 | icaps_ptight | sphere/capsule distinct here — different end-cap geometry |
+| `16a76df6…` | 1 | isphere_ptight | distinct from capsule counterpart |
+| `83cce4f7…` / `fa6ed352…` / `5f00ac35…` / `b04db911…` | 1 each | plane variants | unchanged |
+
+The remaining "collapses" are physically correct: sphere/capsule share end-cap code (VMK confirmed; spec-aligned), default angleLimit happens to equal 90° for inside-shapes and 60° for planes (worth confirming as a separate finding once verified). No residual bug in VMK; conformance-side gap closed.
+
+**Closing the VMK#237 loop**: the substep-ordering improvement landed on VMK as a defensive robustness fix (no regression, no real bug needed shifting). The bucket collapse was conformance-side fixture engineering. Both fixes pushed; the issue is effectively resolved from both ends.
+
+**TODO** (not blocking): the corpus should also extend the sweep to include radii that engage the constraint more strongly across additional axes (e.g., chain length + swing amplitude variants) so cross-cohort consensus across the inside-shape feature has more dimensions. Defer until empirically motivated by another adapter.
