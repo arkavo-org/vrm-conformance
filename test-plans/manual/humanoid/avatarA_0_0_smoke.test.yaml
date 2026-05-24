@@ -1,11 +1,11 @@
-id: avatarA_bosom_threequarter
-spec_section: VRMC_materials_mtoon + VRMC_springBone (bust chains, settled, 3/4 angle)
-asset: avatarA_1_0.vrm
+id: avatarA_0_0_smoke
+spec_section: VRM 0.x (load + basic render smoke; -Z camera per unified spec-correct convention — avatar faces -Z in glTF in both 0.x and 1.0)
+asset: avatarA_0_0.vrm
 camera:
   position:
-  - 0.45
+  - 0.0
   - 1.25
-  - -0.6
+  - -0.55
   target:
   - 0.0
   - 1.25
@@ -14,7 +14,7 @@ camera:
   - 0.0
   - 1.0
   - 0.0
-  fov_degrees: 32.0
+  fov_degrees: 28.0
 lighting:
   directional:
     dir:
@@ -44,8 +44,8 @@ output:
   msaa: 4
 diff:
   mode: ssim
-  threshold: 0.80
-  reference_renderer: three-vrm
+  threshold: 0.70
+  reference_renderer: univrm
   conformance_status:
     kind: included
 ignore_renderers: []

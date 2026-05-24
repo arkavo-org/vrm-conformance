@@ -2770,3 +2770,212 @@ Neither blocks 0.16.0 adoption. The adapter wiring update for VMK#294 (`applyImm
 | `docs/upstream/VMK-swing-stiffness-axis-collapse-rc3.md` | VMK#292 | ✅ closed in rc.4 |
 | `docs/upstream/VMK-occlusion-texture-strength.md` | VMK#293 | ✅ closed in rc.4 |
 | `docs/upstream/VMK-vrma-lookat-renderer-propagation.md` | VMK#294 | ✅ closed in rc.4 (renderer); suite-side asset coverage follow-up open |
+
+## Downstream goal calibration — VRoid Hub baseline, Muse 0.16.0 diagnosis correction, two-tier corpus pivot
+
+**Date**: 2026-05-24.
+
+**Trigger**: a downstream tester of VMK 0.16.0 (Muse) reported `Muse/Renderer.swift:554` invokes `colliderRegistry?.update()` every frame but never injects the computed procedural sphere colliders (head / upper-chest / hand body-blockers built in `Muse/Physics/ColliderRegistry.swift:117-132`) into VRMMetalKit's spring-bone simulation — a long-standing dead pipe (git log -S "updateSphereColliders" returns nothing), not a 0.14 → 0.16 regression. Diagnosed against three candidate fix paths (override existing VRM colliders via `setColliderRadius`; new upstream `setProceduralSphereColliders` API; or model-side `insideSphere` / `insideCapsule`).
+
+The bug surfaces a methodology question this suite hadn't engaged with: **the downstream goal is "VRoid Hub `.vrm` imported into a game with physics and collisions working out of the box."** Our existing 263-plan corpus is entirely parametric synthetic assets (one-axis-at-a-time sweeps on stripped baseline rigs). Whether real VRoid content exhibits the bug class Muse is patching around — and whether Muse's patch is even *necessary* — could not be answered from the corpus.
+
+**Method**: exported `vroid_default_F_1_0.vrm` from VRoid Studio with permissive license fields set at export time. Symlinked into `assets/humanoid/` (matching the existing avatarA pattern that points back to `../VRMMetalKit/`). Extracted the glTF JSON chunk and inspected `VRMC_vrm.meta`, `VRMC_springBone`, and `extensionsUsed`.
+
+### What VRoid's default export actually ships
+
+**License (clean for redistribution + Khronos donation):**
+
+| Field | Value |
+|---|---|
+| `licenseUrl` | `https://vrm.dev/licenses/1.0/` |
+| `avatarPermission` | `everyone` |
+| `commercialUsage` | `corporation` |
+| `allowRedistribution` | `true` |
+| `modification` | `allowModificationRedistribution` |
+| `creditNotation` | `unnecessary` |
+
+`VRMC_vrm.meta` is the spec-defined license layer; downstream apps are required by the VRM 1.0 spec to read and respect it on import. Setting permissive fields at export time obviates the per-fixture licensing audit that hand-authored or Hub-sourced fixtures would require.
+
+**Spring-bone topology (`specVersion: 1.0`, base `VRMC_springBone` only — no `VRMC_springBone_extended_collider`):**
+
+- **28 colliders** organized into **12 collider groups**, all sphere-shape:
+  - Spine: 1 sphere (`J_Bip_C_Spine`)
+  - **UpperChest: 3 spheres** — 1 center + 2 lateral at ±0.043 m X offset, radii 0.061–0.087 m (the exact body-blocker geometry Muse's registry computes)
+  - Neck: 1 sphere (radius 0.043 m)
+  - Head: 1 sphere (radius 0.090 m — classic face/hair anti-clipping)
+  - L+R upper arms: 3 spheres each, distributed along arm length
+  - L+R lower arms: 4 spheres each
+  - L+R hands: 1 sphere each
+  - L+R upper legs: 3 spheres each
+- **44 springs** organized by chain class:
+  - 2 `Bust` springs (3 joints each) — `colliderGroups: []` (swing-only by design)
+  - 24 `Skirt` springs (4 joints each) — `colliderGroups: [10, 11]` (both upper-leg groups)
+  - 7 `Hair` springs (4–5 joints each) — `colliderGroups: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]` (Spine + UpperChest + Neck + Head + both full arm chains, all 10 body-blocker groups)
+  - 6 `TopsUpperArm`, 4 `CatEar`, 1 `FoxTail` (decorative chains) — `colliderGroups: []`
+
+### Diagnosis correction for Muse 0.16.0
+
+The Muse bug ("`ColliderRegistry.update()` computes spheres, result is dropped") is real. The diagnosis of the *fix* is the part this finding revises:
+
+**The procedural registry duplicates colliders VRoid already declares in-file.** For VRoid-sourced content — which is the dominant downstream case and the stated goal — VMK has already loaded the 10-group body-blocker set, and the 7 hair chains already reference them. The host app's procedural recomputation is solving a problem the file already solves.
+
+| Muse fix path | Necessary for VRoid content? |
+|---|---|
+| 1. Override existing colliders via `setColliderRadius` | Yes if registry is repurposed as a radius-tuning source on declared colliders |
+| 2. New `setProceduralSphereColliders` upstream API | **No** — only needed for non-VRoid content that ships without collider groups |
+| 3. Model-side `insideSphere` / `insideCapsule` | No — VRoid doesn't use the extended-collider extension and pushing creators toward it would fork the ecosystem |
+
+The cleanest VMK-side fix is: delete the registry's procedural-injection role and trust the in-file declarations. If the registry has empirical value it's as a radius multiplier on top of `setColliderRadius`. The new-upstream-API path is only justified by a *separate* requirement — supporting avatars exported from non-VRoid pipelines that ship without colliders.
+
+### Methodology implication — two-tier corpus pivot
+
+This was the load-bearing realization. The existing parametric synthetic corpus is excellent at renderer-axis isolation but **structurally cannot answer "does a real VRoid avatar import-and-play correctly across renderers."** The bone topology, the multi-chain hair / bust / skirt / decorative spring layout, the comprehensive in-file collider declarations — none of these are represented in a stripped baseline rig.
+
+Three independent suite-side gaps converge on the same shape:
+
+1. **VMK#267 (`writeBonesToNodes` 1-frame lag)** — flagged in our prior findings catalog as "synthetic swing sweep at 0.2 m / 0.25 s may not surface 1-frame lag; avatarA_bosom_swing more realistic." Realistic content is what surfaces frame-timing bugs.
+2. **The Muse class** — synthesizes the question "does the renderer apply VRoid's declared collider groups to hair chains?" There is no equivalent question we could ask of the synthetic corpus because synthetic doesn't have collider groups in the file.
+3. **`VRMC_springBone_extended_collider` realism gap** (findings.md ≈ 2026-05-15 phase 3 entry) — our 36 extended-shape variants render on synthetic rigs that never enter the inverted-containment shell, compressing SSIM signal. A body-shaped baseline would expose containment behavior properly.
+
+Pivot: **Tier 1 (existing) — parametric synthetic sweeps for renderer-axis isolation. Tier 2 (new) — canonical real-content fixtures from VRoid Studio for downstream-realism conformance.** Both belong, neither replaces the other. Methodology RFC drafted at `rfcs/0005-canonical-content-tier.md`.
+
+### What landed in this commit
+
+- `assets/humanoid/vroid_default_F_1_0.vrm` — symlink to source-of-truth in `../VRMMetalKit/`
+- `assets/humanoid/vroid_default_F_1_0.meta.json` — provenance + license + spring-bone topology summary
+- `test-plans/manual/humanoid/vroid_default_F_collider_settle.test.yaml` — settled-pose hair-vs-body test plan for the new fixture (threshold provisional, calibrates on first bootstrap)
+- `rfcs/0005-canonical-content-tier.md` — methodology RFC, Draft status
+
+### What this obsoletes
+
+- The deferred `avatarA_collider_1_0.vrm` Blender authoring task (findings.md:1105). The VRoid baseline is strictly better than what we would have hand-authored: it ships VRoid's full multi-chain topology and the comprehensive declared collider set, rather than a single bespoke head-mounted sphere on a stripped rig. Half an hour of Studio UI work replaced an estimated half-day of Blender authoring.
+
+### Forward
+
+- No upstream issue against VRMMetalKit for "add `setProceduralSphereColliders`" — the finding above argues it is unnecessary for VRoid-sourced content. If a downstream consumer brings non-VRoid avatars later, the question can be re-opened with that data.
+- Comment the Muse diagnosis correction back to the downstream tester (the registry-vs-declared-colliders observation is the actionable signal).
+- Bootstrap the VRoid baseline through all four real adapters to calibrate the SSIM threshold for `vroid_default_F_collider_settle` empirically. Until then the plan's threshold is provisional.
+- Methodology RFC discussion: see `rfcs/0005-canonical-content-tier.md`.
+
+### First four-adapter bootstrap of `vroid_default_F_collider_settle` (same day)
+
+**Method**: ran the new Tier 2 plan through all four real adapters — VMK 0.16.0, three-vrm 3.5.0, godot-vrm, and UniVRM v0.131.0 (Unity 6000.4.6f1 PlayMode via `execute-test-batch`). All four loaded the file cleanly and produced 1024×1024 PNGs (`overall_passed: true` / batch `ok_count: 1` on each).
+
+**Four-way consensus matrix (SSIM, plan threshold 0.70):**
+
+|                | vrm-metal-kit | three-vrm | godot-vrm | univrm |
+|---|---|---|---|---|
+| **vrm-metal-kit** | 1.0000   | **0.8826 ✓** | 0.6009 ✗ | 0.4560 ✗ |
+| **three-vrm**     | 0.8826 ✓ | 1.0000       | 0.6081 ✗ | 0.4323 ✗ |
+| **godot-vrm**     | 0.6009 ✗ | 0.6081 ✗     | 1.0000   | 0.4479 ✗ |
+| **univrm**        | 0.4560 ✗ | 0.4323 ✗     | 0.4479 ✗ | 1.0000   |
+
+`consensus_passed=false`, all four renderers flagged as outliers (none has ≥ 2 agreements at threshold 0.70). Two distinct conformance-signal classes emerged.
+
+**Visual inspection** (`goldens-cache/humanoid/vroid_default_F_collider_settle/`):
+
+1. **VMK + three-vrm** (SSIM 0.88 to each other): avatar facing camera, **eyes open** at rest, hair drapes naturally, MToon shading agrees within expected cross-renderer drift. This is the "expected" Tier 2 baseline cluster.
+2. **godot-vrm** (SSIM ≈0.60 to VMK/three-vrm): avatar facing camera but **eyes closed** at rest. Glasses framing and hair drape differ as downstream consequence (eyelid bone state propagates).
+3. **univrm** (SSIM ≈0.43–0.46 to all others): **avatar facing AWAY from camera** — UniVRM renders the back of the head. Same camera spec (position `[0.4, 1.4, 0.55]`, target `[0, 1.35, 0]`) produces front-facing renders in the other three adapters and back-facing in UniVRM.
+
+**Diagnosis hypothesis — UniVRM avatar-facing divergence (confirmed via cross-check)**: this is the more conceptually interesting finding.
+
+**Cross-check**: rendered the existing `avatarA_bosom_threequarter` plan (already in the corpus, runs cleanly on the three non-UniVRM adapters) through UniVRM. **UniVRM renders the back of avatarA too** — same systematic behavior on a different fixture. Render saved at `goldens-cache/humanoid/vroid_default_F_collider_settle/_cross_check_avatarA_threequarter_univrm.png` for reference. So the divergence is **systematic to the UniVRM adapter across all VRM 1.0 humanoid fixtures we have**, not specific to VRoid or to one camera framing.
+
+**Spec framing** — VRM 0.x vs VRM 1.0 default avatar orientation:
+
+| Spec version | Avatar facing direction at rest | Origin |
+|---|---|---|
+| VRM 0.x | -Z (Unity convention: "Unity forward" away from a +Z-positioned camera looking toward origin sees the *front*) | Pre-Khronos, Unity-native VRM extension |
+| VRM 1.0 | +Z (glTF convention: avatar's nose along +Z in right-handed glTF space; a +Z-positioned camera looking toward origin sees the *back*) | Ratified at Khronos, normalized to glTF native |
+
+UniVRM v0.131.0 is the spec-authors' reference implementation and correctly applies VRM 1.0 semantics — avatar faces +Z, so a camera at +Z sees the back. The three other adapters carry forward the VRM 0.x convention (either through default-rotation on load, or through a 180°-rotated camera in their native scene setup, or some other compensation), so the same camera spec sees the front for them.
+
+**This means every existing humanoid plan in `test-plans/manual/humanoid/` was implicitly authored against the legacy VRM 0.x camera convention.** The plans pass on VMK / three-vrm / godot-vrm because those three apply the same legacy compensation; UniVRM exposes that the convention is non-spec on VRM 1.0 content.
+
+So: **UniVRM is the spec-correct reference here.** The downstream interop story is the right one — a stock VRoid avatar imported into a game *using a strict-VRM-1.0-conformant runtime* will face away from the camera unless the host app explicitly rotates 180° or places the camera at -Z. Three of four real renderers don't, which is why a downstream developer porting between renderers sees the avatar mysteriously face the wrong way.
+
+**This was the user's hypothesis from the start** ("VRM 0.0 and VRM 1.0 I think have the default placement and coordinates different") — confirmed empirically.
+
+**Diagnosis hypothesis — godot-vrm expression divergence** (separate finding, lower priority): VRM 1.0 default-no-preset semantics expect rest = modeler-baked mesh (eyes open). Godot rendering eyes closed at rest suggests adapter is applying a blink preset by default, or the loader is interpreting blendshape weights at rest non-canonically. Needs adapter-side investigation.
+
+**Calibration verdict**: **keep threshold at 0.70**. The value cleanly separates legitimate cross-renderer drift (VMK/three-vrm at 0.88) from the two real conformance signals (godot at ≈0.60, univrm at ≈0.45). Plan is no longer provisional; calibration confirms the empirical band.
+
+**What this validates about the methodology pivot**: on the very first Tier 2 bootstrap, two distinct conformance-signal classes emerged that the Tier 1 parametric synthetic corpus could not produce — (1) default-blendshape-preset state and (2) avatar-facing convention under coordinate-system conversion. Neither would surface from a stripped synthetic skeleton without face geometry or VRM blendshape presets. This is the case-in-point for RFC 0005.
+
+### Camera-flip executed + post-flip empirical reality
+
+Followed through on the methodology fix in the same session. Flipped camera Z on all six humanoid plans (`avatarA_bosom*`, `avatarA_face`, `vroid_default_F_collider_settle`) — `position[2]: +x → -x`, targets unchanged. Re-bootstrapped the VRoid plan through all four real adapters.
+
+**Post-flip four-way matrix:**
+
+|                | VMK    | three-vrm | godot-vrm | UniVRM |
+|---|---|---|---|---|
+| **VMK**        | 1.0000 | **0.8961 ✓** | 0.6922   | 0.4449 ✗ |
+| **three-vrm**  | 0.8961 ✓ | 1.0000     | **0.7194 ✓** | 0.4324 ✗ |
+| **godot-vrm**  | 0.6922 | 0.7194 ✓   | 1.0000   | 0.4362 ✗ |
+| **UniVRM**     | 0.4449 ✗ | 0.4324 ✗   | 0.4362 ✗ | 1.0000 |
+
+`agreement_count: [1, 2, 1, 0]`. Pairwise SSIM tightened across the three non-UniVRM adapters (VMK↔three-vrm: 0.883 → 0.896; VMK↔godot: 0.601 → 0.692; three-vrm↔godot: 0.608 → 0.719 — now above threshold). UniVRM stayed at ≈0.43 against all three. The same camera-flip that brought the three closer together also kept UniVRM diverging from them by exactly the same amount.
+
+**Visual diagnosis (post-flip renders at `goldens-cache/humanoid/vroid_default_F_collider_settle/post-flip/`):**
+
+- VMK, three-vrm, godot-vrm: all render the **back** of the avatar's head with camera at -Z = -0.55.
+- UniVRM: renders the **front** of the avatar's face (eyes open, glasses visible, hair framing) with the same camera spec.
+
+This confirms mechanism — the three non-UniVRM adapters apply a 180° avatar pre-rotation on load (contrary to VRM 1.0 spec). UniVRM follows VRM 1.0 spec strictly. The camera-flip exposes the bug; it didn't fix it. Filing upstream is the next step for actually getting the four into consensus.
+
+**Calibration note**: godot's eyes-closed expression-state bug is *hidden* in the post-flip view (back of head, eyelids not visible). The corpus loses that signal with the methodology fix. A complementary +Z plan would re-expose it but break consensus on UniVRM. Trade-off worth flagging in RFC 0005's "open questions."
+
+### VRM 0.x adapter-load smoke (`avatarA_0_0_smoke`)
+
+Authored a minimal smoke plan against the existing `avatarA_0_0.vrm` fixture (VRM 0.x, generated by UniGLTF-2.64.1, declares `VRM` extension + `secondaryAnimation` + `materialProperties` + `meta.licenseName: CC_BY`) and ran it through all four real adapters with the unified -Z camera methodology pin.
+
+| Adapter | Result | Detail |
+|---|---|---|
+| VMK 0.16.0 | ✓ loads, renders | Renders back of head — VMK applies 180° flip to VRM 0.x files too (consistent with its VRM 1.0 behavior) |
+| three-vrm 3.5.0 | ✓ loads, renders | Renders **front** of avatar (face, chest, dress) — three-vrm does NOT flip VRM 0.x files (inconsistent with its VRM 1.0 behavior, where it does flip) |
+| godot-vrm | ✓ loads, renders | Renders **front** — same as three-vrm: no flip on VRM 0.x |
+| UniVRM v0.131.0 | ✗ LoadFailed | `Failed to load as VRM 1.0` — adapter passes `canLoadVrm0X: false` to `Vrm10.LoadPathAsync`. One-line adapter fix unblocks. |
+
+**Renders saved at** `goldens-cache/humanoid/avatarA_0_0_smoke/` for reference.
+
+### Combined orientation-handling matrix (this session's most important finding)
+
+Across the two smokes (one VRM 0.x asset + one VRM 1.0 asset, both with -Z camera per the unified methodology pin), the actual cross-adapter behavior is:
+
+| Adapter | VRM 0.x: avatar faces | VRM 1.0: avatar faces | Spec-correct? |
+|---|---|---|---|
+| VMK | +Z (applies 180° flip) | +Z (applies 180° flip) | Wrong for both (spec: -Z) |
+| three-vrm | -Z (native, no flip) | +Z (applies 180° flip) | VRM 0.x ✓, VRM 1.0 ✗ |
+| godot-vrm | -Z (native, no flip) | +Z (applies 180° flip) | VRM 0.x ✓, VRM 1.0 ✗ |
+| UniVRM | (cannot load) | -Z (no flip) | VRM 1.0 ✓ (cannot test 0.x today) |
+
+**No single adapter is fully spec-correct across both spec versions.** With the unified -Z camera methodology pin, three of four adapters render the front for VRM 0.x (three-vrm + godot + UniVRM if loading worked) — but for VRM 1.0, only UniVRM renders the front, and the other three render the back.
+
+### Revised methodology pin (correction)
+
+The earlier proposal in this finding ("VRM 0.x camera at +Z; VRM 1.0 camera at -Z") was based on incorrect intuition that the two spec versions placed avatars at different end orientations in glTF. **They don't.** Empirically and per spec:
+
+- **VRM 0.x spec** (Unity-coord-centric language): "model faces Unity +Z forward." Unity → glTF export Z-flip lands the avatar facing glTF -Z.
+- **VRM 1.0 spec** (glTF-native language): avatar faces glTF -Z directly.
+
+Both spec versions place the avatar facing -Z in the on-disk glTF coordinates. The "different default placement" hypothesis was about spec text language and reference coordinate system, not end-state orientation.
+
+**Unified methodology pin**: all VRM humanoid plans (0.x and 1.0) use camera at -Z (negative Z position, target origin) — spec-correct for both. The avatarA_0_0_smoke plan ships with this convention.
+
+### Stub RFC for VRM 0.x conformance
+
+The scope of "add VRM 0.x to the suite" is larger than this commit — adapter-side fixes (UniVRM `canLoadVrm0X` config), asset generator emit paths (`VRM` extension namespace, `secondaryAnimation`, `materialProperties`), parametric MToon sweep duplication, orientation methodology pin discussion. Scoped in `rfcs/0006-vrm-0x-conformance.md` (Draft, scope sketch — design TBD). Don't expand the corpus today.
+
+### Follow-ups
+
+- **File four upstream orientation issues** (one per adapter) with the smoke renders + camera spec + observed-vs-expected attached:
+  - VMK: applies non-spec 180° avatar flip to BOTH VRM 0.x and 1.0 files; should not flip per spec (-Z is the spec-correct facing direction).
+  - three-vrm: applies non-spec 180° avatar flip to VRM 1.0 files (does not flip VRM 0.x). Internally inconsistent across spec versions.
+  - godot-vrm: same as three-vrm.
+  - UniVRM: adapter rejects VRM 0.x files because `canLoadVrm0X` is set to false. One-line adapter config fix (`adapters/univrm/UniVRMConformance/`).
+- **File godot-vrm rest-pose-expression issue** independently — visible only from camera angles that show the face. Currently hidden by the post-flip back-of-head view; will re-surface when a face-visible plan exists for VRM 1.0 (will need to wait until UniVRM and the other three agree on facing direction, otherwise plans can't run face-visible).
+- **Methodology decision**: with no adapter fully spec-correct across both versions, the corpus's "humanoid plans use -Z camera" pin produces structurally inconsistent renders today. RFC 0006 enumerates three approaches (a) accept divergence as upstream-filing signal, (b) per-spec-version expected-divergence map at the diff layer, (c) author plans with both -Z and +Z cameras for cross-comparison. Pick one in 0006's design phase.
+- **Author `vroid_default_F_collider_swing.test.yaml`** after upstream orientation fixes land — until then, swing-mode tests run into the same back-of-head visibility issue.
+- **Tier 2 manifest publishing** — RFC 0005 open question; defer.

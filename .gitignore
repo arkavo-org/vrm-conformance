@@ -62,9 +62,12 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 
-# Humanoid fixtures: symlinks to upstream-licensed VRM avatars
-# (VRM Platform License 1.0). Materialized by scripts/install-humanoid-fixtures.sh.
-assets/humanoid/
+# Humanoid fixtures: .vrm symlinks point at machine-specific paths and
+# upstream-licensed binaries (VRM Platform License 1.0). Materialized by
+# scripts/install-humanoid-fixtures.sh. The directory itself is tracked
+# (for .meta.json sidecars carrying suite-side provenance, license, and
+# topology summaries per RFC 0005); only the .vrm symlinks are ignored.
+assets/humanoid/*.vrm
 
 # Python bytecode cache (vrma-pose-consensus.py + future python helpers)
 __pycache__/

@@ -1,20 +1,20 @@
-id: avatarA_bosom_threequarter
-spec_section: VRMC_materials_mtoon + VRMC_springBone (bust chains, settled, 3/4 angle)
-asset: avatarA_1_0.vrm
+id: vroid_default_F_collider_settle
+spec_section: VRMC_springBone (Tier 2 canonical content — hair chains vs in-file collider groups, settled pose)
+asset: vroid_default_F_1_0.vrm
 camera:
   position:
-  - 0.45
-  - 1.25
-  - -0.6
+  - 0.4
+  - 1.4
+  - -0.55
   target:
   - 0.0
-  - 1.25
+  - 1.35
   - 0.0
   up:
   - 0.0
   - 1.0
   - 0.0
-  fov_degrees: 32.0
+  fov_degrees: 30.0
 lighting:
   directional:
     dir:
@@ -44,7 +44,7 @@ output:
   msaa: 4
 diff:
   mode: ssim
-  threshold: 0.80
+  threshold: 0.70
   reference_renderer: three-vrm
   conformance_status:
     kind: included

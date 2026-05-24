@@ -1,0 +1,67 @@
+{
+  "id": "vroid_default_F_1_0",
+  "tier": "canonical_content",
+  "blake3": "blake3:943fb75ad424a7f206744cb6bc809325f9779ab5713918a9263677509eef4109",
+  "byte_size": 20802612,
+  "source": {
+    "tool": "VRoid Studio",
+    "tool_version": "2.12.0",
+    "template": "default_female",
+    "export_format": "VRM 1.0",
+    "gltf_version": "2.0",
+    "export_settings": {
+      "mesh_reduction": false,
+      "atlas_baking": false,
+      "mtoon_to_standard_conversion": false
+    }
+  },
+  "license": {
+    "licenseUrl": "https://vrm.dev/licenses/1.0/",
+    "avatarPermission": "everyone",
+    "commercialUsage": "corporation",
+    "allowRedistribution": true,
+    "allowExcessivelyViolentUsage": false,
+    "allowExcessivelySexualUsage": false,
+    "allowPoliticalOrReligiousUsage": false,
+    "allowAntisocialOrHateUsage": false,
+    "modification": "allowModificationRedistribution",
+    "creditNotation": "unnecessary"
+  },
+  "topology": {
+    "spring_bone_spec_version": "1.0",
+    "extensions_used": [
+      "KHR_texture_transform",
+      "KHR_materials_unlit",
+      "VRMC_vrm",
+      "VRMC_springBone",
+      "VRMC_materials_mtoon"
+    ],
+    "colliders": 28,
+    "collider_groups": 12,
+    "springs": 44,
+    "collider_group_summary": {
+      "spine": 1,
+      "upper_chest": 3,
+      "neck": 1,
+      "head": 1,
+      "l_upper_arm": 3,
+      "l_lower_arm": 4,
+      "l_hand": 1,
+      "r_upper_arm": 3,
+      "r_lower_arm": 4,
+      "r_hand": 1,
+      "l_upper_leg": 3,
+      "r_upper_leg": 3
+    },
+    "spring_classes": {
+      "bust": 2,
+      "skirt": 24,
+      "hair": 7,
+      "tops_upper_arm": 6,
+      "cat_ear": 4,
+      "fox_tail": 1
+    }
+  },
+  "spec_section": "VRMC_vrm + VRMC_springBone + VRMC_materials_mtoon (real content)",
+  "rfc": "rfcs/0005-canonical-content-tier.md"
+}
