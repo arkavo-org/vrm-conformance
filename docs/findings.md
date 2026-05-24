@@ -3248,3 +3248,23 @@ VMK ↔ godot-vrm SSIM on the extcoll render: 0.7334 — they respond similarly 
 - **Posted VMK#237 comment** with per-bucket table, canonical reproducer description, and a working hypothesis for the inside-shape collapse pattern: [VMK#237 comment](https://github.com/arkavo-org/VRMMetalKit/issues/237#issuecomment-4530281409).
 - **Committed reproducer artifacts** for the VMK team to pull a one-shot reproducer: generator script + test plan + this finding.
 - **Follow up on UniVRM mixed-extcoll NullReferenceException** as a separate filing once the suite's UniVRM adapter coord-fix lands. Logged in the findings backlog.
+
+### VMK team review round-trip — sharper diagnosis posted as [comment-4530363752](https://github.com/arkavo-org/VRMMetalKit/issues/237#issuecomment-4530363752)
+
+The VMK team picked up VMK#237 and replied with a deep parser/shader/renderer review identifying three plausible code paths: (1) `worldNormal` non-uniform-scale propagation through plane colliders, (2) group-mask filtering, (3) inside-shape substep-ordering. **Their priority ordering put plane as "the entire problem"**, citing my bucket layout — but that reading inverted the table. Plane is the working case; inside-sphere/capsule is the broken one.
+
+To prevent them sinking time into the wrong code path, ran the SHA-bucket × shape-params cross-correlation and posted the full table back. The corrected reading:
+
+- **Plane**: 5 distinct SHAs across 6 variants. Lone collapse (`plane_anglelimit_60` ≡ `plane_pmed`) is consistent with VMK's default `angleLimit` happening to be 60°, so explicit 60° matches the no-angleLimit default. Physically correct, not a bug.
+- **Inside-sphere / inside-capsule**: 10 variants collapse to a single SHA. Across that bucket, `sphere` ≡ `capsule`, `radius=0.2` ≡ `radius=0.4`, and `angleLimit ∈ {30°, 60°, 90°, none}` all produce identical SHAs. The 2-variant `ptight` bucket exists because `radius=0.1` is small enough to actively constrain the chain (physical, expected).
+
+Two parameters are NOT propagating to the inside-shape collision response:
+
+1. **per-joint `angleLimit`** — plane respects it (30/60/90 produce distinct SHAs); inside-sphere/capsule doesn't (all collapse).
+2. **shape-type discrimination** (sphere vs capsule inside-variant) — collapse to same SHA at every radius tier.
+
+Recommended diagnostic to the VMK team: log `(shape_type, radius, joint.angleLimit)` at the `inside`-branch entry in `SpringBoneCollision.metal:151-173` for one inside-sphere and one inside-capsule variant. If `angleLimit` reads as unset for inside but correct for plane, the GPU buffer build path (`SpringBoneComputeSystem.swift:850-881`) is dropping it on the inside path. If it reads correctly but trajectory is unchanged, the constraint isn't being applied in the shader's inside branch. Plane normal / group-mask hypotheses aren't load-bearing because plane is mostly fine — if those were broken, plane would collapse too.
+
+Their #3 hypothesis (inside-shape substep ordering producing 4cm overrun) is separately real but addresses the *magnitude* of penetration when constraint IS engaged, not the *parameter-propagation* issue above. Likely a distinct ticket.
+
+For **VMK#267**, concurred with their assessment: the sync-path partial fix is acceptable for offline (the conformance suite's use case). The 1.4-1.6% residual penetration is RED at the strict threshold but workable for cross-renderer baselines. The real fix (option 2: skinning reads `bonePosCurr` directly for spring joints) belongs as a distinct issue and unblocks the interactive use case (Muse, etc.) — not the conformance suite directly. If/when option 2 lands, the suite re-bootstraps and validates.
