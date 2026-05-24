@@ -3200,3 +3200,51 @@ Authored a `render_sequence` variant of the bust swing using RFC-0004 multi-fram
 **Caveat acknowledged**: VRoid F default's pigtails (hair tied to the sides) are sub-optimal for surfacing the hair-through-chest path described by Muse. The pigtails *do* cross the chest area during lateral swing motion (visible in frames 0007–0021), but a VRoid character with long forward-draping hair would surface the same symptom more dramatically at rest pose. A future fixture (`vroid_F_longhair_*.vrm`) re-exported from Studio with a long-hair preset would close that coverage gap. Defer until empirically warranted by Muse's tuning iteration.
 
 **For the conformance suite as infrastructure**, this is the first multi-frame Tier 2 canonical-content plan in the corpus. The pattern (render_sequence over a VRoid baseline with `animate_root_transform`) is generalizable — future Tier 2 motion plans should follow this shape rather than the single-frame end-of-animation pattern that loses peak-deflection signal.
+
+## VMK#237 status — still reproducing on VMK 0.16.0; canonical-content reproducer landed
+
+**Date**: 2026-05-24. **Trigger**: VMK team picked up the issue for active investigation. Re-bootstrapped the existing synthetic 18-variant swing sweep through VMK 0.16.0 stable to confirm bug persists post-cohort-release; authored a canonical-content reproducer derivative of the VRoid baseline for sharper diagnosis.
+
+### Synthetic recheck on VMK 0.16.0 — per-bucket SHA breakdown
+
+18 `swing_springbone_extended_*` variants rendered through VMK 0.16.0 → 7 unique SHAs (same clustering as original filing, bug persists):
+
+| SHA bucket | # | Variants |
+|---|---|---|
+| `7106a87c…` | **10** | `icaps_anglelimit_{30,60,90}`, `icaps_{ploose,pmed}`, `isphere_anglelimit_{30,60,90}`, `isphere_{ploose,pmed}` |
+| `1bb888ae…` | 2 | `icaps_ptight`, `isphere_ptight` |
+| `c0c9a475…` | 2 | `plane_anglelimit_60`, `plane_pmed` |
+| `83cce4f7…` | 1 | `plane_anglelimit_30` |
+| `fa6ed352…` | 1 | `plane_anglelimit_90` |
+| `5f00ac35…` | 1 | `plane_ploose` |
+| `b04db911…` | 1 | `plane_ptight` |
+
+**Tighter fingerprint than the original 7-bucket framing**: the inside-shape variants (sphere + capsule, `inside: true`) all collapse to one of two SHAs. Plane variants get mostly-distinct treatment (5 unique SHAs across 6). Working hypothesis posted to VMK#237 in the comment:
+
+- VMK's inside-shape handler reads the *radius* (the `ptight` placement uses a smaller radius / different offset, producing a distinct SHA) but ignores shape *type* (sphere vs capsule), *angle limit*, and other parameter variations.
+- VMK's plane handler distinguishes placement variants but `anglelimit_60 ≡ pmed` collapse suggests angle-limit reads in plane but doesn't propagate cleanly to inside-shapes.
+
+### Canonical-content reproducer
+
+`vroid_default_F_extcoll_headbubble.vrm`: derivative of the canonical VRoid baseline with one extended-collider added at the head node. Spec-compliant form (no base `shape`, only `extensions.VRMC_springBone_extended_collider.shape.sphere` with `inside: true`, `radius: 0.1`). Tight head-bubble containment that *must* visibly constrain hair joints if the extension is applied.
+
+Generator script `scripts/build-vroid-extcoll-reproducers.py` produces the derivative deterministically from the canonical source (BLAKE3 `f71fad0f5ecc7edc411b572a6bd5cf3a7e59413c1c7ea57dea401938bfe8fff1`). Test plan `test-plans/manual/humanoid/vroid_extcoll_headbubble.test.yaml`.
+
+| Adapter | Result | Diagnostic value |
+|---|---|---|
+| VMK 0.16.0 | renders distinctly from baseline | extension is being read; SHA differs |
+| three-vrm 3.5.0 | `LoadFailed` | known separate issue — three-vrm rejects extended-only colliders |
+| godot-vrm | renders distinctly from baseline | responds to extension when given spec-compliant form |
+| UniVRM v0.131.0 | `LoadFailed: NullReferenceException` | **new finding** — UniVRM crashes on mixed-extension file (most colliders base-only, one with extended). Filing separately. |
+
+VMK ↔ godot-vrm SSIM on the extcoll render: 0.7334 — they respond similarly to the extension. Confirms the bug isn't synthetic-asset-specific.
+
+### Side findings discovered during this investigation
+
+- **UniVRM v0.131.0 `NullReferenceException`** on VRM 1.0 files with mixed extended-collider declarations (one entry uses `VRMC_springBone_extended_collider`, others use base spec only). The synthetic `_assets_extended/` corpus uses extended-only on all colliders and doesn't trip this bug. The canonical derivative adds *one* extended collider to a file with 28 base-only colliders, which UniVRM's loader doesn't handle. Worth filing against [vrm-c/UniVRM](https://github.com/vrm-c/UniVRM) once the UniVRM adapter coord-handling fix is in (so the cross-pair comparison is clean). **Not blocking VMK#237**; logged for follow-up.
+
+### Action items
+
+- **Posted VMK#237 comment** with per-bucket table, canonical reproducer description, and a working hypothesis for the inside-shape collapse pattern: [VMK#237 comment](https://github.com/arkavo-org/VRMMetalKit/issues/237#issuecomment-4530281409).
+- **Committed reproducer artifacts** for the VMK team to pull a one-shot reproducer: generator script + test plan + this finding.
+- **Follow up on UniVRM mixed-extcoll NullReferenceException** as a separate filing once the suite's UniVRM adapter coord-fix lands. Logged in the findings backlog.
