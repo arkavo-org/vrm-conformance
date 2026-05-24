@@ -42,22 +42,30 @@ The existing `TestPlan` schema in `crates/vrm-test-plan/` is spec-version-agnost
 
 Universal load support is one adapter line away. **However**, "loads cleanly" is not the same as "renders correctly per VRM 0.x spec." See orientation divergence below.
 
-### Orientation handling (the hard part)
+### Orientation handling
 
-Empirically observed 2026-05-24 from smoke through `avatarA_0_0.vrm` and `vroid_default_F_1_0.vrm`:
+Per spec (primary sources verified `docs/upstream-specs/vrm-specification/`):
 
-| Adapter | VRM 0.x: avatar faces | VRM 1.0: avatar faces | Spec-correct? |
+- VRM 0.x (`specification/0.0/README.md:238`): "Model faces towards -Z direction" in OpenGL/glTF coords.
+- VRM 1.0 (`specification/VRMC_vrm-1.0/tpose.md` Definition 1.1): "must be oriented along the +Z axis ... The toes must be directed along the +Z axis."
+
+**The two spec versions define opposite default avatar orientations in glTF.** Per-spec methodology pin:
+
+- VRM 0.x plans: camera at -Z (target origin) — sees front of -Z-facing avatar.
+- VRM 1.0 plans: camera at +Z (target origin) — sees front of +Z-facing avatar.
+
+Empirically observed 2026-05-24 (smoke + per-adapter inspection, see `docs/findings.md` "Correction: avatar-facing-direction spec reading was inverted" subsection):
+
+| Adapter | VRM 0.x behavior | VRM 1.0 behavior | Spec-correct? |
 |---|---|---|---|
-| VMK | +Z (applies 180° flip) | +Z (applies 180° flip) | Neither matches spec (-Z) |
-| three-vrm | -Z (native, no flip) | +Z (applies 180° flip) | VRM 0.x ✓, VRM 1.0 ✗ |
-| godot-vrm | -Z (native, no flip) | +Z (applies 180° flip) | VRM 0.x ✓, VRM 1.0 ✗ |
-| UniVRM | (cannot load) | -Z (no flip) | VRM 1.0 ✓ |
+| VMK | applies 180° flip (avatar faces +Z internally; non-spec) | preserves +Z facing | VRM 0.x ✗, VRM 1.0 ✓ |
+| three-vrm | preserves -Z facing | preserves +Z facing | Both ✓ |
+| godot-vrm | preserves -Z facing | preserves +Z facing | Both ✓ |
+| UniVRM | (cannot load — `canLoadVrm0X: false`) | spec-correct in UniVRM library; our adapter has a coord-handling bug (Unity Z-flips avatar on glTF import, adapter doesn't Z-flip camera to match) | adapter-side, not library |
 
-No single adapter is fully spec-correct across both spec versions. This means the corpus's "humanoid plans use -Z camera" methodology pin (also added today) produces:
-- VRM 0.x plans: only three-vrm + godot show the front; VMK shows the back; UniVRM can't render.
-- VRM 1.0 plans: only UniVRM shows the front; the other three show the back.
+three-vrm and godot-vrm are fully spec-correct on orientation across both versions. VMK has a VRM-0.x-specific 180° flip bug. UniVRM divergence is in our adapter, not the underlying library.
 
-The conformance signal is clear (per-adapter, per-spec-version bug), but the consensus matrix is hard to interpret. Open question for the design phase: do we (a) accept the cross-spec inconsistency and let the corpus surface it as renderer bugs to file upstream, (b) document an "expected-divergence" map per spec version that filters out the known orientation bugs at the diff layer, or (c) author plans with both -Z and +Z cameras and let plan authors document which side they expect each renderer to see?
+This is a cleaner conformance signal than I described in my previous draft (which had inverted the VRM 1.0 facing direction). Remaining open question for design: how does the corpus's consensus diff handle the UniVRM adapter coord-mismatch — fix the adapter first, or document the divergence as a known methodology hazard until the fix lands?
 
 ### Manifest schema
 
@@ -65,7 +73,9 @@ Add an optional `spec_version: "0.x" | "1.0"` field to manifest entries. Backwar
 
 ### Methodology pins
 
-- Camera convention: -Z (target origin) for both VRM 0.x and VRM 1.0. Avatar faces -Z in glTF per both specs (VRM 0.x via Unity-coord-spec + export Z-flip; VRM 1.0 directly).
+- Camera convention is **per-spec-version, not unified** (correcting an earlier draft of this section):
+  - VRM 0.x plans: camera at **-Z** (target origin) — avatar faces -Z per `specification/0.0/README.md:238`.
+  - VRM 1.0 plans: camera at **+Z** (target origin) — avatar faces +Z per `specification/VRMC_vrm-1.0/tpose.md` Definition 1.1.
 - Spring-bone: VRM 0.x uses `secondaryAnimation` (no `centerNode`, different drag/stiffness semantics, no `colliderGroups[].name`); VRM 1.0 uses `VRMC_springBone`. Methodology hazard: 0.x and 1.0 spring-bone math is not bit-equivalent; consensus across spec versions on the same intended scene is out of scope.
 - MToon: 0.x uses `materialProperties` (Unity-style key-value), 1.0 uses `VRMC_materials_mtoon` (structured). Parameter naming + ranges differ enough that the 1.0 MToon sweep enumeration is NOT directly re-usable for 0.x. Need a separate sweep for 0.x materials.
 

@@ -2979,3 +2979,65 @@ The scope of "add VRM 0.x to the suite" is larger than this commit — adapter-s
 - **Methodology decision**: with no adapter fully spec-correct across both versions, the corpus's "humanoid plans use -Z camera" pin produces structurally inconsistent renders today. RFC 0006 enumerates three approaches (a) accept divergence as upstream-filing signal, (b) per-spec-version expected-divergence map at the diff layer, (c) author plans with both -Z and +Z cameras for cross-comparison. Pick one in 0006's design phase.
 - **Author `vroid_default_F_collider_swing.test.yaml`** after upstream orientation fixes land — until then, swing-mode tests run into the same back-of-head visibility issue.
 - **Tier 2 manifest publishing** — RFC 0005 open question; defer.
+
+### Correction: avatar-facing-direction spec reading was inverted
+
+**Date**: 2026-05-24 (same session as the original finding; committed earlier today as `5a8928f`).
+
+**What changed**: Re-read both spec versions directly to ground the upstream-issue language. The conclusions in this finding's earlier subsections (and in RFCs 0005 + 0006) were **based on an inverted reading of the VRM 1.0 spec**. Correcting transparently rather than amending the commit, because (a) findings-as-deliverable history is more valuable than a clean amendment, and (b) the correction itself is a useful methodology data point: spec-direction mistakes are easy to make and the suite has to catch them by reading primary sources.
+
+**Spec text, both versions, primary sources:**
+
+- VRM 0.x: `specification/0.0/README.md` line 238 — *"Model faces towards -Z direction"* (in OpenGL/glTF coords; the document is explicit about OpenGL coord system in its footnote).
+- VRM 1.0: `specification/VRMC_vrm-1.0/tpose.md` Definition 1.1 — *"The legs, torso, head, and eyes of a VRM model must be oriented along the +Z axis, symmetrical on the X axis, and standing straight."* Definition 1.2 confirms: *"The toes must be directed along the +Z axis."*
+
+**The two spec versions place the avatar at OPPOSITE default orientations in glTF coordinates:**
+
+| Spec | Avatar faces (glTF coords) | Spec-correct camera position to view front |
+|---|---|---|
+| VRM 0.x | -Z | -Z (camera at -Z = beyond the avatar's nose, looking toward origin = +Z direction = sees front) |
+| VRM 1.0 | +Z | +Z (camera at +Z = beyond the avatar's nose, looking toward origin = -Z direction = sees front) |
+
+This is the user's hypothesis from the start ("VRM 0.0 and VRM 1.0 I think have the default placement and coordinates different"), confirmed by both spec texts directly.
+
+**Re-interpretation of the empirical data (corrected):**
+
+Pre-flip VRM 1.0 plans (camera at +Z, *spec-correct for VRM 1.0*):
+- VMK / three-vrm / godot-vrm: all rendered the front of the avatar's face — **all three are spec-correct on VRM 1.0**.
+- UniVRM: rendered the back — **adapter coord-handling bug** (Unity Z-flips the avatar on glTF import, but the adapter does not Z-flip the plan's camera position to match; the camera ends up on the wrong side relative to the avatar in Unity's coordinate space).
+
+VRM 0.x smoke (camera at -Z, *spec-correct for VRM 0.x*):
+- three-vrm / godot-vrm: rendered the front — **spec-correct** (no flip; preserve the file's native -Z facing).
+- VMK: rendered the back — **non-spec** (VMK applies a 180° rotation on VRM 0.x load, making the avatar face +Z internally, contradicting the VRM 0.x spec's -Z facing).
+- UniVRM: cannot load (`canLoadVrm0X: false`).
+
+**Corrected cross-adapter matrix:**
+
+| Adapter | VRM 0.x | VRM 1.0 |
+|---|---|---|
+| VMK | ✗ applies 180° flip (non-spec for 0.x; should preserve -Z facing) | ✓ preserves +Z facing (spec-correct) |
+| three-vrm | ✓ preserves -Z facing (spec-correct) | ✓ preserves +Z facing (spec-correct) |
+| godot-vrm | ✓ preserves -Z facing (spec-correct) | ✓ preserves +Z facing (spec-correct) |
+| UniVRM | (cannot load) | ✗ adapter coord-mismatch (Unity Z-flip on avatar but not camera) |
+
+three-vrm and godot-vrm are fully spec-correct across both spec versions — the one renderer pair that needs no upstream fix on orientation. VMK has a VRM-0.x-specific bug. The UniVRM divergence is in our adapter (not in the UniVRM library itself), and is solvable adapter-side by Z-flipping the camera position when bridging glTF coords → Unity coords.
+
+**Methodology pin (corrected, per-spec-version):**
+
+- VRM 0.x humanoid plans: camera at **-Z** (target origin) — sees the front of an avatar that natively faces -Z.
+- VRM 1.0 humanoid plans: camera at **+Z** (target origin) — sees the front of an avatar that natively faces +Z.
+
+The "unified -Z pin" proposed earlier was wrong. The "VRM 0.x +Z, VRM 1.0 -Z" pin proposed before that was also wrong. The correct per-spec pin has each version's camera matching its avatar's natively-facing direction.
+
+**Plan-file changes following the correction (in this commit's diff):**
+
+- Reverted camera Z back to +0.55 / +0.6 on the five VRM 1.0 humanoid plans (`avatarA_bosom*`, `avatarA_face`, `vroid_default_F_collider_settle`). These now match the spec-correct VRM 1.0 convention.
+- `avatarA_0_0_smoke.test.yaml` stays at -Z (spec-correct for VRM 0.x). No change.
+
+**Upstream filings, corrected scope:**
+
+- **VMK**: file VRM 0.x avatar-orientation issue — adapter applies non-spec 180° rotation; VRM 0.x spec (`specification/0.0/README.md:238`) requires -Z facing in OpenGL/glTF coords. Three-vrm and godot-vrm preserve the spec orientation; VMK does not. Filing now.
+- **UniVRM adapter** (`adapters/univrm/UniVRMConformance/`): adapter-side fix — Z-flip the plan's camera position when bridging glTF → Unity coords, so the camera ends up on the correct side of the Z-flipped avatar. Internal to our suite; not an upstream filing.
+- **godot-vrm rest-pose-expression eyes-closed**: still pending; independent of orientation; visible now that camera at +Z (spec-correct) shows the face.
+
+**Methodology data point**: I committed the inverted reading because the empirical evidence (UniVRM-as-spec-reference vs. three-cohort-disagrees) read more naturally as "UniVRM correct, others wrong" without verifying the spec text. The spec quote went into RFC 0006 fabricated rather than copied verbatim. The lesson recorded for the suite: **always quote spec text verbatim with file:line attribution; never paraphrase from memory or extrapolate from empirical disagreement without grounding in the canonical document**. Adding this discipline to the suite's contribution guidelines.
