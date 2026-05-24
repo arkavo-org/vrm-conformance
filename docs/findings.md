@@ -3268,3 +3268,50 @@ Recommended diagnostic to the VMK team: log `(shape_type, radius, joint.angleLim
 Their #3 hypothesis (inside-shape substep ordering producing 4cm overrun) is separately real but addresses the *magnitude* of penetration when constraint IS engaged, not the *parameter-propagation* issue above. Likely a distinct ticket.
 
 For **VMK#267**, concurred with their assessment: the sync-path partial fix is acceptable for offline (the conformance suite's use case). The 1.4-1.6% residual penetration is RED at the strict threshold but workable for cross-renderer baselines. The real fix (option 2: skinning reads `bonePosCurr` directly for spring joints) belongs as a distinct issue and unblocks the interactive use case (Muse, etc.) — not the conformance suite directly. If/when option 2 lands, the suite re-bootstraps and validates.
+
+### Diagnostic results — angleLimit propagates correctly; collapse is physical, not a parser bug
+
+**Date**: 2026-05-24 (same session). **Trigger**: VMK team landed instrumentation in their working tree — `setInsideColliderDiagnosticsEnabled(true)` + `dumpInsideColliderDiagnostics()` — and asked the suite to run against the fixtures. Wired it into the adapter via a temporary local-path swap (Package.swift `.package(path: ...)`) + env-gated diagnostic hook (`VMK_INSIDE_DIAGNOSTICS=1`); both reverted after the run since the API isn't in the SPM-pinned 0.16.0 yet.
+
+**Output for the relevant variants:**
+
+```
+isphere_pmed       boundary=0.2  bone=3 penetration=0.0000  angleLimit=0.0°
+isphere_ploose     boundary=0.4  bone=3 penetration=0.0000  angleLimit=0.0°
+isphere_anglelimit_30   boundary=0.2  bone=3 penetration=0.0000  angleLimit=30.0° (0.524 rad) ✓
+isphere_anglelimit_60   boundary=0.2  bone=3 penetration=0.0000  angleLimit=60.0° (1.047 rad) ✓
+isphere_anglelimit_90   boundary=0.2  bone=3 penetration=0.0000  angleLimit=90.0° (1.571 rad) ✓
+isphere_ptight     boundary=0.1  bone=3 penetration=0.0200  angleLimit=0.0°            ← only fixture engaging the constraint
+icaps_anglelimit_60     boundary=0.2  bone=3 penetration=0.0000  angleLimit=60.0° (1.047 rad) ✓ shape=inside-capsule
+plane_anglelimit_60     "inside-collider diagnostics: no bone hit an inside-* branch this run"  ← correct, plane uses different pipeline
+```
+
+**My earlier hypothesis was wrong.** `angleLimit` propagates per-variant correctly (30/60/90° read as the right radian values; 0.0 for no-angleLimit fixtures). `shape` is correctly distinguished (`inside-sphere` vs `inside-capsule`). `groupMatched=1` everywhere. `boundary` reads the correct radius per variant.
+
+**The SHA collapse is physical, not a parser/buffer-build bug.** Chain bone positions are at `distance = {0.0014, 0.0500, 0.0999}` from the collider node. For boundary `0.2` and `0.4`, the chain fits inside — bone 3 (the deepest) has `distance < boundary` so no penetration. Containment never engages, the trajectory is whatever the (unconstrained) gravity + drag + spring produces, and identical params modulo `angleLimit` (which is post-engagement-applied) produce identical SHAs.
+
+Only `isphere_ptight` (boundary=0.1) has `bone=3 distance=0.1000 → penetration=0.0200` — the constraint actively engages. `icaps_ptight` likewise. Both ptight variants collapse to a single SHA because sphere-inside and capsule-inside use shared code at the end-cap (correct per spec — capsule end-cap IS a sphere).
+
+**The real bug surfaced**: `isphere_ptight bone=3` reports `penetration=0.02m` at the diagnostic capture point, even though the inside-shape collision pass is supposed to resolve it. This confirms the VMK team's hypothesis #3 (substep ordering): the inside-shape collision push runs, but the distance-constraint or FK reconstruction partially unwinds it within the same substep. **Substep ordering is the actually-real fix direction** — their `testInsideSphereColliderKeepsJointsInsideAfterSwing` failing by 4cm matches this exactly. Iterating collision-after-distance, or applying the inside clamp inside the distance kernel itself, would close it.
+
+**The plane `anglelimit_60 ≡ pmed` collapse** is consistent with VMK's default `angleLimit` being `60°` (or 1.047 rad, whichever is the internal default). Physically correct, not a bug. Likely worth a code comment in VMK's angleLimit default-value path.
+
+### Test fixture coverage gap (suite-side TODO)
+
+The synthetic extended-collider sweep authoring chose boundary radii `{0.1, 0.2, 0.4}` against a chain whose deepest bone is at distance `0.1` from the collider node. So only `radius=0.1` (`ptight`) actually engages the inside-constraint; `0.2` and `0.4` are no-ops. **This is a test-design coverage gap, not a VMK bug** — the sweep was framed to expect SHA divergence per axis without verifying that each variant actually exercises its swept parameter.
+
+**Suite-side action**: emit additional inside-collider fixtures with boundary radii smaller than chain extent (e.g., `0.04, 0.06, 0.08` so all bones penetrate). Re-bootstrap to confirm VMK distinguishes them.
+
+### Posted to VMK#237 as [comment-4530444585](https://github.com/arkavo-org/VRMMetalKit/issues/237#issuecomment-4530444585)
+
+Forwarded the diagnostic output + corrected analysis upstream. Apologized for the previous misdirection.
+
+### Methodology lesson
+
+This session produced *three* successive corrections in the diagnosis path:
+
+1. Camera-Z direction misread (committed wrong, corrected in `7d81075`).
+2. "Bust-clipping = bust-mesh-into-torso" misread of the Muse symptom (corrected in `54933fd`).
+3. "Inside-shape angleLimit not propagating" diagnosis based on bucket-table pattern matching, without instrumenting to verify (corrected by the diagnostic run above).
+
+Each was a case of inferring a code-level bug from behavioral evidence without verifying through instrumentation or primary source. The shared pattern: **behavioral evidence ranks lower than instrumented data**. When a downstream team has the instrumentation, the suite should ask them to run it before posting hypotheses. Adding this to the suite's contributing guidance.
