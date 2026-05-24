@@ -3170,3 +3170,33 @@ The VRMC_vrm.humanoid bone names are normative (spec-defined enum), so this work
 - **Muse team**: proceed with option 2. Use the bone-name → collider-index algorithm above. Bump sphere 1 (UpperChest center) more aggressively than 2/3 due to position geometry. Tune `multiplier` empirically against the products that are blocking on this.
 - **vrm-conformance suite**: author a follow-up plan that actually surfaces hair-through-chest-gap visually — candidate: VRoid template export with longer hair, OR a forced-pose plan that pushes default pigtails forward, OR a `render_sequence` swing. Not blocking Muse's fix; useful for the cross-renderer regression baseline once they ship the fix.
 - **Possible future VMK filing**: `setColliderOffset(at:offset:)` if radius-only tuning is empirically insufficient. Don't file speculatively — wait for Muse's tuning data.
+
+### `vroid_default_F_bust_seq` — RFC-0004 trajectory plan landed for downstream regression baselines
+
+Authored a `render_sequence` variant of the bust swing using RFC-0004 multi-frame capture: 30 frames at 60 Hz, `animate_root_transform` lateral translation `[0.15, 0, 0]`, frontal chest framing. Bootstrapped through all four real adapters. 30 PNG frames per adapter, all sequences complete (`overall_passed: true` on each).
+
+**Per-frame pairwise SSIM** (computed via `vrm-runner diff` per frame):
+
+| Frame | VMK ↔ three-vrm | VMK ↔ godot | three-vrm ↔ godot | Comment |
+|---|---|---|---|---|
+| 0000 | 0.8433 | 0.4714 | 0.4807 | settle pose |
+| 0001 | **0.6656** | 0.4285 | 0.4320 | motion-start transition dip |
+| 0007 | 0.8139 | 0.3461 | 0.3403 | mid-motion |
+| 0014 | 0.8493 | 0.3386 | 0.3356 | peak displacement (~50% of trajectory) |
+| 0021 | 0.8675 | 0.3946 | 0.3908 | motion winding down |
+| 0029 | 0.8815 | 0.4216 | 0.4181 | end of trajectory |
+
+**Pattern:**
+
+- **VMK ↔ three-vrm** (the spec-correct cohort): cluster tightly at 0.83–0.88 across the trajectory. One transient dip to 0.67 on frame 0001 (settle-to-motion transition; one renderer applies motion faster than the other). Otherwise consistently above the 0.70 plan threshold.
+- **All pairs involving godot**: 0.32–0.48 throughout. Godot's eyes-closed default-expression bug dominates the face region regardless of physics state; the divergence is rendering convention, not spring-bone behavior. Filed separately.
+- **UniVRM**: not in this table (still has adapter coord-handling bug rendering the back of the head; same coordinate-flip issue documented in the "spec reading was inverted" correction).
+
+**For downstream regression baselines** (the Muse use case):
+- The 30 VMK frames serve as a baseline of "what VMK renders today on the unfixed VRoid file." Sample frames at `goldens-cache/humanoid/vroid_default_F_bust_seq/` (frames 0000, 0007, 0014, 0021, 0029 saved as visual reference).
+- Muse can hot-swap their app with `setColliderRadius` bumps applied at load time, re-render the same plan, and visually compare against this baseline. The expected fix-signature: chest area hair coverage tighter (less gap, less hair-through-bust), bust silhouette unchanged.
+- Frame 0014 (mid-motion peak) is the most diagnostic single frame for the chest-collider-gap symptom — pigtails in transit across the chest region during the lateral swing.
+
+**Caveat acknowledged**: VRoid F default's pigtails (hair tied to the sides) are sub-optimal for surfacing the hair-through-chest path described by Muse. The pigtails *do* cross the chest area during lateral swing motion (visible in frames 0007–0021), but a VRoid character with long forward-draping hair would surface the same symptom more dramatically at rest pose. A future fixture (`vroid_F_longhair_*.vrm`) re-exported from Studio with a long-hair preset would close that coverage gap. Defer until empirically warranted by Muse's tuning iteration.
+
+**For the conformance suite as infrastructure**, this is the first multi-frame Tier 2 canonical-content plan in the corpus. The pattern (render_sequence over a VRoid baseline with `animate_root_transform`) is generalizable — future Tier 2 motion plans should follow this shape rather than the single-frame end-of-animation pattern that loses peak-deflection signal.
