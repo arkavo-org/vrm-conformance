@@ -3119,3 +3119,54 @@ The single-frame settle render does NOT dramatically surface bust-vs-bodice clip
   - VRoid Studio: consider making Bust spring `colliderGroups` default to `[UpperChest]` in the default character template. Would silently fix the issue for every new export without breaking existing content.
   - VMK: feature request for a `setSpringColliderGroups` API that mutates `springs[].colliderGroups[]` at runtime. Would let host apps like Muse override the file-declared configuration on a per-character basis without re-exporting. Not filed yet — should wait until at least one product genuinely needs it (and would be willing to land the upstream PR if VMK accepts it).
 - **Suite-side follow-up**: author a `vroid_default_F_bust_seq.test.yaml` using RFC-0004 `render_sequence` to capture the swing trajectory across 30 frames. The worst-clipping frame will be visible there.
+
+### Correction (same session): "bust-clipping" means hair-through-bust-via-chest-sphere-gap, not bust-mesh-into-torso
+
+**Date**: 2026-05-24 (same session, after Muse team round-trip).
+
+The Muse team confirmed their loaded VRoid diagnostic and clarified the symptom. The conformance suite committed `d03a3b3` with my analysis framing "bust-clipping" as *bust mesh penetrating torso* — a problem class that exists in principle (Bust springs have empty `colliderGroups`) but is **not what Muse is observing**.
+
+**Actual symptom**: hair strands clip through the bust region of the avatar — visible at static settle and in motion. The 28 sphere colliders that approximate the humanoid don't form a continuous shell across the upper torso; the bust geometry curves forward into a gap between the chest spheres, and Hair springs (which DO reference the UpperChest collider group) can pass strands through that gap into / past the bust.
+
+**This rehabilitates Muse's option 2.** `setColliderRadius` on the chest spheres *is* the right fix for this symptom — Hair springs reference UpperChest, so bumping those radii closes the gap that allows hair to clip through. My earlier rejection of option 2 was based on conflating two bug classes (Bust spring deflection vs. Hair spring clipping). Apologies forwarded to the Muse team.
+
+**Concrete bump targets** (from inspection of `vroid_default_F_1_0.vrm`):
+
+```
+collider[0]  node=J_Bip_C_Spine        offset=[0, 0, 0]               r=0.1041
+collider[1]  node=J_Bip_C_UpperChest   offset=[0, 0, +0.0087]         r=0.0868   ← bust-area front; load-bearing bump
+collider[2]  node=J_Bip_C_UpperChest   offset=[+0.043, +0.056, -0.009] r=0.0607  ← L upper-chest (positioned slightly back + high)
+collider[3]  node=J_Bip_C_UpperChest   offset=[-0.043, +0.056, -0.009] r=0.0607  ← R upper-chest (mirror)
+```
+
+For Hair → UpperChest collision: indices **1, 2, 3** are the bump targets. **Geometric nuance**: spheres 2 and 3 are positioned slightly behind UpperChest origin (`z = -0.009`) and higher (`y = +0.056`, near shoulder level). Sphere 1 is the one whose forward projection actually touches the bust volume. A uniform multiplier on all three may push 2/3 backward into the torso interior; **sphere 1 deserves a larger bump** (1.5×–2.0×) than 2/3.
+
+**Bone-name → collider-index lookup** (deterministic per VRM 1.0 humanoid spec, no new VMK API needed):
+
+```swift
+let upperChestNode = vrm.extensions.VRMC_vrm.humanoid.humanBones["upperChest"]?.node
+let chestNode      = vrm.extensions.VRMC_vrm.humanoid.humanBones["chest"]?.node
+let spineNode      = vrm.extensions.VRMC_vrm.humanoid.humanBones["spine"]?.node
+let bumpable       = Set([upperChestNode, chestNode, spineNode].compactMap { $0 })
+
+for (idx, collider) in vrm.extensions.VRMC_springBone.colliders.enumerated() {
+    if bumpable.contains(collider.node) {
+        let baseRadius = collider.shape.sphere.radius
+        renderer.setColliderRadius(at: idx, radius: baseRadius * multiplier)
+    }
+}
+```
+
+The VRMC_vrm.humanoid bone names are normative (spec-defined enum), so this works on any spec-conformant avatar — not just VRoid Studio output. Cross-character compatible.
+
+**Backup if radius bumping alone is insufficient**: spheres at backward Z offsets may not close the bust-front gap even at maximum radius. A logical follow-on VMK API would be `setColliderOffset(at:offset:)` — bump radius AND shift sphere position forward into the bust geometry. Small upstream change; worth filing if empirical tuning shows radius alone doesn't close the gap.
+
+**My earlier committed plans (`vroid_default_F_bust_settle/swing`) don't exercise this symptom.** VRoid F default has pigtails (hair tied to the sides), not chest-draping hair. Hair joints stay near the head/shoulder line and don't engage the chest-collider region. To surface the actual Muse-observed symptom, a follow-up plan is needed — either with a VRoid template that has chest-draping hair, or a forced-pose plan that throws default hair across the chest, or a `render_sequence` swing where hair sweeps through the chest during motion. Filed as a follow-up.
+
+**Bust spring `colliderGroups: []` finding is still factually correct** but is about a hypothetical class (bust mesh deflection into torso) that isn't manifesting in the wild — bust mesh is light and follows the bust bones cleanly without large deflection at typical motion levels. Demoted from "the diagnosis" to "a related observation worth recording."
+
+### Action items, corrected
+
+- **Muse team**: proceed with option 2. Use the bone-name → collider-index algorithm above. Bump sphere 1 (UpperChest center) more aggressively than 2/3 due to position geometry. Tune `multiplier` empirically against the products that are blocking on this.
+- **vrm-conformance suite**: author a follow-up plan that actually surfaces hair-through-chest-gap visually — candidate: VRoid template export with longer hair, OR a forced-pose plan that pushes default pigtails forward, OR a `render_sequence` swing. Not blocking Muse's fix; useful for the cross-renderer regression baseline once they ship the fix.
+- **Possible future VMK filing**: `setColliderOffset(at:offset:)` if radius-only tuning is empirically insufficient. Don't file speculatively — wait for Muse's tuning data.
