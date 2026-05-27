@@ -158,3 +158,95 @@ Adopted by [RFC-0004](../rfcs/0004-render-sequence-op.md). These pins apply to a
 **Worst-frame reporting.** Every sequence diff result MUST surface `worst_frame_index` so site reviewers can land on the divergent frame directly. A single bad frame in a 60-frame sequence is fine if mean SSIM holds; the threshold relaxation handles this.
 
 **Output format.** PNG sequence is the canonical contract format. MP4/MOV are convenience formats for site display and reviewer ergonomics — the diff engine consumes the per-frame PNGs regardless. Adapters that emit only PNG sequences are spec-compliant; the bootstrap script can mux post-hoc via `ffmpeg`.
+
+## VRM 0.x conformance
+
+The corpus exercises VRM 0.x assets in parallel with VRM 1.0. Spec-version metadata threads through the manifest, test plan, and runner (`spec_version: "0.x" | "1.0"`); the runner enforces the version-specific methodology pins below.
+
+### Camera convention (per-spec-version)
+
+The two spec versions specify **opposite** default avatar orientations in glTF coordinates:
+
+- **VRM 0.x:** avatar faces -Z per `specification/0.0/README.md:238` ("Model faces towards -Z direction"). Test plans place the camera at -Z (target = origin) to see the front of a spec-conformant render.
+- **VRM 1.0:** avatar faces +Z per `specification/VRMC_vrm-1.0/tpose.md` Definition 1.1. Test plans place the camera at +Z.
+
+The runner enforces this — a test plan declaring `spec_version: "0.x"` with a camera at positive Z is rejected with a clear error (see `validate_camera_convention` in `crates/vrm-runner/src/execute.rs`).
+
+### Coordinate-frame normalization at adapter load time
+
+Empirical finding from slice 1 (recorded in `docs/findings.md` 2026-05-26): two of the four real adapters perform **load-time coordinate normalization** of VRM 0.x assets into VRM 1.0 / glTF coordinate space:
+
+- **VRMMetalKit (VMK):** `VRMModel.buildNodeHierarchy()` conjugates 0.x TRS into VRM 1.0 / glTF right-handed space when `isVRM0`, with a companion `applyVRM0InverseBindMatrixConjugation()` for skin inverse-bind-matrix consistency. Intentional and load-bearing.
+- **UniVRM:** `Vrm10.LoadPathAsync(path, canLoadVrm0X: true, …)` enables an in-library 0.x → 1.0 migration path. Similar normalization shape.
+- **three-vrm + godot-vrm:** preserve the source spec's coordinate frame; no load-time normalization.
+
+This is **not a conformance defect.** The suite's camera placement uses VRM 0.x's spec-correct -Z convention. Adapters that normalize internally still render correctly through this camera because "forward" is preserved across the normalization. Adapters that don't normalize render correctly directly. All four adapters should converge on the same visual output for a 0.x asset with a -Z-placed camera.
+
+The conformance signal that this design surfaces is **whether all four adapters agree** on the rendered output, not whether any specific adapter applies or skips a rotation.
+
+### `source_spec_version` reporting contract
+
+Every adapter dump response (`dump_humanoid_pose`, `dump_expression_weights`, `dump_look_at_state`) carries a required `source_spec_version: "0.x" | "1.0"` field, echoing what the adapter parsed from the loaded asset's `extensionsUsed` array. Adapters that normalize internally (VMK, UniVRM) still report the **original** spec version, not the post-normalization shape — the field documents what the asset **was**, not what the renderer is rendering it **as**.
+
+The runner cross-checks the adapter-reported `source_spec_version` against the test plan's declared `spec_version`. Mismatch aborts the run with a clear error — the third hard-error gate in the three-way `spec_version` cross-check:
+
+1. Test plan ↔ manifest (Task 5: `validate-manifest` cross-checks test_id naming against `spec_version` field).
+2. Test plan camera ↔ `spec_version` (Task 25: `validate_camera_convention`).
+3. Test plan ↔ adapter-reported `source_spec_version` (Task 26: `cross_check_source_spec_version`).
+
+### Normalization is one-directional and lossy
+
+The runner can normalize 0.x dumps to a 1.0-equivalent shape via the `vrm-normalize` crate (called by the runner via `apply_normalization_if_requested`; adapters do not implement normalization themselves — single bug surface per the design).
+
+Normalization is requested via the optional `as_spec_version` request param on dump ops:
+
+- **Absent (default)**: adapter returns the dump in its **native** spec-version shape — never normalize unless asked.
+- **`"1.0"` against a 0.x asset**: runner normalizes via `vrm-normalize` (joy → happy preset mapping, weight 0–100 → 0–1, etc.).
+- **`"0.x"` against a 1.0 asset**: rejected with error `-32001 NormalizationDirectionUnsupported`. v1 → v0 has no lossless mapping for some v1-only presets (`surprised`, etc.).
+- Custom blendshapes without a v1 preset equivalent pass through with `custom:<name>` markers, never dropped.
+
+The canonical v0 → v1 preset mapping table:
+
+| v0 (`blendShapeMaster.presetName`) | v1 (`VRMC_vrm.expressions.preset`) |
+|---|---|
+| `joy` | `happy` |
+| `angry` | `angry` |
+| `sorrow` | `sad` |
+| `fun` | `relaxed` |
+| `neutral` | `neutral` |
+| `a`, `i`, `u`, `e`, `o` | `aa`, `ih`, `ou`, `ee`, `oh` |
+| `blink` / `blink_l` / `blink_r` | `blink` / `blinkLeft` / `blinkRight` |
+| `lookup` / `lookdown` / `lookleft` / `lookright` | `lookUp` / `lookDown` / `lookLeft` / `lookRight` |
+| custom (any other) | `custom:<original-name>` |
+
+Weight range conversion: v0 uses Unity-convention 0–100; v1 uses glTF-convention 0–1. Normalization divides by 100.
+
+### Sweep registry symmetry
+
+Every `*_v0` sweep entry has a 1.0 counterpart in the registry, OR is registered with a structured `NotApplicable { reason: <NotApplicableReason> }` when the axis doesn't apply to 0.x. The structured reason enum (defined in `crates/vrm-asset-generator/src/lib.rs`) makes absence queryable rather than free-text. Slice 1's MToon `mtoon_basic_v0_outline_lighting_mix` is the canonical example: registered as `NotApplicable { reason: OutlineLightingMixV1Only }` because 0.x has no `_OutlineLightingMix` Unity-shader key.
+
+A compile-time invariant test (`sweep_registry_symmetric_across_versions` in `sweep.rs`) enforces this — every `Applicable` v0 entry must have a v1 counterpart, OR be explicitly `NotApplicable` with a reason.
+
+### v0-specific quirk sweeps (slice 2+)
+
+The `_v0_quirk_*` sweep prefix is reserved for slice 2's intentional probes of 0.x spec corners that adapters sometimes silently correct:
+
+- `stiffinessForce` — canonical typo in the 0.x spec spring-bone field. An adapter that "fixes" the typo by also accepting `stiffness` is silently non-conformant.
+- centerNode-as-transform vs centerNode-ignored.
+- Single-bone-per-group spring-bone topology.
+- Sphere-collider-only enforcement (capsule colliders must be rejected on 0.x, not silently handled).
+- 0.x `firstPerson` flagging semantics.
+- 0.x meta schema (`licenseName: CC0` as a string vs 1.0's structured `meta.licenseUrl`).
+
+These exist explicitly to surface adapter behavior on the weird parts of 0.x.
+
+### What slice 1 does NOT cover
+
+Out of scope for slice 1 (per `docs/superpowers/specs/2026-05-26-vrm-0x-conformance-design.md`):
+
+- Round-tripping (parsing 0.x assets). Trigger to revisit the single-crate generator decision if this becomes a goal.
+- Side-channel "native orientation" render as a supplementary artifact. Deferred to v2 — the back-of-head failure mode (if it materializes) is already legibly diagnostic on its own.
+- VRM 1.1 plumbing. The `SpecVersion::{V0, V1}` enum extends cleanly when 1.1 lands; sweep registry stays.
+- VRMA × 0.x. Slice 3.
+- Spring-bone v0 parametric (`secondaryAnimation` emit). Slice 2.
+- Full MToon parametric parity (44 variants × 0.x). Slice 2.
