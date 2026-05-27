@@ -970,7 +970,9 @@ pub fn run(cli: Cli) -> Result<()> {
             output_dir,
             json: emit_json,
         } => {
-            use crate::emit::{emit_with_sidecars_spring_bone, emit_with_sidecars_spring_bone_swing};
+            use crate::emit::{
+                emit_with_sidecars_spring_bone, emit_with_sidecars_spring_bone_swing,
+            };
             use crate::spring_bone::spring_bone_coupling_sweep;
 
             std::fs::create_dir_all(&output_dir)?;

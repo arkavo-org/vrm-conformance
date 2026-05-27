@@ -3177,6 +3177,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "tracing-subscriber",
+ "vrm-ops",
  "vrm-test-plan",
  "vrm-validator-wrap",
 ]
@@ -3288,6 +3289,7 @@ dependencies = [
  "serde_yml",
  "thiserror 1.0.69",
  "vrm-diff-engine",
+ "vrm-ops",
 ]
 
 [[package]]
