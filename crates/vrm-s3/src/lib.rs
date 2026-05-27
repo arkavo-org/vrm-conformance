@@ -3,3 +3,5 @@
 pub mod manifest;
 pub mod push_pull;
 pub mod validation;
+
+pub use vrm_ops::SpecVersion;
