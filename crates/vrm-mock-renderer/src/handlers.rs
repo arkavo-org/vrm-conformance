@@ -6,7 +6,7 @@ use crate::render::{synthesize_frame, synthesize_png, FrameState};
 use crate::session::{Session, SessionRegistry};
 use camino::Utf8Path;
 use vrm_ops::tools as ops;
-use vrm_ops::{RpcError, SpecVersion};
+use vrm_ops::RpcError;
 
 pub fn load_vrm(
     registry: &mut SessionRegistry,
@@ -159,11 +159,15 @@ pub fn apply_vrma_at_time(
 }
 
 pub fn dump_humanoid_pose(
-    _registry: &mut SessionRegistry,
-    _params: ops::DumpHumanoidPoseParams,
+    registry: &mut SessionRegistry,
+    params: ops::DumpHumanoidPoseParams,
 ) -> Result<ops::DumpHumanoidPoseResult, RpcError> {
+    let session = registry
+        .get(&params.session_id)
+        .ok_or_else(|| invalid_session(&params.session_id))?;
+    let source_spec_version = session.source_spec_version;
     Ok(ops::DumpHumanoidPoseResult {
-        source_spec_version: SpecVersion::V1,
+        source_spec_version,
         bones: vec![
             ops::HumanoidBoneRotation {
                 name: "head".into(),
@@ -180,24 +184,32 @@ pub fn dump_humanoid_pose(
 }
 
 pub fn dump_expression_weights(
-    _registry: &mut SessionRegistry,
-    _params: ops::DumpExpressionWeightsParams,
+    registry: &mut SessionRegistry,
+    params: ops::DumpExpressionWeightsParams,
 ) -> Result<ops::DumpExpressionWeightsResult, RpcError> {
+    let session = registry
+        .get(&params.session_id)
+        .ok_or_else(|| invalid_session(&params.session_id))?;
+    let source_spec_version = session.source_spec_version;
     let mut presets = std::collections::BTreeMap::new();
     presets.insert("happy".into(), 0.0_f32);
     Ok(ops::DumpExpressionWeightsResult {
-        source_spec_version: SpecVersion::V1,
+        source_spec_version,
         presets,
         custom: std::collections::BTreeMap::new(),
     })
 }
 
 pub fn dump_look_at_state(
-    _registry: &mut SessionRegistry,
-    _params: ops::DumpLookAtStateParams,
+    registry: &mut SessionRegistry,
+    params: ops::DumpLookAtStateParams,
 ) -> Result<ops::DumpLookAtStateResult, RpcError> {
+    let session = registry
+        .get(&params.session_id)
+        .ok_or_else(|| invalid_session(&params.session_id))?;
+    let source_spec_version = session.source_spec_version;
     Ok(ops::DumpLookAtStateResult {
-        source_spec_version: SpecVersion::V1,
+        source_spec_version,
         gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
         yaw_deg: 0.0,
         pitch_deg: 0.0,
@@ -387,10 +399,15 @@ mod tests {
     use vrm_ops::tools::{DumpBonePositionsParams, DumpBonePositionsResult};
 
     fn make_test_session() -> (SessionRegistry, String) {
+        make_test_session_with_version(vrm_ops::SpecVersion::V1)
+    }
+
+    fn make_test_session_with_version(version: vrm_ops::SpecVersion) -> (SessionRegistry, String) {
         let mut registry = SessionRegistry::new();
         let session = Session {
             asset_path: Utf8PathBuf::from("test.vrm"),
             params: MToonParams::defaults("test"),
+            source_spec_version: version,
             camera: None,
             lighting: None,
             post_processing: None,
@@ -423,5 +440,113 @@ mod tests {
             0,
             "mock has no springs; expected empty result"
         );
+    }
+
+    // --- source_spec_version propagation tests ---
+
+    #[test]
+    fn dump_expression_weights_propagates_v1() {
+        let (mut registry, session_id) = make_test_session_with_version(vrm_ops::SpecVersion::V1);
+        let result = dump_expression_weights(
+            &mut registry,
+            vrm_ops::tools::DumpExpressionWeightsParams {
+                session_id,
+                as_spec_version: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            result.source_spec_version,
+            vrm_ops::SpecVersion::V1,
+            "expected V1 from session"
+        );
+    }
+
+    #[test]
+    fn dump_expression_weights_propagates_v0() {
+        let (mut registry, session_id) = make_test_session_with_version(vrm_ops::SpecVersion::V0);
+        let result = dump_expression_weights(
+            &mut registry,
+            vrm_ops::tools::DumpExpressionWeightsParams {
+                session_id,
+                as_spec_version: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            result.source_spec_version,
+            vrm_ops::SpecVersion::V0,
+            "expected V0 from session"
+        );
+    }
+
+    #[test]
+    fn dump_humanoid_pose_propagates_source_spec_version() {
+        let (mut registry, session_id) = make_test_session_with_version(vrm_ops::SpecVersion::V0);
+        let result = dump_humanoid_pose(
+            &mut registry,
+            vrm_ops::tools::DumpHumanoidPoseParams {
+                session_id,
+                as_spec_version: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.source_spec_version, vrm_ops::SpecVersion::V0);
+    }
+
+    #[test]
+    fn dump_look_at_state_propagates_source_spec_version() {
+        let (mut registry, session_id) = make_test_session_with_version(vrm_ops::SpecVersion::V0);
+        let result = dump_look_at_state(
+            &mut registry,
+            vrm_ops::tools::DumpLookAtStateParams {
+                session_id,
+                as_spec_version: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.source_spec_version, vrm_ops::SpecVersion::V0);
+    }
+
+    #[test]
+    fn dump_expression_weights_on_unknown_session_returns_invalid_params() {
+        let mut registry = SessionRegistry::default();
+        let err = dump_expression_weights(
+            &mut registry,
+            vrm_ops::tools::DumpExpressionWeightsParams {
+                session_id: "ghost".into(),
+                as_spec_version: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, -32602, "expected InvalidParams, got {err:?}");
+    }
+
+    #[test]
+    fn dump_humanoid_pose_on_unknown_session_returns_invalid_params() {
+        let mut registry = SessionRegistry::default();
+        let err = dump_humanoid_pose(
+            &mut registry,
+            vrm_ops::tools::DumpHumanoidPoseParams {
+                session_id: "ghost".into(),
+                as_spec_version: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, -32602, "expected InvalidParams, got {err:?}");
+    }
+
+    #[test]
+    fn dump_look_at_state_on_unknown_session_returns_invalid_params() {
+        let mut registry = SessionRegistry::default();
+        let err = dump_look_at_state(
+            &mut registry,
+            vrm_ops::tools::DumpLookAtStateParams {
+                session_id: "ghost".into(),
+                as_spec_version: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, -32602, "expected InvalidParams, got {err:?}");
     }
 }
