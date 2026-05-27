@@ -73,6 +73,17 @@ final class Operations: @unchecked Sendable {
         let renderer: VRMRenderer
         let model: VRMModel
 
+        /// Wire-format spec version string echoed on every dump response.
+        ///
+        /// Derived from `model.specVersion` at session creation — reports what
+        /// the asset *was* (the source encoding), not what VRMMetalKit
+        /// normalised it *to* internally. VRMMetalKit conjugates VRM 0.x TRS
+        /// into glTF right-handed space at load (0.14.0 changelog) but the
+        /// contract field reports the original asset's declared spec.
+        ///
+        /// Mapping: `.v0_0` → "0.x", `.v1_0` / `.v1_1` → "1.0".
+        let sourceSpecVersion: String
+
         // Camera (filled by set_camera; consumed by render).
         // Projection is rebuilt at render time because aspect = width/height
         // is only known then.
@@ -105,6 +116,16 @@ final class Operations: @unchecked Sendable {
         init(renderer: VRMRenderer, model: VRMModel) {
             self.renderer = renderer
             self.model = model
+            // Map VRMSpecVersion to the wire-format string used by the ops
+            // contract. VRM 0.x assets declare `extensionsUsed: ["VRM"]` and
+            // load as .v0_0; 1.0 assets declare `extensionsUsed: ["VRMC_vrm"]`
+            // and load as .v1_0 (or .v1_1 for future minor revisions).
+            switch model.specVersion {
+            case .v0_0:
+                self.sourceSpecVersion = "0.x"
+            case .v1_0, .v1_1:
+                self.sourceSpecVersion = "1.0"
+            }
         }
     }
 
@@ -1250,6 +1271,8 @@ final class Operations: @unchecked Sendable {
         guard let session = lookupSession(sessionId) else {
             return invalidParams("unknown session_id: \(sessionId)")
         }
+        // `as_spec_version` is accepted for protocol compliance (Task 22 added
+        // it to the op contract) but ignored — the runner normalises post-hoc.
 
         var bonesArr: [JSONValue] = []
         var missingArr: [JSONValue] = []
@@ -1275,6 +1298,7 @@ final class Operations: @unchecked Sendable {
         }
         let hips = session.model.getHipsTranslation() ?? SIMD3<Float>(0, 0, 0)
         return .ok(.object([
+            "source_spec_version": .string(session.sourceSpecVersion),
             "bones": .array(bonesArr),
             "hips_translation": .array([
                 .number(Double(hips.x)),
@@ -1294,6 +1318,8 @@ final class Operations: @unchecked Sendable {
         guard let session = lookupSession(sessionId) else {
             return invalidParams("unknown session_id: \(sessionId)")
         }
+        // `as_spec_version` is accepted for protocol compliance (Task 22 added
+        // it to the op contract) but ignored — the runner normalises post-hoc.
         let controller = session.renderer.expressionController
         // Sorted-key emit so the JSON output is deterministic and matches
         // the Rust-side BTreeMap ordering expected by `pose_diff`.
@@ -1319,6 +1345,7 @@ final class Operations: @unchecked Sendable {
             }
         }
         return .ok(.object([
+            "source_spec_version": .string(session.sourceSpecVersion),
             "presets": .object(presets),
             "custom": .object(custom),
         ]))
@@ -1333,6 +1360,8 @@ final class Operations: @unchecked Sendable {
         guard let session = lookupSession(sessionId) else {
             return invalidParams("unknown session_id: \(sessionId)")
         }
+        // `as_spec_version` is accepted for protocol compliance (Task 22 added
+        // it to the op contract) but ignored — the runner normalises post-hoc.
 
         // Derive yaw/pitch from the last-applied head-local target point.
         // glTF/VRM forward is -Z in head-local space, Y up, X right.
@@ -1368,6 +1397,7 @@ final class Operations: @unchecked Sendable {
         let offset = session.model.lookAt?.offsetFromHeadBone ?? SIMD3<Float>(0, 0, 0)
 
         return .ok(.object([
+            "source_spec_version": .string(session.sourceSpecVersion),
             "gaze_direction_quat": .array([
                 .number(Double(q.x)),
                 .number(Double(q.y)),
