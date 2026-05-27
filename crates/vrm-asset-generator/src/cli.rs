@@ -334,6 +334,19 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the VRM 0.x MToon basic sweep (3 variants, slice 1 of the 0.x conformance corpus).
+    ///
+    /// Two Applicable variants produce `.vrm`, `.meta.json`, and `.test.yaml` triplets via
+    /// the v0 emit pipeline. The NotApplicable variant (`mtoon_basic_v0_outline_lighting_mix`)
+    /// produces a `.skipped.json` marker; outlineLightingMix is a v1-only axis absent from 0.x.
+    EmitMtoonBasicV0Sweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        /// Emit JSON progress on stderr (NDJSON) and a final JSON summary on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -1623,6 +1636,87 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string(&summary)?);
             } else {
                 println!("emitted {total} VRMA lookAt sweep plans to {output_dir}");
+            }
+            Ok(())
+        }
+        Cmd::EmitMtoonBasicV0Sweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::{emit_not_applicable_marker, emit_with_sidecars_v0};
+            use crate::sweep::mtoon_basic_v0_sweep;
+            use crate::SweepApplicability;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = mtoon_basic_v0_sweep();
+            let total = variants.len();
+            let mut emitted: Vec<String> = Vec::new();
+            let mut skipped: Vec<String> = Vec::new();
+
+            for (i, (params, applicability)) in variants.iter().enumerate() {
+                match applicability {
+                    SweepApplicability::Applicable => {
+                        if emit_json {
+                            let evt = json!({
+                                "event": "progress",
+                                "op": "emit-mtoon-basic-v0-sweep",
+                                "index": i,
+                                "total": total,
+                                "id": params.id,
+                                "status": "applicable"
+                            });
+                            eprintln!("{}", serde_json::to_string(&evt)?);
+                        } else {
+                            eprintln!("[{:3}/{}] {} (Applicable)", i + 1, total, params.id);
+                        }
+                        let stem = output_dir.join(&params.id);
+                        emit_with_sidecars_v0(params, &stem)?;
+                        emitted.push(params.id.clone());
+                    }
+                    SweepApplicability::NotApplicable { reason } => {
+                        if emit_json {
+                            let evt = json!({
+                                "event": "progress",
+                                "op": "emit-mtoon-basic-v0-sweep",
+                                "index": i,
+                                "total": total,
+                                "id": params.id,
+                                "status": "not_applicable",
+                                "reason": format!("{reason:?}")
+                            });
+                            eprintln!("{}", serde_json::to_string(&evt)?);
+                        } else {
+                            eprintln!(
+                                "[{:3}/{}] {} (NotApplicable: {:?})",
+                                i + 1,
+                                total,
+                                params.id,
+                                reason
+                            );
+                        }
+                        emit_not_applicable_marker(&params.id, *reason, &output_dir)?;
+                        skipped.push(params.id.clone());
+                    }
+                }
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "emitted": emitted.len(),
+                    "skipped": skipped.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted,
+                    "not_applicable": skipped
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} v0 MToon basic sweep assets ({} skipped) to {}",
+                    emitted.len(),
+                    skipped.len(),
+                    output_dir
+                );
             }
             Ok(())
         }

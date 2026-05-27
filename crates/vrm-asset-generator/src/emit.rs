@@ -374,12 +374,16 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
 /// secondaryAnimation, materialProperties) assembled by
 /// [`crate::vrm_ext_v0::emit_vrm_extension`].
 /// No binary chunk: the minimal 0.x default asset has no mesh geometry.
-pub fn emit_vrm_v0(id: &str, output: &Utf8Path) -> Result<()> {
+///
+/// `materials` is the list of MToon material variants to embed in
+/// `materialProperties`. Pass `&[MToonParams::defaults(id)]` for the default
+/// single-material case; pass a specific sweep variant's `MToonParams` for
+/// parametric sweep emission.
+pub fn emit_vrm_v0(id: &str, materials: &[MToonParams], output: &Utf8Path) -> Result<()> {
     use crate::expressions_v0::ExpressionsV0Params;
 
-    let material = MToonParams::defaults(id);
     let expressions = ExpressionsV0Params { groups: vec![] };
-    let vrm_ext = crate::vrm_ext_v0::emit_vrm_extension(id, &[material], &expressions);
+    let vrm_ext = crate::vrm_ext_v0::emit_vrm_extension(id, materials, &expressions);
 
     let doc = serde_json::json!({
         "asset": {
@@ -416,7 +420,7 @@ pub fn emit_vrm_v0(id: &str, output: &Utf8Path) -> Result<()> {
 /// spec_version `0.x` so plans are clearly tagged.
 pub fn emit_with_sidecars_v0(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
     let vrm_path = stem.with_extension("vrm");
-    emit_vrm_v0(&params.id, &vrm_path)?;
+    emit_vrm_v0(&params.id, &[params.clone()], &vrm_path)?;
 
     let meta_path = stem.with_extension("meta.json");
     write_meta_json(params, None, &vrm_path, &meta_path)?;
@@ -431,6 +435,33 @@ pub fn emit_with_sidecars_v0(params: &MToonParams, stem: &Utf8Path) -> Result<()
     plan.spec_version = vrm_test_plan::SpecVersion::V0;
     write_test_yaml(&plan, &yaml_path)?;
 
+    Ok(())
+}
+
+/// Emit a `.skipped.json` marker file for a NotApplicable sweep variant.
+///
+/// Instead of a `.vrm` asset, writes a small JSON file that records why the
+/// variant is not applicable for the target spec version. The runner and site
+/// consume this marker to skip rendering and diff for this variant without
+/// treating the absence of a `.vrm` as a missing-asset error.
+///
+/// Convention: `<id>.skipped.json` co-located with the Applicable assets in
+/// the same output directory.
+pub fn emit_not_applicable_marker(
+    id: &str,
+    reason: crate::NotApplicableReason,
+    output_dir: &Utf8Path,
+) -> std::io::Result<()> {
+    let marker = serde_json::json!({
+        "kind": "NotApplicable",
+        "reason": format!("{reason:?}"),
+        "test_id": id,
+    });
+    let path = output_dir.join(format!("{id}.skipped.json"));
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&marker).map_err(|e| std::io::Error::other(e))?,
+    )?;
     Ok(())
 }
 
@@ -1688,7 +1719,7 @@ mod extended_emit_integration_tests {
         use tempfile::tempdir;
         let tmp = tempdir().unwrap();
         let path = Utf8Path::from_path(tmp.path()).unwrap().join("v0.vrm");
-        emit_vrm_v0("v0_test", &path).unwrap();
+        emit_vrm_v0("v0_test", &[MToonParams::defaults("v0_test")], &path).unwrap();
         let bytes = std::fs::read(&path).unwrap();
         let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
         let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();

@@ -694,6 +694,42 @@ pub fn mtoon_first_person_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// VRM 0.x MToon basic sweep — slice 1 of the conformance corpus.
+///
+/// 3 variants:
+/// - `mtoon_basic_v0_lit_001` — neutral lit baseline; Applicable.
+/// - `mtoon_basic_v0_shadeShift_neg05` — shadingShift -0.5; Applicable.
+/// - `mtoon_basic_v0_outline_lighting_mix` — registered as
+///   `NotApplicable { reason: OutlineLightingMixV1Only }` because 0.x has no
+///   `_OutlineLightingMix` Unity-shader key (v1-only axis).
+///
+/// Each Applicable variant has a counterpart in `mtoon_basic_sweep` (1.0).
+pub fn mtoon_basic_v0_sweep() -> Vec<(MToonParams, crate::SweepApplicability)> {
+    let mut out = Vec::new();
+
+    let lit = MToonParams::defaults("mtoon_basic_v0_lit_001");
+    out.push((lit, crate::SweepApplicability::Applicable));
+
+    let mut shade_shift = MToonParams::defaults("mtoon_basic_v0_shadeShift_neg05");
+    shade_shift.shading_shift_factor = -0.5;
+    out.push((shade_shift, crate::SweepApplicability::Applicable));
+
+    let mut lighting_mix = MToonParams::defaults("mtoon_basic_v0_outline_lighting_mix");
+    // outlineLightingMix is only meaningful in VRM 1.0; in 0.x there is no
+    // corresponding Unity-shader key. We set the field to a non-default
+    // value to make the intent explicit; the runner uses the .skipped.json
+    // marker produced for this variant and never reads the MToonParams.
+    lighting_mix.outline_lighting_mix_factor = 0.5;
+    out.push((
+        lighting_mix,
+        crate::SweepApplicability::NotApplicable {
+            reason: crate::NotApplicableReason::OutlineLightingMixV1Only,
+        },
+    ));
+
+    out
+}
+
 fn fmt_num<T: std::fmt::Display + Copy + PartialOrd + Default>(v: T) -> String
 where
     f64: From<T>,
@@ -1868,5 +1904,71 @@ mod pbr_textures_sweep_tests {
         let c = s.iter().find(|p| p.id == "mtoon_pbrtex_combined").unwrap();
         assert!(c.normal_texture_scale.is_some());
         assert!(c.occlusion_texture_strength.is_some());
+    }
+}
+
+#[cfg(test)]
+mod sweep_v0_tests {
+    use super::*;
+    use crate::{NotApplicableReason, SweepApplicability};
+
+    #[test]
+    fn mtoon_basic_v0_sweep_has_three_variants() {
+        let sweep = mtoon_basic_v0_sweep();
+        assert_eq!(sweep.len(), 3);
+    }
+
+    #[test]
+    fn mtoon_basic_v0_sweep_has_one_not_applicable() {
+        let sweep = mtoon_basic_v0_sweep();
+        let na_count = sweep
+            .iter()
+            .filter(|(_, app)| matches!(app, SweepApplicability::NotApplicable { .. }))
+            .count();
+        assert_eq!(na_count, 1);
+    }
+
+    #[test]
+    fn not_applicable_reason_is_outline_lighting_mix() {
+        let sweep = mtoon_basic_v0_sweep();
+        let na = sweep
+            .iter()
+            .find_map(|(_, app)| match app {
+                SweepApplicability::NotApplicable { reason } => Some(*reason),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(na, NotApplicableReason::OutlineLightingMixV1Only);
+    }
+
+    #[test]
+    fn mtoon_basic_v0_sweep_variant_ids_match_plan() {
+        let sweep = mtoon_basic_v0_sweep();
+        let ids: Vec<&str> = sweep.iter().map(|(p, _)| p.id.as_str()).collect();
+        assert!(
+            ids.contains(&"mtoon_basic_v0_lit_001"),
+            "missing mtoon_basic_v0_lit_001"
+        );
+        assert!(
+            ids.contains(&"mtoon_basic_v0_shadeShift_neg05"),
+            "missing mtoon_basic_v0_shadeShift_neg05"
+        );
+        assert!(
+            ids.contains(&"mtoon_basic_v0_outline_lighting_mix"),
+            "missing mtoon_basic_v0_outline_lighting_mix"
+        );
+    }
+
+    #[test]
+    fn mtoon_basic_v0_sweep_applicable_variants_have_correct_params() {
+        let sweep = mtoon_basic_v0_sweep();
+        let shade_shift = sweep
+            .iter()
+            .find(|(p, _)| p.id == "mtoon_basic_v0_shadeShift_neg05")
+            .unwrap();
+        assert!(
+            (shade_shift.0.shading_shift_factor - (-0.5)).abs() < 1e-6,
+            "shadeShift variant must set shading_shift_factor = -0.5"
+        );
     }
 }
