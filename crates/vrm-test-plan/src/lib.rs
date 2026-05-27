@@ -335,7 +335,6 @@ pub struct CouplingMatrix {
 #[cfg(test)]
 mod spec_version_tests {
     use super::*;
-    use vrm_ops::SpecVersion;
 
     fn minimal_yaml_with_spec_version(v: &str) -> String {
         format!(
