@@ -42,6 +42,7 @@ pub fn write_meta_json(
 pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> TestPlan {
     TestPlan {
         id: params.id.clone(),
+        spec_version: vrm_test_plan::SpecVersion::V1,
         spec_section: "VRMC_materials_mtoon".into(),
         asset: asset_relpath.into(),
         camera: Camera {
