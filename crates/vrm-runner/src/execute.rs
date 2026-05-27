@@ -6,7 +6,62 @@ use anyhow::Result;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde_json::json;
 use vrm_ops::tools as ops;
+use vrm_ops::SpecVersion;
 use vrm_test_plan::TestPlan;
+
+/// Task 25: Enforce camera Z-axis convention per `spec_version`.
+///
+/// VRM 0.x avatars face -Z (per specification/0.0/README.md:238).
+/// Camera must be placed at negative Z to see the avatar's front.
+///
+/// VRM 1.0 avatars face +Z (per VRMC_vrm-1.0/tpose.md Definition 1.1).
+/// Camera must be placed at positive Z to see the avatar's front.
+pub fn validate_camera_convention(plan: &TestPlan) -> Result<(), String> {
+    let camera_z = plan.camera.position[2];
+    match plan.spec_version {
+        SpecVersion::V0 => {
+            if camera_z >= 0.0 {
+                return Err(format!(
+                    "test plan {} declares spec_version 0.x but camera at z={camera_z} is on the \
+                     wrong side (0.x avatars face -Z; camera must be at negative Z)",
+                    plan.id
+                ));
+            }
+        }
+        SpecVersion::V1 => {
+            if camera_z <= 0.0 {
+                return Err(format!(
+                    "test plan {} declares spec_version 1.0 but camera at z={camera_z} is on the \
+                     wrong side (1.0 avatars face +Z; camera must be at positive Z)",
+                    plan.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Task 26: Cross-check the adapter's reported `source_spec_version` against
+/// the test plan's declared `spec_version`.
+///
+/// A mismatch means the asset's `extensionsUsed` disagrees with the plan's
+/// declaration — the runner aborts before any rendering to catch this early.
+pub fn cross_check_source_spec_version(
+    declared: SpecVersion,
+    adapter_reported: SpecVersion,
+    test_id: &str,
+) -> Result<(), String> {
+    if declared != adapter_reported {
+        return Err(format!(
+            "spec_version mismatch on plan {test_id}: declared {} but adapter parsed {} from the \
+             asset. This indicates the asset's extensionsUsed disagrees with the test plan's \
+             spec_version declaration.",
+            declared.as_str(),
+            adapter_reported.as_str(),
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub struct ExecuteOptions {
@@ -81,6 +136,9 @@ pub struct ExecuteResult {
 }
 
 pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteResult> {
+    // Pre-flight: camera convention must agree with spec_version.
+    validate_camera_convention(plan).map_err(|e| anyhow::anyhow!("{e}"))?;
+
     let asset_path = opts.asset_dir.join(&plan.asset);
     if !asset_path.exists() {
         anyhow::bail!("asset not found: {asset_path}");
@@ -158,6 +216,10 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
                 },
             )
             .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+
+        // Task 26: cross-check adapter-reported spec_version against plan declaration.
+        cross_check_source_spec_version(plan.spec_version, humanoid.source_spec_version, &plan.id)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         progress(opts, "dump_expression_weights", &plan.id, json!({}));
         let expressions: ops::DumpExpressionWeightsResult = adapter
@@ -424,6 +486,9 @@ pub fn execute_plan_capturing_positions(
     plan: &TestPlan,
     opts: &ExecuteOptions,
 ) -> Result<ops::DumpBonePositionsResult> {
+    // Pre-flight: camera convention must agree with spec_version.
+    validate_camera_convention(plan).map_err(|e| anyhow::anyhow!("{e}"))?;
+
     let asset_path = opts.asset_dir.join(&plan.asset);
     if !asset_path.exists() {
         anyhow::bail!("asset not found: {asset_path}");
