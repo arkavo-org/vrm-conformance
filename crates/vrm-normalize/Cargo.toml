@@ -1,0 +1,14 @@
+[package]
+name = "vrm-normalize"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "v0 → v1 normalization for VRM dump responses; called by runner, not adapters"
+
+[dependencies]
+vrm-ops = { path = "../vrm-ops" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
