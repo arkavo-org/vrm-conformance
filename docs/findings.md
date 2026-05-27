@@ -16,6 +16,23 @@ This document records cross-renderer divergence findings produced by the suite, 
 
 **Slice 1 closure (Task 19, 2026-05-26):** the `avatarA_0_0` fallback is in effect. `avatarA_0_0.vrm` is sourced via `scripts/install-humanoid-fixtures.sh` (symlinks from a VRMMetalKit checkout; the asset is not redistributed in this repo per its VRM Platform License). The Task 20 test plan at `test-plans/manual/humanoid/avatarA_0_0.test.yaml` consumes this fixture path. No `vroid_default_F_0_0.vrm` is shipped in slice 1.
 
+## 2026-05-26 — Slice 1 mid-slice checkpoint (Task 27): DEFERRED to user-side bootstrap
+
+**Status.** DEFERRED. This checkpoint requires local fixtures (`assets/humanoid/avatarA_0_0.vrm`, `vroid_default_F_1_0.vrm`) installed via `scripts/install-humanoid-fixtures.sh` plus built adapter binaries (three-vrm via `npm run build`, vrm-metal-kit via `swift build`) plus an actual `scripts/bootstrap-goldens.sh` run. None of these are reliably available in a fresh CI worktree; the checkpoint is meant to run on the user's local M-series Mac development environment.
+
+**Expected outcome when run.** With Task 9's empirical finding clarifying that VMK's "180° flip" is intentional library normalization (not a non-spec defect), the original design's day-10 expected failure (`VMK renders back of head on 0.x`) is unlikely to materialize. Instead, three-vrm + VMK should both render the front of the avatar on 0.x assets when the camera is at -Z, because VMK's load-time coord normalization preserves "forward."
+
+**What to capture when the user runs it.**
+1. Build adapters: `cd adapters/three-vrm && npm install && npm run build && cd ../vrm-metal-kit && swift build`.
+2. Run bootstrap on slice-1 assets: `scripts/bootstrap-goldens.sh --plans test-plans/manual/humanoid/avatarA_0_0.test.yaml` (or whatever the actual command surface is).
+3. Run consensus: `scripts/consensus-report.sh --manifest goldens-cache/<bootstrap-dir>/manifest.json`.
+4. Inspect both rendered PNGs visually. Save the failure-mode example (if any) to `docs/images/`.
+5. Update this entry with: SSIM(three-vrm, VMK) result, visual outcome, and whichever adapter (if any) flagged as outlier.
+
+**Slice 1 implication.** Until this checkpoint runs, success criterion #2 ("VMK 180° flip flagged as conformance failure with clear visual signal") cannot be verified. Slice 1 can ship without this verification if the user accepts that the design assumption was inverted by Task 9. Alternatively, the slice can wait until the user runs the bootstrap locally.
+
+The remaining Phase C tasks (UniVRM wiring, godot-vrm wiring, mock renderer) and Phase D tasks (normalization, methodology doc, site filter) proceed regardless of this deferral — they don't depend on the mid-slice checkpoint's output.
+
 The methodology hazards in `docs/methodology.md` describe what divergence we *expect* between renderers (tone mapping, shadow noise, outline AA, …). This document records divergence the suite *actually observed* in our specific corpus + specific adapter pair, beyond those expected differences.
 
 ## Corpus-wide consensus, three-vrm 3.5.0 vs vrm-metal-kit `50cfd7d`
