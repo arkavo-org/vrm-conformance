@@ -56,8 +56,10 @@ mod applicability_tests {
             reason: NotApplicableReason::OutlineLightingMixV1Only,
         };
         let s = serde_json::to_string(&n).unwrap();
-        // Confirm the reason variant name surfaces in the wire format.
-        assert!(s.contains("OutlineLightingMixV1Only"), "got {s}");
+        assert_eq!(
+            s,
+            r#"{"kind":"NotApplicable","reason":"OutlineLightingMixV1Only"}"#
+        );
         let back: SweepApplicability = serde_json::from_str(&s).unwrap();
         assert_eq!(back, n);
     }
