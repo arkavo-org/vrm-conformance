@@ -178,19 +178,24 @@ export async function dispatch(
         return { ok: true, result };
       }
       case "dump_humanoid_pose": {
-        const p = params as { session_id?: string };
+        // as_spec_version (Task 22 field) is deserialized and accepted but
+        // not acted upon here — normalization is the runner's responsibility
+        // (Task 35). This prevents rejecting requests from an updated runner.
+        const p = params as { session_id?: string; as_spec_version?: string };
         if (!p?.session_id) return badParams("missing session_id");
         const result = await ctx.session.dumpHumanoidPose();
         return { ok: true, result };
       }
       case "dump_expression_weights": {
-        const p = params as { session_id?: string };
+        // as_spec_version accepted but ignored; see dump_humanoid_pose.
+        const p = params as { session_id?: string; as_spec_version?: string };
         if (!p?.session_id) return badParams("missing session_id");
         const result = await ctx.session.dumpExpressionWeights();
         return { ok: true, result };
       }
       case "dump_look_at_state": {
-        const p = params as { session_id?: string };
+        // as_spec_version accepted but ignored; see dump_humanoid_pose.
+        const p = params as { session_id?: string; as_spec_version?: string };
         if (!p?.session_id) return badParams("missing session_id");
         const result = await ctx.session.dumpLookAtState();
         return { ok: true, result };

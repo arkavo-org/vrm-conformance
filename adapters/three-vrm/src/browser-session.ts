@@ -227,6 +227,7 @@ export class BrowserSession {
   }
 
   async dumpHumanoidPose(): Promise<{
+    source_spec_version: string | null;
     bones: Array<{ name: string; local_rotation_quat: number[] }>;
     hips_translation: number[];
     bones_missing: string[];
@@ -239,6 +240,7 @@ export class BrowserSession {
   }
 
   async dumpExpressionWeights(): Promise<{
+    source_spec_version: string | null;
     presets: Record<string, number>;
     custom: Record<string, number>;
   }> {
@@ -250,6 +252,7 @@ export class BrowserSession {
   }
 
   async dumpLookAtState(): Promise<{
+    source_spec_version: string | null;
     gaze_direction_quat: number[];
     yaw_deg: number;
     pitch_deg: number;

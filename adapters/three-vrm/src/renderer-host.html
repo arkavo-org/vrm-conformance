@@ -42,7 +42,18 @@
         vrmAnimation: null,   // VRMAnimation parsed from .vrma
         vrmaMixer: null,      // THREE.AnimationMixer
         vrmaClip: null,       // THREE.AnimationClip (retargeted)
+        sourceSpecVersion: null, // "0.x" | "1.0" | null
       };
+
+      // Detect VRM spec version from glTF extensionsUsed.
+      // Returns "0.x" for legacy VRM (VRM extension) or "1.0" for VRMC_vrm.
+      // Throws if neither extension is present.
+      function detectSpecVersion(gltfJson) {
+        const used = gltfJson.extensionsUsed ?? [];
+        if (used.includes("VRMC_vrm")) return "1.0";
+        if (used.includes("VRM")) return "0.x";
+        throw new Error("No VRM extension found in extensionsUsed");
+      }
 
       function ensureRenderer(width, height) {
         if (!state.canvas) {
@@ -108,6 +119,10 @@
         const vrm = gltf.userData.vrm;
         state.vrm = vrm;
         state.scene.add(vrm.scene);
+
+        // Detect and store spec version. gltf.parser.json is the raw glTF JSON
+        // object parsed by THREE.GLTFLoader; extensionsUsed lives at the top level.
+        state.sourceSpecVersion = detectSpecVersion(gltf.parser.json);
 
         // Activate VRMC_vrm.firstPerson culling. Without this call the
         // plugin parses meshAnnotations into vrm.firstPerson but doesn't
@@ -285,6 +300,7 @@
           }
         }
         return {
+          source_spec_version: state.sourceSpecVersion,
           bones,
           hips_translation: hipsTranslation,
           bones_missing: missing,
@@ -296,7 +312,7 @@
         const presets = {};
         const custom = {};
         const em = state.vrm.expressionManager;
-        if (!em) return { presets, custom };
+        if (!em) return { source_spec_version: state.sourceSpecVersion, presets, custom };
 
         for (const name of PRESET_EXPRESSIONS) {
           presets[name] = em.getValue(name) ?? 0.0;
@@ -310,7 +326,7 @@
           custom[exprName] = em.getValue(exprName) ?? 0.0;
         }
 
-        return { presets, custom };
+        return { source_spec_version: state.sourceSpecVersion, presets, custom };
       };
 
       window.__dumpLookAtState = function () {
@@ -348,6 +364,7 @@
         const offsetArr = offset ? [offset.x, offset.y, offset.z] : [0, 0, 0];
 
         return {
+          source_spec_version: state.sourceSpecVersion,
           gaze_direction_quat: [q.x, q.y, q.z, q.w],
           yaw_deg: yaw,
           pitch_deg: pitch,
@@ -401,6 +418,10 @@
           const vrm = gltf.userData.vrm;
           state.vrm = vrm;
           state.scene.add(vrm.scene);
+          // Re-detect spec version after reload (sourceSpecVersion persists
+          // from the original loadVrm, but update it here in case parser.json
+          // is available and consistent).
+          state.sourceSpecVersion = detectSpecVersion(gltf.parser.json);
         }
 
         if (state.vrm && settle > 0) {
