@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use vrm_ops::SpecVersion;
 
 /// Kind of manifest entry. `Image` is the default to preserve back-compat
 /// with existing manifest files written before sequence support landed.
@@ -38,6 +39,8 @@ pub struct Manifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestEntry {
     pub test_id: String,
+    #[serde(default = "default_spec_version_v1")]
+    pub spec_version: SpecVersion,
     pub renderer_name: String,
     pub renderer_version: String,
     pub git_hash: String,
@@ -87,6 +90,10 @@ pub struct SubmissionMetadata {
     pub build_flags: String,
 }
 
+fn default_spec_version_v1() -> SpecVersion {
+    SpecVersion::V1
+}
+
 impl Manifest {
     pub fn empty() -> Self {
         Self {
@@ -126,6 +133,7 @@ mod tests {
     fn entry(test_id: &str, renderer_name: &str, image_blake3: &str) -> ManifestEntry {
         ManifestEntry {
             test_id: test_id.into(),
+            spec_version: SpecVersion::V1,
             renderer_name: renderer_name.into(),
             renderer_version: "0.1.0".into(),
             git_hash: "deadbeef".into(),
@@ -147,6 +155,7 @@ mod tests {
     fn entry_with_positions_roundtrips() {
         let e = ManifestEntry {
             test_id: "springbone_default".into(),
+            spec_version: SpecVersion::V1,
             renderer_name: "three-vrm".into(),
             renderer_version: "0.1.0".into(),
             git_hash: "deadbeef".into(),
@@ -175,6 +184,7 @@ mod tests {
     fn entry_without_positions_omits_fields_from_json() {
         let e = ManifestEntry {
             test_id: "t".into(),
+            spec_version: SpecVersion::V1,
             renderer_name: "r".into(),
             renderer_version: "v".into(),
             git_hash: "g".into(),
@@ -267,6 +277,7 @@ mod tests {
     fn manifest_entry_roundtrips_vrma_url() {
         let e = ManifestEntry {
             test_id: "vrma_humanoid_x".into(),
+            spec_version: SpecVersion::V1,
             renderer_name: "univrm".into(),
             renderer_version: "v0.131.0".into(),
             git_hash: "abc".into(),
@@ -293,6 +304,7 @@ mod tests {
     fn manifest_entry_omits_vrma_fields_when_none() {
         let e = ManifestEntry {
             test_id: "mtoon_default".into(),
+            spec_version: SpecVersion::V1,
             renderer_name: "univrm".into(),
             renderer_version: "v0.131.0".into(),
             git_hash: "abc".into(),
@@ -390,5 +402,56 @@ mod tests {
             v.get("image_blake3").is_none(),
             "top-level image_blake3 must be omitted for Sequence entries, got {v}"
         );
+    }
+}
+
+#[cfg(test)]
+mod spec_version_tests {
+    use super::*;
+    use vrm_ops::SpecVersion;
+
+    /// Build a minimal ManifestEntry JSON string with the given spec_version block
+    /// (e.g. `"spec_version": "0.x",` or `""` for absent).
+    /// SubmissionMetadata is flattened, so all its required fields appear at top level.
+    fn minimal_entry_json(spec_version_block: &str) -> String {
+        format!(
+            r#"{{
+  "test_id": "t",
+  "renderer_name": "r",
+  "renderer_version": "0",
+  "git_hash": "abc",
+  "os": "linux",
+  "os_version": "22.04",
+  "gpu_vendor": "NVIDIA",
+  "gpu_model": "RTX 4090",
+  "driver_version": "545.0",
+  "build_flags": "release",
+  {spec_version_block}
+  "image_url": "s3://b/r/t.png",
+  "image_blake3": "blake3:aaa",
+  "submitted_at": "2026-05-26T00:00:00Z"
+}}"#
+        )
+    }
+
+    #[test]
+    fn parses_spec_version_v0() {
+        let json = minimal_entry_json(r#""spec_version": "0.x","#);
+        let e: ManifestEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(e.spec_version, SpecVersion::V0);
+    }
+
+    #[test]
+    fn parses_spec_version_v1() {
+        let json = minimal_entry_json(r#""spec_version": "1.0","#);
+        let e: ManifestEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(e.spec_version, SpecVersion::V1);
+    }
+
+    #[test]
+    fn defaults_to_v1_when_absent() {
+        let json = minimal_entry_json("");
+        let e: ManifestEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(e.spec_version, SpecVersion::V1);
     }
 }

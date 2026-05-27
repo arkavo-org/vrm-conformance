@@ -126,6 +126,7 @@ fn local_manifest_entry(
 
     Ok(ManifestEntry {
         test_id: test_id.into(),
+        spec_version: vrm_ops::SpecVersion::V1,
         renderer_name: renderer_name.into(),
         renderer_version: renderer_version.into(),
         git_hash: git_hash.into(),

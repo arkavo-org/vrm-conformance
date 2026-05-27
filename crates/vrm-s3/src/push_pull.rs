@@ -43,6 +43,7 @@ pub async fn push_png(file: &Utf8Path, test_id: &str, opts: &PushOptions) -> Res
 
     Ok(ManifestEntry {
         test_id: test_id.into(),
+        spec_version: vrm_ops::SpecVersion::V1,
         renderer_name: opts.renderer_name.clone(),
         renderer_version: opts.renderer_version.clone(),
         git_hash: opts.git_hash.clone(),

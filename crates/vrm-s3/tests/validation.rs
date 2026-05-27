@@ -1,3 +1,4 @@
+use vrm_ops::SpecVersion;
 use vrm_s3::manifest::{
     ManifestEntry, ManifestEntryKind, SequenceManifest, SequenceManifestFrame, SubmissionMetadata,
 };
@@ -17,6 +18,7 @@ fn meta() -> SubmissionMetadata {
 fn good_image_entry() -> ManifestEntry {
     ManifestEntry {
         test_id: "img_ok".into(),
+        spec_version: SpecVersion::V1,
         renderer_name: "vmk".into(),
         renderer_version: "0.15.2".into(),
         git_hash: "abcdef1".into(),
@@ -37,6 +39,7 @@ fn good_image_entry() -> ManifestEntry {
 fn good_sequence_entry() -> ManifestEntry {
     ManifestEntry {
         test_id: "seq_ok".into(),
+        spec_version: SpecVersion::V1,
         renderer_name: "vmk".into(),
         renderer_version: "0.15.2".into(),
         git_hash: "abcdef1".into(),

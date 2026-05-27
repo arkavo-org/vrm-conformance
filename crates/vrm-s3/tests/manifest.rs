@@ -1,3 +1,4 @@
+use vrm_ops::SpecVersion;
 use vrm_s3::manifest::{Manifest, ManifestEntry, ManifestEntryKind, SubmissionMetadata};
 
 #[test]
@@ -6,6 +7,7 @@ fn manifest_round_trips_json() {
         version: 1,
         entries: vec![ManifestEntry {
             test_id: "mtoon_default".into(),
+            spec_version: SpecVersion::V1,
             renderer_name: "vrm-metal-kit".into(),
             renderer_version: "0.5.2".into(),
             git_hash: "deadbeef".into(),
