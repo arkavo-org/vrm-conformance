@@ -4,6 +4,9 @@
 //! Spec: `docs/operation-contract.md`. Stdio framing follows LSP header convention
 //! (`Content-Length: NNN\r\n\r\n` + body).
 
+pub mod spec_version;
+pub use spec_version::SpecVersion;
+
 pub mod stdio;
 pub mod tools;
 
