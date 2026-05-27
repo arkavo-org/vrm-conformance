@@ -9,6 +9,33 @@ use vrm_ops::tools as ops;
 use vrm_ops::SpecVersion;
 use vrm_test_plan::TestPlan;
 
+/// Task 35: Apply vrm-normalize to a v0 dump when the consumer requests
+/// `as_spec_version=V1`. Called by the runner after each dump op completes,
+/// before the result is returned to the consumer.
+///
+/// Rules:
+/// - Absent `as_spec_version`: return native (asset's parsed shape verbatim).
+/// - `Some(V1)` against a V0 asset: normalize v0 → v1 via vrm-normalize.
+/// - `Some(V0)` against a V1 asset: reject with `-32001 NormalizationDirectionUnsupported`.
+/// - Same-version requests are no-ops.
+pub fn apply_normalization_if_requested(
+    weights: &std::collections::HashMap<String, f32>,
+    source: SpecVersion,
+    requested: Option<SpecVersion>,
+) -> anyhow::Result<std::collections::HashMap<String, f32>> {
+    use vrm_normalize::expressions::normalize_weights_v0_to_v1;
+    match (source, requested) {
+        (_, None) => Ok(weights.clone()),
+        (SpecVersion::V0, Some(SpecVersion::V1)) => Ok(normalize_weights_v0_to_v1(weights)),
+        (SpecVersion::V1, Some(SpecVersion::V1)) => Ok(weights.clone()),
+        (SpecVersion::V0, Some(SpecVersion::V0)) => Ok(weights.clone()),
+        (SpecVersion::V1, Some(SpecVersion::V0)) => Err(anyhow::anyhow!(
+            "-32001 NormalizationDirectionUnsupported: cannot project a 1.0 dump as 0.x \
+             — no lossless mapping exists for v1 presets like 'surprised'"
+        )),
+    }
+}
+
 /// Task 25: Enforce camera Z-axis convention per `spec_version`.
 ///
 /// VRM 0.x avatars face -Z (per specification/0.0/README.md:238).

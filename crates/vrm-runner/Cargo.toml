@@ -17,6 +17,7 @@ camino.workspace = true
 thiserror.workspace = true
 
 vrm-ops = { path = "../vrm-ops" }
+vrm-normalize = { path = "../vrm-normalize" }
 vrm-test-plan = { path = "../vrm-test-plan" }
 vrm-diff-engine = { path = "../vrm-diff-engine" }
 image.workspace = true
