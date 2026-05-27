@@ -10,6 +10,7 @@ pub mod glb;
 pub mod humanoid;
 pub mod mesh;
 pub mod mtoon_common;
+pub mod mtoon_v0;
 pub mod params;
 pub mod sidecar;
 pub mod spring_bone;
