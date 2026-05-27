@@ -18,9 +18,6 @@ const PHASE_BY_RESERVED_METHOD := {
     # real implementation deferred until upstream completes it.
     "load_vrma": "vrma-v1",
     "apply_vrma_at_time": "vrma-v1",
-    "dump_humanoid_pose": "vrma-v1",
-    "dump_expression_weights": "vrma-v1",
-    "dump_look_at_state": "vrma-v1",
 }
 
 # Phase 1 method names. dispatch() routes these to Session.<name>.
@@ -29,6 +26,7 @@ const PHASE1_METHODS := [
     "set_post_processing", "render", "dispose",
     "step_physics", "reset_physics", "animate_root_transform",
     "dump_bone_positions", "render_sequence",
+    "dump_expression_weights", "dump_humanoid_pose", "dump_look_at_state",
 ]
 
 # Async to support `render` which awaits frames.
@@ -58,6 +56,12 @@ static func dispatch(tree: SceneTree, session: Session, id: Variant, method: Str
                 outcome = await session.render_sequence(tree, params if typeof(params) == TYPE_DICTIONARY else {})
             "dump_bone_positions":
                 outcome = session.dump_bone_positions(params if typeof(params) == TYPE_DICTIONARY else {})
+            "dump_expression_weights":
+                outcome = session.dump_expression_weights(params if typeof(params) == TYPE_DICTIONARY else {})
+            "dump_humanoid_pose":
+                outcome = session.dump_humanoid_pose(params if typeof(params) == TYPE_DICTIONARY else {})
+            "dump_look_at_state":
+                outcome = session.dump_look_at_state(params if typeof(params) == TYPE_DICTIONARY else {})
             _:
                 outcome = { "ok": false, "error": { "code": -32601, "message": "internal: PHASE1 method not routed: " + method } }
         if outcome.get("ok"):

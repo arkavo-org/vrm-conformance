@@ -8,6 +8,7 @@ const VrmRuntimeExtensions := preload("res://src/vrm_runtime_extensions.gd")
 const MAGENTA := Color(1.0, 0.0, 1.0)
 
 var session_id: String = ""
+var source_spec_version: String = ""
 var scene: Node = null
 var viewport: SubViewport = null
 var camera: Camera3D = null
@@ -43,6 +44,10 @@ func load_vrm(tree_root: Node, params: Dictionary) -> Dictionary:
     if err != OK:
         VrmRuntimeExtensions.unregister_all(registered)
         return _err(-32001, "LoadFailed", { "reason": "append_from_file err %d" % err })
+
+    # Detect spec version from the parsed glTF JSON before generating the scene.
+    source_spec_version = _detect_spec_version(state.json)
+
     var built: Node = gltf.generate_scene(state)
     VrmRuntimeExtensions.unregister_all(registered)
     if built == null:
@@ -431,6 +436,48 @@ func render_sequence(tree: SceneTree, params: Dictionary) -> Dictionary:
         "duration_seconds": float(frame_count) / frame_hz,
         "actual_color_space": "Srgb",
         "frame_hz_achieved": frame_hz,
+    })
+
+# Detect the VRM spec version from the parsed glTF JSON's extensionsUsed array.
+# Returns "1.0" for VRMC_vrm (VRM 1.0), "0.x" for VRM (legacy VRM 0.x), or ""
+# if neither extension is present (degenerate asset; logs a warning).
+static func _detect_spec_version(gltf_json: Dictionary) -> String:
+    var used: Array = gltf_json.get("extensionsUsed", [])
+    if "VRMC_vrm" in used:
+        return "1.0"
+    if "VRM" in used:
+        return "0.x"
+    push_warning("session: no VRM extension found in extensionsUsed; source_spec_version will be empty")
+    return ""
+
+# dump_expression_weights: returns expression-weight state with source_spec_version.
+# godot-vrm's VRM 1.0 addon does not expose a runtime expression manager at this
+# phase, so weights are returned as empty arrays (protocol-compliant stub).
+# as_spec_version param is accepted (per Task 22 contract) but ignored.
+func dump_expression_weights(_params: Dictionary) -> Dictionary:
+    return _ok({
+        "source_spec_version": source_spec_version,
+        "presets": {},
+        "custom": {},
+    })
+
+# dump_humanoid_pose: returns humanoid bone pose state with source_spec_version.
+# Bone data is not yet extracted at this phase; returns an empty bones dict.
+# as_spec_version param is accepted but ignored.
+func dump_humanoid_pose(_params: Dictionary) -> Dictionary:
+    return _ok({
+        "source_spec_version": source_spec_version,
+        "bones": {},
+    })
+
+# dump_look_at_state: returns look-at state with source_spec_version.
+# Runtime look-at is not yet wired at this phase; returns null yaw/pitch.
+# as_spec_version param is accepted but ignored.
+func dump_look_at_state(_params: Dictionary) -> Dictionary:
+    return _ok({
+        "source_spec_version": source_spec_version,
+        "yaw_degrees": null,
+        "pitch_degrees": null,
     })
 
 func _ok(result: Variant) -> Dictionary:

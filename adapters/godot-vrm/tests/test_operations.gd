@@ -46,17 +46,25 @@ func test_set_expression_returns_phase_3() -> void:
     _assert_eq(r.get("error", {}).get("data", {}).get("phase"), "Phase 3", "phase label")
 
 func test_vrma_ops_return_vrma_v1() -> void:
+    # load_vrma and apply_vrma_at_time remain deferred (VRMA upstream incomplete).
+    # dump_* ops are now real and tested separately via source_spec_version tests.
     var methods: Array = [
         "load_vrma",
         "apply_vrma_at_time",
-        "dump_humanoid_pose",
-        "dump_expression_weights",
-        "dump_look_at_state",
     ]
     for method in methods:
         var r: Dictionary = await Operations.dispatch(null, null, 100, method, {})
         _assert_eq(r.get("error", {}).get("code"), -32000, "%s code" % method)
         _assert_eq(r.get("error", {}).get("data", {}).get("phase"), "vrma-v1", "%s phase" % method)
+
+func test_dump_ops_in_phase1() -> void:
+    var dump_methods: Array = [
+        "dump_expression_weights",
+        "dump_humanoid_pose",
+        "dump_look_at_state",
+    ]
+    for method in dump_methods:
+        _assert_eq(Operations.PHASE1_METHODS.has(method), true, "%s in PHASE1_METHODS" % method)
 
 func test_id_is_echoed_on_unknown_method() -> void:
     var r1: Dictionary = await Operations.dispatch(null, null, "abc-123", "definitely_not_a_method", {})
