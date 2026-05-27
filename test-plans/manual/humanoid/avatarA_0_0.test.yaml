@@ -1,0 +1,61 @@
+id: avatarA_v0_lit_baseline
+spec_version: "0.x"
+spec_section: VRM 0.x humanoid baseline (slice 1 canonical Tier 2 fixture)
+asset: avatarA_0_0.vrm
+camera:
+  # VRM 0.x camera convention: avatar faces -Z in glTF coords per
+  # docs/upstream-specs/vrm-specification/specification/0.0/README.md:238.
+  # Camera placed at negative Z to see the front of a spec-conformant render.
+  # VMK normalises 0.x -> 1.0 coords at load (Task 9 finding); this same
+  # -Z camera reads the normalised model correctly because VMK's normalisation
+  # preserves "forward" — the -Z camera still sees the avatar's front.
+  position:
+  - 0.0
+  - 1.25
+  - -1.5
+  target:
+  - 0.0
+  - 1.25
+  - 0.0
+  up:
+  - 0.0
+  - 1.0
+  - 0.0
+  fov_degrees: 30.0
+lighting:
+  directional:
+    dir:
+    - -0.3
+    - -0.6
+    - -0.7
+    color:
+    - 1.0
+    - 1.0
+    - 1.0
+    intensity: 1.0
+  ambient:
+    color:
+    - 0.5
+    - 0.5
+    - 0.5
+    intensity: 0.3
+  cast_shadows: false
+  receive_shadows: false
+post_processing:
+  tone_mapping: none   # Methodology pin — see docs/methodology.md
+  exposure: 1.0
+output:
+  width: 1024
+  height: 1024
+  color_space: srgb
+  msaa: 4
+diff:
+  mode: ssim
+  threshold: 0.92   # Slightly relaxed for first 0.x corpus; tighten after baselines
+  reference_renderer: three-vrm   # spec-correct on 0.x per Task 9 finding analysis
+  conformance_status:
+    kind: included
+ignore_renderers: []
+properties: []
+physics:
+  settle_steps: 30
