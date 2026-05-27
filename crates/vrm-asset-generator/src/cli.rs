@@ -1,9 +1,19 @@
-use crate::emit::emit_with_sidecars;
+use crate::emit::{emit_with_sidecars, emit_with_sidecars_v0};
 use crate::params::MToonParams;
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::json;
+
+fn parse_spec_version(s: &str) -> Result<vrm_ops::SpecVersion, String> {
+    match s {
+        "0.x" => Ok(vrm_ops::SpecVersion::V0),
+        "1.0" => Ok(vrm_ops::SpecVersion::V1),
+        other => Err(format!(
+            "unsupported spec_version {other:?}; expected \"0.x\" or \"1.0\""
+        )),
+    }
+}
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Parametric VRM 1.0 test asset generator")]
@@ -21,6 +31,9 @@ pub enum Cmd {
         id: String,
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         /// Emit JSON status to stdout instead of human text.
         #[arg(long)]
         json: bool,
@@ -339,12 +352,16 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::EmitDefault {
             id,
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             std::fs::create_dir_all(&output_dir)?;
             let stem = output_dir.join(&id);
             let params = MToonParams::defaults(&id);
-            emit_with_sidecars(&params, &stem)?;
+            match spec_version {
+                vrm_ops::SpecVersion::V0 => emit_with_sidecars_v0(&params, &stem)?,
+                vrm_ops::SpecVersion::V1 => emit_with_sidecars(&params, &stem)?,
+            }
 
             if emit_json {
                 let result = json!({

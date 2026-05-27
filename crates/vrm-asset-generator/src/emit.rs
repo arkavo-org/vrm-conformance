@@ -367,6 +367,67 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+/// Emit a minimal VRM 0.x `.vrm` GLB (stub — real content in Task 15).
+///
+/// Produces a parseable GLB with `extensionsUsed: ["VRM"]` and a minimal
+/// `VRM` extension block from [`crate::vrm_ext_v0::emit_stub_vrm_extension`].
+/// No binary chunk: the stub has no mesh geometry. Sufficient for integration
+/// tests that only need a parseable `.vrm` file at the given path.
+pub fn emit_vrm_v0_stub(id: &str, output: &Utf8Path) -> Result<()> {
+    use crate::vrm_ext_v0::emit_stub_vrm_extension;
+
+    let doc = serde_json::json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1 (v0-stub)"
+        },
+        "extensionsUsed": ["VRM"],
+        "scene": 0,
+        "scenes": [{ "nodes": [0] }],
+        "nodes": [{ "name": id }],
+        "extensions": {
+            "VRM": emit_stub_vrm_extension()
+        }
+    });
+
+    let json_bytes = serde_json::to_vec(&doc)?;
+    let glb = crate::glb::write_glb(&crate::glb::GlbDocument {
+        json: json_bytes,
+        binary: Vec::new(),
+    })?;
+
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(output, glb)?;
+    Ok(())
+}
+
+/// Emit a VRM 0.x asset triplet: `.vrm` (stub), `.meta.json`, `.test.yaml`.
+///
+/// The `.vrm` is produced by [`emit_vrm_v0_stub`] — minimal but parseable.
+/// The sidecar files use spec_version `0.x` so plans are clearly tagged.
+/// Task 15 replaces the stub with a full v0 assembly.
+pub fn emit_with_sidecars_v0(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_v0_stub(&params.id, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(params, None, &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan = build_default_test_plan(params, &asset_relpath);
+    // Tag the plan as VRM 0.x so runners and validators know the spec target.
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 /// Emit a `.vrm` GLB containing MToon material data, a VRMC_springBone
 /// chain attached to the head bone, **and a cylinder mesh skinned to
 /// the chain joints** so spring-bone physics is visible in pixel space.
@@ -1613,6 +1674,27 @@ mod extended_emit_integration_tests {
         assert!(
             names.contains(&"VRMC_springBone_extended_collider"),
             "extensionsUsed must declare VRMC_springBone_extended_collider when plane shape used: {names:?}"
+        );
+    }
+
+    #[test]
+    fn emit_vrm_v0_stub_produces_parseable_glb() {
+        use tempfile::tempdir;
+        let tmp = tempdir().unwrap();
+        let path = Utf8Path::from_path(tmp.path()).unwrap().join("v0_stub.vrm");
+        emit_vrm_v0_stub("v0_stub_test", &path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        let used = doc["extensionsUsed"].as_array().unwrap();
+        let names: Vec<&str> = used.iter().filter_map(|v| v.as_str()).collect();
+        assert!(
+            names.contains(&"VRM"),
+            "extensionsUsed must declare VRM: {names:?}"
+        );
+        assert!(
+            doc["extensions"]["VRM"].is_object(),
+            "extensions.VRM must be present"
         );
     }
 

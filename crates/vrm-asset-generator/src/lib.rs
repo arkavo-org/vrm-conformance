@@ -15,6 +15,7 @@ pub mod spring_bone;
 pub mod sweep;
 pub mod texture;
 pub mod vrm_ext;
+pub mod vrm_ext_v0;
 pub mod vrma_emit;
 pub mod vrma_params;
 

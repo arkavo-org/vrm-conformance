@@ -3228,6 +3228,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vrm-normalize"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "vrm-ops",
+]
+
+[[package]]
 name = "vrm-ops"
 version = "0.1.0"
 dependencies = [
@@ -3275,6 +3285,7 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
+ "vrm-ops",
 ]
 
 [[package]]
