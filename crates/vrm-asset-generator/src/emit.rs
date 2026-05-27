@@ -367,26 +367,31 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
-/// Emit a minimal VRM 0.x `.vrm` GLB (stub — real content in Task 15).
+/// Emit a VRM 0.x `.vrm` GLB with the full VRM extension block.
 ///
-/// Produces a parseable GLB with `extensionsUsed: ["VRM"]` and a minimal
-/// `VRM` extension block from [`crate::vrm_ext_v0::emit_stub_vrm_extension`].
-/// No binary chunk: the stub has no mesh geometry. Sufficient for integration
-/// tests that only need a parseable `.vrm` file at the given path.
-pub fn emit_vrm_v0_stub(id: &str, output: &Utf8Path) -> Result<()> {
-    use crate::vrm_ext_v0::emit_stub_vrm_extension;
+/// Produces a parseable GLB with `extensionsUsed: ["VRM"]` and a complete
+/// `VRM` extension block (meta, humanoid, firstPerson, blendShapeMaster,
+/// secondaryAnimation, materialProperties) assembled by
+/// [`crate::vrm_ext_v0::emit_vrm_extension`].
+/// No binary chunk: the minimal 0.x default asset has no mesh geometry.
+pub fn emit_vrm_v0(id: &str, output: &Utf8Path) -> Result<()> {
+    use crate::expressions_v0::ExpressionsV0Params;
+
+    let material = MToonParams::defaults(id);
+    let expressions = ExpressionsV0Params { groups: vec![] };
+    let vrm_ext = crate::vrm_ext_v0::emit_vrm_extension(id, &[material], &expressions);
 
     let doc = serde_json::json!({
         "asset": {
             "version": "2.0",
-            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1 (v0-stub)"
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
         },
         "extensionsUsed": ["VRM"],
         "scene": 0,
         "scenes": [{ "nodes": [0] }],
         "nodes": [{ "name": id }],
         "extensions": {
-            "VRM": emit_stub_vrm_extension()
+            "VRM": vrm_ext
         }
     });
 
@@ -403,14 +408,15 @@ pub fn emit_vrm_v0_stub(id: &str, output: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
-/// Emit a VRM 0.x asset triplet: `.vrm` (stub), `.meta.json`, `.test.yaml`.
+/// Emit a VRM 0.x asset triplet: `.vrm`, `.meta.json`, `.test.yaml`.
 ///
-/// The `.vrm` is produced by [`emit_vrm_v0_stub`] — minimal but parseable.
-/// The sidecar files use spec_version `0.x` so plans are clearly tagged.
-/// Task 15 replaces the stub with a full v0 assembly.
+/// The `.vrm` is produced by [`emit_vrm_v0`] — a complete VRM 0.x GLB with
+/// full extension blocks (meta, humanoid, firstPerson, blendShapeMaster,
+/// secondaryAnimation, materialProperties). The sidecar files use
+/// spec_version `0.x` so plans are clearly tagged.
 pub fn emit_with_sidecars_v0(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
     let vrm_path = stem.with_extension("vrm");
-    emit_vrm_v0_stub(&params.id, &vrm_path)?;
+    emit_vrm_v0(&params.id, &vrm_path)?;
 
     let meta_path = stem.with_extension("meta.json");
     write_meta_json(params, None, &vrm_path, &meta_path)?;
@@ -1678,11 +1684,11 @@ mod extended_emit_integration_tests {
     }
 
     #[test]
-    fn emit_vrm_v0_stub_produces_parseable_glb() {
+    fn emit_vrm_v0_produces_parseable_glb_with_full_extension() {
         use tempfile::tempdir;
         let tmp = tempdir().unwrap();
-        let path = Utf8Path::from_path(tmp.path()).unwrap().join("v0_stub.vrm");
-        emit_vrm_v0_stub("v0_stub_test", &path).unwrap();
+        let path = Utf8Path::from_path(tmp.path()).unwrap().join("v0.vrm");
+        emit_vrm_v0("v0_test", &path).unwrap();
         let bytes = std::fs::read(&path).unwrap();
         let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
         let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
@@ -1696,6 +1702,19 @@ mod extended_emit_integration_tests {
             doc["extensions"]["VRM"].is_object(),
             "extensions.VRM must be present"
         );
+        assert_eq!(doc["extensions"]["VRM"]["specVersion"], "0.0");
+        assert!(
+            doc["extensions"]["VRM"]["meta"].is_object(),
+            "VRM.meta must be present"
+        );
+        assert!(
+            doc["extensions"]["VRM"]["humanoid"].is_object(),
+            "VRM.humanoid must be present"
+        );
+        let mat_props = doc["extensions"]["VRM"]["materialProperties"]
+            .as_array()
+            .unwrap();
+        assert_eq!(mat_props.len(), 1, "one default MToon material");
     }
 
     #[test]
