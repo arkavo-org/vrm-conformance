@@ -6,6 +6,8 @@ import {
   type ManifestEntry,
 } from "./manifest";
 
+type SpecVersionFilter = "all" | "0.x" | "1.0";
+
 const app = document.getElementById("app");
 if (!app) {
   throw new Error("#app element missing from index.html");
@@ -16,9 +18,69 @@ void main(app);
 async function main(root: HTMLElement): Promise<void> {
   try {
     const manifest = await loadManifest();
-    render(root, manifest.entries);
+    renderWithFilter(root, manifest.entries);
   } catch (err) {
     renderError(root, err);
+  }
+}
+
+function renderWithFilter(root: HTMLElement, allEntries: ManifestEntry[]): void {
+  let currentFilter: SpecVersionFilter = "all";
+
+  const filterBar = buildFilterBar(currentFilter, (newFilter) => {
+    currentFilter = newFilter;
+    updateFilterBar(filterBar, currentFilter);
+    const filtered = filterEntries(allEntries, currentFilter);
+    render(content, filtered);
+  });
+
+  const content = document.createElement("div");
+  content.id = "content";
+
+  clear(root);
+  root.append(filterBar, content);
+
+  render(content, filterEntries(allEntries, currentFilter));
+}
+
+function filterEntries(entries: ManifestEntry[], filter: SpecVersionFilter): ManifestEntry[] {
+  if (filter === "all") return entries;
+  return entries.filter((e) => (e.spec_version ?? "1.0") === filter);
+}
+
+function buildFilterBar(
+  initial: SpecVersionFilter,
+  onChange: (v: SpecVersionFilter) => void,
+): HTMLElement {
+  const bar = document.createElement("div");
+  bar.className = "filter-bar";
+
+  const label = document.createElement("span");
+  label.className = "filter-label";
+  label.textContent = "Spec:";
+  bar.append(label);
+
+  const chips: { value: SpecVersionFilter; text: string }[] = [
+    { value: "all", text: "All" },
+    { value: "0.x", text: "VRM 0.x" },
+    { value: "1.0", text: "VRM 1.0" },
+  ];
+
+  for (const chip of chips) {
+    const btn = document.createElement("button");
+    btn.className = `chip${initial === chip.value ? " active" : ""}`;
+    btn.dataset.value = chip.value;
+    btn.textContent = chip.text;
+    btn.addEventListener("click", () => onChange(chip.value));
+    bar.append(btn);
+  }
+
+  return bar;
+}
+
+function updateFilterBar(bar: HTMLElement, active: SpecVersionFilter): void {
+  for (const btn of bar.querySelectorAll<HTMLButtonElement>("button.chip")) {
+    btn.classList.toggle("active", btn.dataset.value === active);
   }
 }
 
@@ -45,14 +107,14 @@ function renderError(root: HTMLElement, err: unknown): void {
   root.append(box);
 }
 
-function render(root: HTMLElement, entries: ManifestEntry[]): void {
-  clear(root);
+function render(container: HTMLElement, entries: ManifestEntry[]): void {
+  clear(container);
 
   if (entries.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty";
     empty.textContent = "Manifest loaded but contains no entries yet.";
-    root.append(empty);
+    container.append(empty);
     return;
   }
 
@@ -65,7 +127,7 @@ function render(root: HTMLElement, entries: ManifestEntry[]): void {
 
   for (const testId of testIds) {
     const section = renderTestSection(testId, groups.get(testId) ?? [], renderers);
-    root.append(section);
+    container.append(section);
   }
 }
 
@@ -108,10 +170,21 @@ function renderCell(entry: ManifestEntry): HTMLElement {
   const cell = document.createElement("article");
   cell.className = "cell";
 
+  const header = document.createElement("div");
+  header.className = "cell-header";
+
   const rendererLabel = document.createElement("h3");
   rendererLabel.className = "renderer";
   rendererLabel.textContent = entry.renderer_name;
-  cell.append(rendererLabel);
+  header.append(rendererLabel);
+
+  const specBadge = document.createElement("span");
+  const specVersion = entry.spec_version ?? "1.0";
+  specBadge.className = `spec-version-badge spec-version-${specVersion === "0.x" ? "v0" : "v1"}`;
+  specBadge.textContent = specVersion;
+  header.append(specBadge);
+
+  cell.append(header);
 
   const img = document.createElement("img");
   img.loading = "lazy";

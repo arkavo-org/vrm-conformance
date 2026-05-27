@@ -5,6 +5,7 @@
 
 export interface ManifestEntry {
   test_id: string;
+  spec_version: "0.x" | "1.0"; // Task 4 / Task 6 migration
   renderer_name: string;
   renderer_version: string;
   git_hash: string;
