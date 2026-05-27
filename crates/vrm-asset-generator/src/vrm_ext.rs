@@ -131,6 +131,8 @@ pub fn vrmc_vrm(
 
 /// Build the per-material VRMC_materials_mtoon extension JSON.
 pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
+    use crate::mtoon_common as mc;
+
     let outline_width_mode = match p.outline_width_mode {
         OutlineWidthMode::None => "none",
         OutlineWidthMode::WorldCoordinates => "worldCoordinates",
@@ -142,18 +144,18 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
         "transparentWithZWrite": p.transparent_with_z_write,
         "renderQueueOffsetNumber": p.render_queue_offset_number,
         "shadeColorFactor": p.shade_color_factor,
-        "shadingShiftFactor": p.shading_shift_factor,
-        "shadingToonyFactor": p.shading_toony_factor,
-        "giEqualizationFactor": p.gi_equalization_factor,
+        "shadingShiftFactor": mc::shading_shift_factor(p),
+        "shadingToonyFactor": mc::shading_toony_factor(p),
+        "giEqualizationFactor": mc::gi_equalization_factor(p),
         "matcapFactor": p.matcap_factor,
-        "parametricRimColorFactor": p.parametric_rim_color_factor,
+        "parametricRimColorFactor": mc::parametric_rim_color_factor(p),
         "parametricRimFresnelPowerFactor": p.parametric_rim_fresnel_power_factor,
         "parametricRimLiftFactor": p.parametric_rim_lift_factor,
-        "rimLightingMixFactor": p.rim_lighting_mix_factor,
+        "rimLightingMixFactor": mc::rim_lighting_mix_factor(p),
         "outlineWidthMode": outline_width_mode,
-        "outlineWidthFactor": p.outline_width_factor,
+        "outlineWidthFactor": mc::outline_width_factor(p),
         "outlineColorFactor": p.outline_color_factor,
-        "outlineLightingMixFactor": p.outline_lighting_mix_factor,
+        "outlineLightingMixFactor": mc::outline_lighting_mix_factor(p),
         "uvAnimationScrollXSpeedFactor": p.uv_animation_scroll_x_speed_factor,
         "uvAnimationScrollYSpeedFactor": p.uv_animation_scroll_y_speed_factor,
         "uvAnimationRotationSpeedFactor": p.uv_animation_rotation_speed_factor
