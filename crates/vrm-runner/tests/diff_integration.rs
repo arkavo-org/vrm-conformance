@@ -5,7 +5,7 @@ use camino::Utf8PathBuf;
 use vrm_runner::diff::diff_one;
 use vrm_test_plan::{
     AmbientLight, Camera, ColorSpace, Diff, DiffMode, DirectionalLight, Lighting, Output,
-    PostProcessing, TestPlan, ToneMapping,
+    PostProcessing, SpecVersion, TestPlan, ToneMapping,
 };
 
 fn make_solid_png(path: &std::path::Path, w: u32, h: u32, rgb: [u8; 3]) {
@@ -17,6 +17,7 @@ fn make_solid_png(path: &std::path::Path, w: u32, h: u32, rgb: [u8; 3]) {
 fn synthetic_plan(id: &str, threshold: f32) -> TestPlan {
     TestPlan {
         id: id.into(),
+        spec_version: SpecVersion::V1,
         spec_section: "test".into(),
         asset: "synthetic.vrm".into(),
         camera: Camera {

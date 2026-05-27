@@ -49,12 +49,13 @@ use camino::Utf8PathBuf;
 use vrm_runner::execute_batch::build_manifest;
 use vrm_test_plan::{
     AmbientLight, Camera, ColorSpace, Diff, DiffMode, DirectionalLight, Lighting, Output,
-    PostProcessing, TestPlan, ToneMapping,
+    PostProcessing, SpecVersion, TestPlan, ToneMapping,
 };
 
 fn synthetic_plan(id: &str) -> TestPlan {
     TestPlan {
         id: id.into(),
+        spec_version: SpecVersion::V1,
         spec_section: "VRMC_materials_mtoon".into(),
         asset: format!("{id}.vrm"),
         camera: Camera {
