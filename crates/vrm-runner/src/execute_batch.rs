@@ -166,6 +166,12 @@ pub struct ResultEntry {
     pub actual_color_space: Option<String>,
     #[serde(default)]
     pub render_seconds: Option<f32>,
+    /// Task 28: source spec version reported by the adapter, detected from the
+    /// GLB `extensionsUsed` before any auto-migration. "0.x" for VRM 0.x
+    /// ("VRM" extension), "1.0" for VRM 1.0 ("VRMC_vrm" extension).
+    /// `None` for adapters that predate Task 28 or if detection failed.
+    #[serde(default)]
+    pub source_spec_version: Option<String>,
     #[serde(default)]
     pub error: Option<ResultError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

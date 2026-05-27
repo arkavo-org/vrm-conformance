@@ -1,6 +1,7 @@
 // Spike 1: verify Vrm10.LoadPathAsync + ImmediateCaller runs synchronously
 // in EditMode and produces a Vrm10Instance with a SkinnedMeshRenderer.
 // Spike-only — deleted after Task 11 (subsumed by production code).
+// Task 28: canLoadVrm0X flipped to true so the test exercises VRM 0.x as well.
 
 using NUnit.Framework;
 using UniGLTF;
@@ -24,7 +25,7 @@ namespace Conformance.Tests
 
             var task = Vrm10.LoadPathAsync(
                 FixturePath,
-                canLoadVrm0X: false,
+                canLoadVrm0X: true,
                 showMeshes: true,
                 awaitCaller: new ImmediateCaller(),
                 ct: System.Threading.CancellationToken.None);

@@ -108,17 +108,23 @@ namespace Conformance.Tests.Play
                 yield break;
             }
 
+            // Task 28: detect source spec version from the GLB JSON chunk
+            // before UniVRM migrates 0.x → 1.0 internally.
+            var sourceSpecVersion = SpecVersionDetector.DetectFromGlbPath(t.vrm_path);
+
             GameObject vrmGo = null, lightGo = null, cameraGo = null;
             Manifest.EntryDto result = null;
 
             // Load — synchronous via ImmediateCaller works in PlayMode too.
+            // canLoadVrm0X: true so that VRM 0.x assets are accepted and
+            // auto-migrated to 1.0 internal representation (Task 28).
             System.Threading.Tasks.Task<Vrm10Instance> loadTask = null;
             Exception loadException = null;
             try
             {
                 loadTask = Vrm10.LoadPathAsync(
                     t.vrm_path,
-                    canLoadVrm0X: false,
+                    canLoadVrm0X: true,
                     showMeshes: true,
                     awaitCaller: new ImmediateCaller(),
                     ct: System.Threading.CancellationToken.None);
@@ -232,6 +238,10 @@ namespace Conformance.Tests.Play
                 Manifest.EntryDto sequenceResult = null;
                 yield return RenderSequenceCo(outputDir, rendererName, t, cam, vrm, e => sequenceResult = e);
 
+                // Propagate source_spec_version onto the sequence result (Task 28).
+                if (sequenceResult != null && sequenceResult.status == "ok")
+                    sequenceResult.source_spec_version = sourceSpecVersion;
+
                 // Manual cleanup matching the single-frame finally block.
                 if (cameraGo != null) UnityEngine.Object.DestroyImmediate(cameraGo);
                 if (lightGo != null) UnityEngine.Object.DestroyImmediate(lightGo);
@@ -253,6 +263,7 @@ namespace Conformance.Tests.Play
                     output_path = captureResult.outputPath,
                     actual_color_space = captureResult.actualColorSpace,
                     render_seconds = captureResult.renderSeconds,
+                    source_spec_version = sourceSpecVersion,
                 };
             }
             catch (Exception e)

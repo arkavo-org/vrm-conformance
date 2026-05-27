@@ -168,6 +168,13 @@ namespace Conformance
             public string output_path;
             public string actual_color_space;
             public float render_seconds;
+            /// <summary>
+            /// Source spec version of the loaded VRM asset, detected from
+            /// extensionsUsed in the GLB JSON chunk. "0.x" for VRM 0.x
+            /// (extension "VRM"), "1.0" for VRM 1.0 (extension "VRMC_vrm").
+            /// Null/empty when the load failed before detection (error entries).
+            /// </summary>
+            public string source_spec_version;
             public ErrorDto error;
             // Sequence-shape result fields. Null/zero for single-frame entries.
             public RenderSequenceFrameOutputDto[] frames;

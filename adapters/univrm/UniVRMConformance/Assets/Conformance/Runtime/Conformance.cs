@@ -40,6 +40,68 @@ using UnityEditor;
 using UnityEngine;
 using UniVRM10;
 
+// Task 28: source_spec_version detection helper — shared by EditMode
+// (Conformance.RunBatch) and PlayMode (BatchRunner). Reads the GLB JSON
+// chunk directly so that the original extensionsUsed is inspected before
+// UniVRM's auto-migration to VRM 1.0 internal representation.
+// Placed here (Conformance.cs) rather than Manifest.cs to keep Manifest.cs
+// as a pure DTO file.
+namespace Conformance
+{
+    internal static class SpecVersionDetector
+    {
+        /// <summary>
+        /// Read the first JSON chunk of a GLB file and return "0.x" if the
+        /// asset declares the "VRM" extension (VRM 0.x), or "1.0" if it
+        /// declares "VRMC_vrm" (VRM 1.0).
+        ///
+        /// Returns null on any parse failure so callers can treat it as
+        /// "unknown" rather than crashing the whole batch.
+        /// </summary>
+        public static string DetectFromGlbPath(string path)
+        {
+            try
+            {
+                // GLB layout (little-endian):
+                //   [0-3]  magic        0x46546C67 "glTF"
+                //   [4-7]  version      u32
+                //   [8-11] length       u32
+                //   [12-15] chunk0Len   u32
+                //   [16-19] chunk0Type  u32  (0x4E4F534A = "JSON")
+                //   [20..20+chunk0Len]  UTF-8 JSON text
+                //
+                // We only read the JSON chunk; no need to load the whole file.
+                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var br = new BinaryReader(fs, Encoding.UTF8, leaveOpen: true);
+
+                var magic = br.ReadUInt32();
+                if (magic != 0x46546C67) return null; // not GLB
+
+                br.ReadUInt32(); // version
+                br.ReadUInt32(); // total length
+
+                var chunkLen  = br.ReadUInt32();
+                var chunkType = br.ReadUInt32();
+                if (chunkType != 0x4E4F534A) return null; // chunk 0 is not JSON
+
+                var jsonBytes = br.ReadBytes((int)chunkLen);
+                var json = Encoding.UTF8.GetString(jsonBytes);
+
+                // Lightweight check: look for the extension name strings without
+                // a full JSON parse. Both names are unique enough that a simple
+                // contains check is reliable for well-formed GLB files.
+                if (json.Contains("\"VRMC_vrm\"")) return "1.0";
+                if (json.Contains("\"VRM\""))      return "0.x";
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+}
+
 namespace Conformance
 {
     public static class Conformance
@@ -183,15 +245,22 @@ namespace Conformance
                 };
             }
 
+            // Task 28: detect source spec version from the GLB JSON chunk
+            // before UniVRM migrates 0.x → 1.0 internally. Null = unknown
+            // (parse failure); the field is omitted from the result entry on
+            // error paths where load didn't complete.
+            var sourceSpecVersion = SpecVersionDetector.DetectFromGlbPath(t.vrm_path);
+
             GameObject vrmGo = null;
             GameObject lightGo = null;
             GameObject cameraGo = null;
             try
             {
-                // Load.
+                // Load. canLoadVrm0X: true so that VRM 0.x assets are accepted
+                // and auto-migrated to 1.0 internal representation (Task 28).
                 var loadTask = Vrm10.LoadPathAsync(
                     t.vrm_path,
-                    canLoadVrm0X: false,
+                    canLoadVrm0X: true,
                     showMeshes: true,
                     awaitCaller: new ImmediateCaller(),
                     ct: System.Threading.CancellationToken.None);
@@ -233,6 +302,7 @@ namespace Conformance
                     output_path = captureResult.outputPath,
                     actual_color_space = captureResult.actualColorSpace,
                     render_seconds = captureResult.renderSeconds,
+                    source_spec_version = sourceSpecVersion,
                 };
             }
             catch (Exception e)
