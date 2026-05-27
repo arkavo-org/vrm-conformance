@@ -4,10 +4,13 @@
 //! shadows off, MSAA 4x).
 
 use serde::{Deserialize, Serialize};
+pub use vrm_ops::SpecVersion;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TestPlan {
     pub id: String,
+    #[serde(default = "default_spec_version_v1")]
+    pub spec_version: SpecVersion,
     pub spec_section: String,
     pub asset: String,
     pub camera: Camera,
@@ -70,6 +73,10 @@ pub struct RootTransformAnimation {
 
 fn default_animation_fps() -> u32 {
     60
+}
+
+fn default_spec_version_v1() -> SpecVersion {
+    SpecVersion::V1
 }
 
 /// VRMA (VRMC_vrm_animation) animation block. When present, the runner
@@ -326,6 +333,83 @@ pub struct CouplingMatrix {
 }
 
 #[cfg(test)]
+mod spec_version_tests {
+    use super::*;
+    use vrm_ops::SpecVersion;
+
+    fn minimal_yaml_with_spec_version(v: &str) -> String {
+        format!(
+            r#"
+id: t
+spec_version: "{v}"
+spec_section: test
+asset: a.vrm
+camera:
+  position: [0, 1.3, 1.5]
+  target: [0, 1.3, 0]
+  up: [0, 1, 0]
+  fov_degrees: 30
+lighting:
+  directional: {{ dir: [0, -1, 0], color: [1, 1, 1], intensity: 1.0 }}
+  ambient: {{ color: [1, 1, 1], intensity: 0.2 }}
+output:
+  width: 256
+  height: 256
+  color_space: srgb
+  msaa: 1
+diff:
+  mode: ssim
+  threshold: 0.95
+  reference_renderer: mock
+"#
+        )
+    }
+
+    #[test]
+    fn parses_spec_version_v0() {
+        let yaml = minimal_yaml_with_spec_version("0.x");
+        let plan: TestPlan = serde_yml::from_str(&yaml).unwrap();
+        assert_eq!(plan.spec_version, SpecVersion::V0);
+    }
+
+    #[test]
+    fn parses_spec_version_v1() {
+        let yaml = minimal_yaml_with_spec_version("1.0");
+        let plan: TestPlan = serde_yml::from_str(&yaml).unwrap();
+        assert_eq!(plan.spec_version, SpecVersion::V1);
+    }
+
+    #[test]
+    fn defaults_to_v1_when_absent() {
+        // Back-compat: legacy plans without spec_version parse as VRM 1.0.
+        let yaml = r#"
+id: t
+spec_section: test
+asset: a.vrm
+camera:
+  position: [0, 1.3, 1.5]
+  target: [0, 1.3, 0]
+  up: [0, 1, 0]
+  fov_degrees: 30
+lighting:
+  directional: { dir: [0, -1, 0], color: [1, 1, 1], intensity: 1.0 }
+  ambient: { color: [1, 1, 1], intensity: 0.2 }
+output:
+  width: 256
+  height: 256
+  color_space: srgb
+  msaa: 1
+diff:
+  mode: ssim
+  threshold: 0.95
+  reference_renderer: mock
+"#;
+        let plan: TestPlan = serde_yml::from_str(yaml).unwrap();
+        assert_eq!(plan.spec_version, SpecVersion::V1);
+    }
+}
+
+#[cfg(test)]
 mod coupling_matrix_tests {
     use super::*;
 
@@ -576,6 +660,7 @@ render_sequence:
     fn make_minimal_plan() -> TestPlan {
         TestPlan {
             id: "x".into(),
+            spec_version: SpecVersion::V1,
             spec_section: "x".into(),
             asset: "x.vrm".into(),
             camera: Camera {

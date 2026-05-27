@@ -135,6 +135,7 @@ fn plan_without_physics_serializes_without_field() {
     use vrm_test_plan::*;
     let plan = TestPlan {
         id: "no_phys".into(),
+        spec_version: SpecVersion::V1,
         spec_section: "x".into(),
         asset: "a.vrm".into(),
         camera: Camera {

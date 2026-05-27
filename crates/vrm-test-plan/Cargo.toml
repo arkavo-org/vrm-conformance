@@ -12,6 +12,7 @@ thiserror.workspace = true
 camino.workspace = true
 
 vrm-diff-engine = { path = "../vrm-diff-engine" }
+vrm-ops = { path = "../vrm-ops" }
 
 [dev-dependencies]
 insta.workspace = true
