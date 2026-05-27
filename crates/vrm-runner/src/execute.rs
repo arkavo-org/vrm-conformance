@@ -154,6 +154,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
                 "dump_humanoid_pose",
                 ops::DumpHumanoidPoseParams {
                     session_id: session_id.clone(),
+                    as_spec_version: None,
                 },
             )
             .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
@@ -164,6 +165,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
                 "dump_expression_weights",
                 ops::DumpExpressionWeightsParams {
                     session_id: session_id.clone(),
+                    as_spec_version: None,
                 },
             )
             .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
@@ -174,6 +176,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
                 "dump_look_at_state",
                 ops::DumpLookAtStateParams {
                     session_id: session_id.clone(),
+                    as_spec_version: None,
                 },
             )
             .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;

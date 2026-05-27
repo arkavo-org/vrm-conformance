@@ -236,6 +236,11 @@ pub struct ApplyVrmaAtTimeResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DumpHumanoidPoseParams {
     pub session_id: String,
+    /// When `Some`, request the runner to normalize the dump to the given
+    /// spec version. Absent (default) means return native shape — no
+    /// normalization. Wire-omitted when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_spec_version: Option<SpecVersion>,
 }
 
 /// Single humanoid bone rotation. The name follows the spec's bone-name
@@ -266,6 +271,11 @@ pub struct DumpHumanoidPoseResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DumpExpressionWeightsParams {
     pub session_id: String,
+    /// When `Some`, request the runner to normalize the dump to the given
+    /// spec version. Absent (default) means return native shape — no
+    /// normalization. Wire-omitted when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_spec_version: Option<SpecVersion>,
 }
 
 /// Preset and custom expressions kept structurally separate per spec.
@@ -291,6 +301,11 @@ pub struct DumpExpressionWeightsResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DumpLookAtStateParams {
     pub session_id: String,
+    /// When `Some`, request the runner to normalize the dump to the given
+    /// spec version. Absent (default) means return native shape — no
+    /// normalization. Wire-omitted when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_spec_version: Option<SpecVersion>,
 }
 
 /// How the avatar (per its `VRMC_vrm.lookAt.type`) applies the gaze
@@ -478,6 +493,65 @@ mod source_spec_version_tests {
         };
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         assert_eq!(v["source_spec_version"], "0.x");
+    }
+}
+
+#[cfg(test)]
+mod as_spec_version_tests {
+    use super::*;
+    use crate::SpecVersion;
+
+    #[test]
+    fn dump_expression_weights_params_omits_as_spec_version_when_none() {
+        let p = DumpExpressionWeightsParams {
+            session_id: "s".into(),
+            as_spec_version: None,
+        };
+        let v: serde_json::Value = serde_json::to_value(&p).unwrap();
+        assert!(
+            v.get("as_spec_version").is_none(),
+            "expected key omitted; got {v}"
+        );
+    }
+
+    #[test]
+    fn dump_expression_weights_params_as_spec_version_v1_serializes() {
+        let p = DumpExpressionWeightsParams {
+            session_id: "s".into(),
+            as_spec_version: Some(SpecVersion::V1),
+        };
+        let v: serde_json::Value = serde_json::to_value(&p).unwrap();
+        assert_eq!(v["as_spec_version"], "1.0");
+    }
+
+    #[test]
+    fn dump_expression_weights_params_as_spec_version_v0_serializes() {
+        let p = DumpExpressionWeightsParams {
+            session_id: "s".into(),
+            as_spec_version: Some(SpecVersion::V0),
+        };
+        let v: serde_json::Value = serde_json::to_value(&p).unwrap();
+        assert_eq!(v["as_spec_version"], "0.x");
+    }
+
+    #[test]
+    fn dump_humanoid_pose_params_as_spec_version_works() {
+        let p = DumpHumanoidPoseParams {
+            session_id: "s".into(),
+            as_spec_version: Some(SpecVersion::V0),
+        };
+        let v: serde_json::Value = serde_json::to_value(&p).unwrap();
+        assert_eq!(v["as_spec_version"], "0.x");
+    }
+
+    #[test]
+    fn dump_look_at_state_params_as_spec_version_works() {
+        let p = DumpLookAtStateParams {
+            session_id: "s".into(),
+            as_spec_version: Some(SpecVersion::V1),
+        };
+        let v: serde_json::Value = serde_json::to_value(&p).unwrap();
+        assert_eq!(v["as_spec_version"], "1.0");
     }
 }
 

@@ -288,21 +288,21 @@ Sample the loaded clip at `time_seconds` and write the resulting pose onto the a
 
 Return per-bone local rotations + the hips translation as of the most recent state-advancing op. Bones referenced by the .vrma but absent from the .vrm appear in `bones_missing` and are excluded from per-bone diff (methodology hazard #3).
 
-- Params: `DumpHumanoidPoseParams { session_id }`
+- Params: `DumpHumanoidPoseParams { session_id, as_spec_version? }`
 - Result: `DumpHumanoidPoseResult { source_spec_version, bones, hips_translation, bones_missing }`
 
 ### `dump_expression_weights`
 
 Return current expression weights, preset + custom kept structurally separate per spec. Weights are clamped to `[0, 1]`.
 
-- Params: `DumpExpressionWeightsParams { session_id }`
+- Params: `DumpExpressionWeightsParams { session_id, as_spec_version? }`
 - Result: `DumpExpressionWeightsResult { source_spec_version, presets: map<string, f32>, custom: map<string, f32> }`
 
 ### `dump_look_at_state`
 
 Return current gaze direction (raw quat + spec-defined Extrinsic ZXY yaw/pitch) and the avatar's application mode (`bone | expression | off`).
 
-- Params: `DumpLookAtStateParams { session_id }`
+- Params: `DumpLookAtStateParams { session_id, as_spec_version? }`
 - Result: `DumpLookAtStateResult { source_spec_version, gaze_direction_quat, yaw_deg, pitch_deg, applied_via, offset_from_head_bone }`
 
 ### Response field: `source_spec_version`
@@ -316,6 +316,20 @@ This field is the third gate in the three-way spec-version cross-check: (1) test
 Adapters detect this from the loaded asset's `extensionsUsed` array: `VRMC_vrm` → `"1.0"`, `VRM` → `"0.x"`.
 
 The field is **required** — not optional, no `serde(default)`. Adapters cannot omit it.
+
+### Request param: `as_spec_version`
+
+Optional on `dump_humanoid_pose`, `dump_expression_weights`, `dump_look_at_state`. Wire form `"0.x" | "1.0"`.
+
+Semantics (Task 35 enforces at runner level):
+
+- **Absent (default)**: adapter returns the dump in its **native** spec-version shape — never normalize unless asked.
+- **`"1.0"` against a 0.x asset**: runner normalizes via `vrm-normalize` (joy → happy preset mapping, weight 0–100 → 0–1, etc.).
+- **`"0.x"` against a 1.0 asset**: rejected with error `-32001 NormalizationDirectionUnsupported`. v1→v0 has no lossless mapping for some v1-only presets (`surprised`, etc.).
+- Custom blendshapes without a v1 preset equivalent pass through with `custom:<name>` markers, never dropped.
+- Adapters do not implement normalization themselves — they return native; runner applies normalization post-hoc. Single bug surface.
+
+Field is wire-omitted when absent (`#[serde(skip_serializing_if = "Option::is_none")]`).
 
 ## Reserved operations (Phase 2+)
 
