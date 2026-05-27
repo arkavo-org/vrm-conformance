@@ -14,6 +14,8 @@ This document records cross-renderer divergence findings produced by the suite, 
 
 **Implication if REMOVED (current operating assumption):** slice 1 ships with `avatarA_0_0` alone as Tier 2 canonical. Alternate-source paths (older Studio installer; Hub-sourced content) can be explored in slice 2+ if needed.
 
+**Slice 1 closure (Task 19, 2026-05-26):** the `avatarA_0_0` fallback is in effect. `avatarA_0_0.vrm` is sourced via `scripts/install-humanoid-fixtures.sh` (symlinks from a VRMMetalKit checkout; the asset is not redistributed in this repo per its VRM Platform License). The Task 20 test plan at `test-plans/manual/humanoid/avatarA_0_0.test.yaml` consumes this fixture path. No `vroid_default_F_0_0.vrm` is shipped in slice 1.
+
 The methodology hazards in `docs/methodology.md` describe what divergence we *expect* between renderers (tone mapping, shadow noise, outline AA, …). This document records divergence the suite *actually observed* in our specific corpus + specific adapter pair, beyond those expected differences.
 
 ## Corpus-wide consensus, three-vrm 3.5.0 vs vrm-metal-kit `50cfd7d`
