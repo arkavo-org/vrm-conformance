@@ -6,6 +6,7 @@ pub mod buffer;
 pub mod chain_mesh;
 pub mod cli;
 pub mod emit;
+pub mod expressions_v0;
 pub mod glb;
 pub mod humanoid;
 pub mod mesh;
