@@ -6,7 +6,7 @@ use crate::render::{synthesize_frame, synthesize_png, FrameState};
 use crate::session::{Session, SessionRegistry};
 use camino::Utf8Path;
 use vrm_ops::tools as ops;
-use vrm_ops::RpcError;
+use vrm_ops::{RpcError, SpecVersion};
 
 pub fn load_vrm(
     registry: &mut SessionRegistry,
@@ -163,6 +163,7 @@ pub fn dump_humanoid_pose(
     _params: ops::DumpHumanoidPoseParams,
 ) -> Result<ops::DumpHumanoidPoseResult, RpcError> {
     Ok(ops::DumpHumanoidPoseResult {
+        source_spec_version: SpecVersion::V1,
         bones: vec![
             ops::HumanoidBoneRotation {
                 name: "head".into(),
@@ -185,6 +186,7 @@ pub fn dump_expression_weights(
     let mut presets = std::collections::BTreeMap::new();
     presets.insert("happy".into(), 0.0_f32);
     Ok(ops::DumpExpressionWeightsResult {
+        source_spec_version: SpecVersion::V1,
         presets,
         custom: std::collections::BTreeMap::new(),
     })
@@ -195,6 +197,7 @@ pub fn dump_look_at_state(
     _params: ops::DumpLookAtStateParams,
 ) -> Result<ops::DumpLookAtStateResult, RpcError> {
     Ok(ops::DumpLookAtStateResult {
+        source_spec_version: SpecVersion::V1,
         gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
         yaw_deg: 0.0,
         pitch_deg: 0.0,

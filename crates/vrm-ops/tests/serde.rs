@@ -1,4 +1,4 @@
-use vrm_ops::{tools::*, JsonRpcRequest, JsonRpcResponse, RpcError};
+use vrm_ops::{tools::*, JsonRpcRequest, JsonRpcResponse, RpcError, SpecVersion};
 
 #[test]
 fn load_vrm_request_serializes() {
@@ -122,6 +122,7 @@ fn apply_vrma_at_time_result_roundtrip() {
 #[test]
 fn dump_humanoid_pose_result_roundtrip() {
     let r = DumpHumanoidPoseResult {
+        source_spec_version: SpecVersion::V1,
         bones: vec![
             HumanoidBoneRotation {
                 name: "leftUpperArm".into(),
@@ -155,7 +156,11 @@ fn dump_expression_weights_result_roundtrip() {
     presets.insert("blink".to_string(), 0.02_f32);
     let mut custom = std::collections::BTreeMap::new();
     custom.insert("smug".to_string(), 0.5_f32);
-    let r = DumpExpressionWeightsResult { presets, custom };
+    let r = DumpExpressionWeightsResult {
+        source_spec_version: SpecVersion::V1,
+        presets,
+        custom,
+    };
     let s = serde_json::to_string(&r).unwrap();
     let back: DumpExpressionWeightsResult = serde_json::from_str(&s).unwrap();
     assert_eq!(back.presets.get("happy"), Some(&0.83));
@@ -165,6 +170,7 @@ fn dump_expression_weights_result_roundtrip() {
 #[test]
 fn dump_look_at_state_result_roundtrip() {
     let r = DumpLookAtStateResult {
+        source_spec_version: SpecVersion::V1,
         gaze_direction_quat: [0.0, 0.2588, 0.0, 0.9659], // 30° yaw
         yaw_deg: 30.0,
         pitch_deg: 0.0,
@@ -183,6 +189,7 @@ fn dump_look_at_state_result_roundtrip() {
 #[test]
 fn dump_look_at_state_applied_via_off_serializes() {
     let r = DumpLookAtStateResult {
+        source_spec_version: SpecVersion::V1,
         gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
         yaw_deg: 0.0,
         pitch_deg: 0.0,

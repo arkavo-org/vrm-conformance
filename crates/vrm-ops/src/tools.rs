@@ -4,6 +4,7 @@
 //! JSON-RPC request `params` / response `result` payloads. Same types,
 //! same schemas, two transports.
 
+use crate::SpecVersion;
 use serde::{Deserialize, Serialize};
 
 // ---- Phase 1 required operations ----
@@ -251,6 +252,7 @@ pub struct HumanoidBoneRotation {
 /// does not have (excluded from per-bone diff per methodology hazard #3).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DumpHumanoidPoseResult {
+    pub source_spec_version: SpecVersion,
     pub bones: Vec<HumanoidBoneRotation>,
     pub hips_translation: [f32; 3],
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -273,6 +275,7 @@ pub struct DumpExpressionWeightsParams {
 /// LookAt and reported via `dump_look_at_state` instead.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DumpExpressionWeightsResult {
+    pub source_spec_version: SpecVersion,
     pub presets: std::collections::BTreeMap<String, f32>,
     pub custom: std::collections::BTreeMap<String, f32>,
 }
@@ -310,6 +313,7 @@ pub enum LookAtAppliedVia {
 /// application mode + head-local offset.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DumpLookAtStateResult {
+    pub source_spec_version: SpecVersion,
     pub gaze_direction_quat: [f32; 4],
     pub yaw_deg: f32,
     pub pitch_deg: f32,
@@ -432,6 +436,49 @@ pub struct RenderSequenceResult {
     pub frame_hz_achieved: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub muxed_path: Option<String>,
+}
+
+#[cfg(test)]
+mod source_spec_version_tests {
+    use super::*;
+    use crate::SpecVersion;
+
+    #[test]
+    fn dump_expression_weights_result_carries_source_spec_version() {
+        let r = DumpExpressionWeightsResult {
+            source_spec_version: SpecVersion::V0,
+            presets: std::collections::BTreeMap::new(),
+            custom: std::collections::BTreeMap::new(),
+        };
+        let v: serde_json::Value = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["source_spec_version"], "0.x");
+    }
+
+    #[test]
+    fn dump_humanoid_pose_result_carries_source_spec_version() {
+        let r = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
+            bones: vec![],
+            hips_translation: [0.0, 0.0, 0.0],
+            bones_missing: vec![],
+        };
+        let v: serde_json::Value = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["source_spec_version"], "1.0");
+    }
+
+    #[test]
+    fn dump_look_at_state_result_carries_source_spec_version() {
+        let r = DumpLookAtStateResult {
+            source_spec_version: SpecVersion::V0,
+            gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
+            yaw_deg: 0.0,
+            pitch_deg: 0.0,
+            applied_via: LookAtAppliedVia::Off,
+            offset_from_head_bone: [0.0, 0.0, 0.0],
+        };
+        let v: serde_json::Value = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["source_spec_version"], "0.x");
+    }
 }
 
 #[cfg(test)]

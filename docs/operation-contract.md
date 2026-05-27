@@ -289,21 +289,33 @@ Sample the loaded clip at `time_seconds` and write the resulting pose onto the a
 Return per-bone local rotations + the hips translation as of the most recent state-advancing op. Bones referenced by the .vrma but absent from the .vrm appear in `bones_missing` and are excluded from per-bone diff (methodology hazard #3).
 
 - Params: `DumpHumanoidPoseParams { session_id }`
-- Result: `DumpHumanoidPoseResult { bones, hips_translation, bones_missing }`
+- Result: `DumpHumanoidPoseResult { source_spec_version, bones, hips_translation, bones_missing }`
 
 ### `dump_expression_weights`
 
 Return current expression weights, preset + custom kept structurally separate per spec. Weights are clamped to `[0, 1]`.
 
 - Params: `DumpExpressionWeightsParams { session_id }`
-- Result: `DumpExpressionWeightsResult { presets: map<string, f32>, custom: map<string, f32> }`
+- Result: `DumpExpressionWeightsResult { source_spec_version, presets: map<string, f32>, custom: map<string, f32> }`
 
 ### `dump_look_at_state`
 
 Return current gaze direction (raw quat + spec-defined Extrinsic ZXY yaw/pitch) and the avatar's application mode (`bone | expression | off`).
 
 - Params: `DumpLookAtStateParams { session_id }`
-- Result: `DumpLookAtStateResult { gaze_direction_quat, yaw_deg, pitch_deg, applied_via, offset_from_head_bone }`
+- Result: `DumpLookAtStateResult { source_spec_version, gaze_direction_quat, yaw_deg, pitch_deg, applied_via, offset_from_head_bone }`
+
+### Response field: `source_spec_version`
+
+Every dump operation's response (`dump_humanoid_pose`, `dump_expression_weights`, `dump_look_at_state`) carries a required `source_spec_version: "0.x" | "1.0"` field, echoing what the adapter parsed from the loaded asset.
+
+Cross-checks at runner level (Task 26): must match the test plan's declared `spec_version` and the manifest entry's `spec_version`. Mismatches trigger hard-error abort.
+
+This field is the third gate in the three-way spec-version cross-check: (1) test plan ↔ manifest, (2) test plan camera convention ↔ spec_version, (3) test plan ↔ adapter-reported `source_spec_version`.
+
+Adapters detect this from the loaded asset's `extensionsUsed` array: `VRMC_vrm` → `"1.0"`, `VRM` → `"0.x"`.
+
+The field is **required** — not optional, no `serde(default)`. Adapters cannot omit it.
 
 ## Reserved operations (Phase 2+)
 

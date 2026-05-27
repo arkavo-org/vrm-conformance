@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 use vrm_ops::tools::{DumpExpressionWeightsResult, DumpHumanoidPoseResult, DumpLookAtStateResult};
+#[cfg(test)]
+use vrm_ops::SpecVersion;
 
 /// Per-channel tolerances. All in their respective units (radians, meters,
 /// scalar deltas, degrees). A pass requires every per-channel max to be
@@ -193,6 +195,7 @@ mod tests {
 
     fn empty_expressions() -> DumpExpressionWeightsResult {
         DumpExpressionWeightsResult {
+            source_spec_version: SpecVersion::V1,
             presets: std::collections::BTreeMap::new(),
             custom: std::collections::BTreeMap::new(),
         }
@@ -200,6 +203,7 @@ mod tests {
 
     fn identity_look_at() -> DumpLookAtStateResult {
         DumpLookAtStateResult {
+            source_spec_version: SpecVersion::V1,
             gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
             yaw_deg: 0.0,
             pitch_deg: 0.0,
@@ -211,6 +215,7 @@ mod tests {
     #[test]
     fn identical_pose_passes() {
         let pose = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![HumanoidBoneRotation {
                 name: "leftUpperArm".into(),
                 local_rotation_quat: [0.0, 0.0, 0.0, 1.0],
@@ -235,6 +240,7 @@ mod tests {
     #[test]
     fn quaternion_geodesic_is_sign_invariant() {
         let p_pos = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![HumanoidBoneRotation {
                 name: "head".into(),
                 local_rotation_quat: [0.0, 0.0, 0.0, 1.0],
@@ -243,6 +249,7 @@ mod tests {
             bones_missing: vec![],
         };
         let p_neg = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![HumanoidBoneRotation {
                 name: "head".into(),
                 local_rotation_quat: [0.0, 0.0, 0.0, -1.0],
@@ -269,11 +276,13 @@ mod tests {
     #[test]
     fn hips_translation_fails_outside_tolerance() {
         let pose_a = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![],
             hips_translation: [0.0, 0.0, 0.0],
             bones_missing: vec![],
         };
         let pose_b = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![],
             hips_translation: [0.020, 0.0, 0.0], // 20mm — exceeds 5mm default
             bones_missing: vec![],
@@ -297,6 +306,7 @@ mod tests {
         // should not contribute to per-bone diff even if it appears in
         // the reference.
         let actual = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![HumanoidBoneRotation {
                 name: "head".into(),
                 local_rotation_quat: [0.0, 0.0, 0.0, 1.0],
@@ -305,6 +315,7 @@ mod tests {
             bones_missing: vec!["leftThumbDistal".into()],
         };
         let reference = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![HumanoidBoneRotation {
                 name: "head".into(),
                 local_rotation_quat: [0.0, 0.0, 0.0, 1.0],
@@ -330,6 +341,7 @@ mod tests {
         actual_presets.insert("happy".into(), 0.5_f32);
         actual_presets.insert("blink".into(), 0.0_f32);
         let actual = DumpExpressionWeightsResult {
+            source_spec_version: SpecVersion::V1,
             presets: actual_presets,
             custom: Default::default(),
         };
@@ -338,11 +350,13 @@ mod tests {
         ref_presets.insert("happy".into(), 0.4_f32); // delta 0.1 (fails 0.005 tol)
         ref_presets.insert("blink".into(), 0.0_f32); // delta 0.0
         let reference = DumpExpressionWeightsResult {
+            source_spec_version: SpecVersion::V1,
             presets: ref_presets,
             custom: Default::default(),
         };
 
         let bones = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![],
             hips_translation: [0.0, 0.0, 0.0],
             bones_missing: vec![],
@@ -369,14 +383,17 @@ mod tests {
         let mut actual_presets = std::collections::BTreeMap::new();
         actual_presets.insert("happy".into(), 0.5);
         let actual = DumpExpressionWeightsResult {
+            source_spec_version: SpecVersion::V1,
             presets: actual_presets,
             custom: Default::default(),
         };
         let reference = DumpExpressionWeightsResult {
+            source_spec_version: SpecVersion::V1,
             presets: Default::default(),
             custom: Default::default(),
         };
         let bones = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![],
             hips_translation: [0.0, 0.0, 0.0],
             bones_missing: vec![],
@@ -396,6 +413,7 @@ mod tests {
     #[test]
     fn look_at_yaw_delta_exceeds_tolerance() {
         let actual_look = DumpLookAtStateResult {
+            source_spec_version: SpecVersion::V1,
             gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
             yaw_deg: 30.0,
             pitch_deg: 0.0,
@@ -403,6 +421,7 @@ mod tests {
             offset_from_head_bone: [0.0, 0.06, 0.0],
         };
         let ref_look = DumpLookAtStateResult {
+            source_spec_version: SpecVersion::V1,
             gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
             yaw_deg: 0.0, // 30° delta — exceeds 1° default
             pitch_deg: 0.0,
@@ -410,6 +429,7 @@ mod tests {
             offset_from_head_bone: [0.0, 0.06, 0.0],
         };
         let bones = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![],
             hips_translation: [0.0, 0.0, 0.0],
             bones_missing: vec![],
@@ -431,6 +451,7 @@ mod tests {
     #[test]
     fn offset_from_head_bone_diff() {
         let look_a = DumpLookAtStateResult {
+            source_spec_version: SpecVersion::V1,
             gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
             yaw_deg: 0.0,
             pitch_deg: 0.0,
@@ -438,6 +459,7 @@ mod tests {
             offset_from_head_bone: [0.0, 0.06, 0.0],
         };
         let look_b = DumpLookAtStateResult {
+            source_spec_version: SpecVersion::V1,
             gaze_direction_quat: [0.0, 0.0, 0.0, 1.0],
             yaw_deg: 0.0,
             pitch_deg: 0.0,
@@ -445,6 +467,7 @@ mod tests {
             offset_from_head_bone: [0.0, 0.065, 0.0], // 5mm — exceeds 1mm default
         };
         let bones = DumpHumanoidPoseResult {
+            source_spec_version: SpecVersion::V1,
             bones: vec![],
             hips_translation: [0.0, 0.0, 0.0],
             bones_missing: vec![],
