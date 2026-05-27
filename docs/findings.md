@@ -33,6 +33,19 @@ This document records cross-renderer divergence findings produced by the suite, 
 
 The remaining Phase C tasks (UniVRM wiring, godot-vrm wiring, mock renderer) and Phase D tasks (normalization, methodology doc, site filter) proceed regardless of this deferral — they don't depend on the mid-slice checkpoint's output.
 
+## 2026-05-26 — Slice 1 UniVRM coord-handling repro (Task 29): DEFERRED to user-side bootstrap
+
+**Status.** DEFERRED. Same shape as Task 27 deferral: this investigation requires a built UniVRM adapter and an actual render run on a 0.x asset, which needs Unity 6 installed locally (CLAUDE.md: "CI does build-validate only"). Not feasible in a fresh worktree.
+
+**What changed in Task 28.** UniVRM now accepts 0.x assets (`canLoadVrm0X: true` at all three call sites: `Conformance.cs`, `BatchRunner.cs`, `Vrm10LoadSpike.cs`). Before Task 28 it rejected them outright. So the Task-29 investigation can now actually run.
+
+**What the repro should produce when run.** Render `avatarA_0_0_lit_baseline` through UniVRM and compare visually + via SSIM against three-vrm's render of the same plan (three-vrm is the spec-correct baseline per Task 9). If UniVRM's render differs significantly (e.g., wrong side of the avatar, sideways orientation), that's the coord-handling bug surfacing. Capture the result here and either:
+
+1. **If UniVRM renders correctly:** the suspected coord bug was either fixed upstream since the slice-1 design was written, or was inferred from limited evidence. Close out as "no coord bug observed in current UniVRM v0.131.0 + this adapter wiring."
+2. **If UniVRM renders incorrectly:** isolate which axis (front-vs-back? sideways? upside-down?) and check `https://github.com/vrm-c/UniVRM/issues` for related upstream issues. File a new issue with the slice-1 plan as the reproducer if unfiled, and link here.
+
+**Slice 1 impact.** This deferral does not block the rest of Phase C/D. Tasks 30 (godot), 31 (mock), 32–34 (vrm-normalize), 35–36 (runner normalization + tests), 37 (methodology doc), 38 (site filter) can all proceed. Slice 1 success criterion #2 (VMK 180° flip flagged) was the design's original expected failure flag — Task 9 already inverted that expectation. UniVRM's coord behavior is a separate empirical question that resolves when the user runs the bootstrap.
+
 The methodology hazards in `docs/methodology.md` describe what divergence we *expect* between renderers (tone mapping, shadow noise, outline AA, …). This document records divergence the suite *actually observed* in our specific corpus + specific adapter pair, beyond those expected differences.
 
 ## Corpus-wide consensus, three-vrm 3.5.0 vs vrm-metal-kit `50cfd7d`
