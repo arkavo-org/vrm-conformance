@@ -3358,3 +3358,120 @@ The remaining "collapses" are physically correct: sphere/capsule share end-cap c
 **Closing the VMK#237 loop**: the substep-ordering improvement landed on VMK as a defensive robustness fix (no regression, no real bug needed shifting). The bucket collapse was conformance-side fixture engineering. Both fixes pushed; the issue is effectively resolved from both ends.
 
 **TODO** (not blocking): the corpus should also extend the sweep to include radii that engage the constraint more strongly across additional axes (e.g., chain length + swing amplitude variants) so cross-cohort consensus across the inside-shape feature has more dimensions. Defer until empirically motivated by another adapter.
+
+## 2026-05-26 — VMK 180° flip on VRM 0.x: location and structurality (slice 1 days 1–3 empirical check)
+
+**Pinned VRMMetalKit revision:** `392d94926619bcb59401f49b29e82d2a575d4d15` (from `adapters/vrm-metal-kit/Package.swift`).
+
+**Location.** UPSTREAM_LIBRARY. Lines: `Sources/VRMMetalKit/Core/VRMModel.swift:980–1011` (the `buildNodeHierarchy()` block gated on `if isVRM0`) and `Sources/VRMMetalKit/Core/VRMModel.swift:881–897` (`applyVRM0InverseBindMatrixConjugation()`).
+
+**Structurality.** LOAD_BEARING. Reasoning: the 180° rotation is not a render-pass toggle — it is conjugated into every node's local TRS at model-load time (`node.rotation`, `node.translation`, `node.initialRotation`, `node.initialTranslation`) and a matching left-multiply of `Ry180` into every skin's `inverseBindMatrices`. Physics, animation, and culling all operate in the rotated space thereafter. The `VRMRenderer` comments at lines 1567, 2310–2312, and 2421–2423 explicitly state "VRM 0.0 → 1.0 coordinate conversion is applied at load time, so there is no per-frame version rotation". Removing the load-time flip without also removing the IBM conjugation would produce a `Ry180·p − p` vertex displacement on every joint. The `ARKitCoordinateConverter.rootRotationCorrection` (`Sources/VRMMetalKit/ARKit/ARKitCoordinateConverter.swift:165–167`) is a separate, independent quaternion used only for ARKit root-joint alignment — it is not the VRM 0.x conversion and is not gated on spec version.
+
+**Implication for slice 1.**
+The flip is UPSTREAM_LIBRARY + LOAD_BEARING. This means:
+- No adapter-shim fix is possible. The flip is structurally embedded in VRMMetalKit's load path.
+- The observed rendering effect (model in VRM 1.0 coordinate space) is intentional from VRMMetalKit's perspective: it normalises VRM 0.x to VRM 1.0 semantics so a single downstream render path serves both formats.
+- For conformance purposes, the question is whether VRMMetalKit's normalisation is spec-correct. The VRM 0.x spec (`specification/0.0/README.md`) says models face −Z in Unity's left-handed coordinate system. VRMMetalKit converts to glTF right-handed space (facing +Z) at load time, which matches what VRM 1.0 consumers expect. The camera convention documented in our conformance suite's `set_camera` operation positions the camera at +Z facing −Z, which is correct for both VRM 1.0 and the VRMMetalKit-normalised VRM 0.x space.
+- Upstream issue stub filed at `docs/upstream/VMK-vrm-0x-orientation.md` for tracking; the flag stays documented through slices 1–4 so we have a paper trail if a conformance discrepancy surfaces empirically.
+
+**Evidence.**
+
+```
+# Sources/VRMMetalKit/Core/VRMModel.swift (revision 392d949), lines 980–1011
+# buildNodeHierarchy() — excerpt:
+
+        // VRM 0.0 → VRM 1.0 coordinate conversion.
+        // Unity left-handed (model faces -Z) → glTF right-handed (model faces +Z).
+        // A 180° rotation around Y aligns facing direction AND makes node.worldPosition
+        // consistent with VRM 1.0 (left limbs positive X).  Applied once at load time
+        // so physics, animation, and culling all see the same coordinate space.
+        // The matching `inverseBindMatrices` pass runs after skins are loaded — see
+        // `applyVRM0InverseBindMatrixConjugation()`; without it skinning at rest
+        // would displace vertices by `Ry180·p − p` for each joint.
+        if isVRM0 {
+            for node in nodes {
+                // Conjugate local rotation by 180° Y: (x, y, z, w) → (-x, y, -z, w)
+                node.rotation = simd_normalize(
+                    simd_quatf(ix: -node.rotation.imag.x,
+                               iy:  node.rotation.imag.y,
+                               iz: -node.rotation.imag.z,
+                               r:   node.rotation.real)
+                )
+                // Rotate translation: (x, y, z) → (-x, y, -z)
+                node.translation = SIMD3<Float>(-node.translation.x,
+                                                 node.translation.y,
+                                                -node.translation.z)
+                // Update bind pose storage so resetToBindPose() stays consistent
+                node.initialRotation = node.rotation
+                node.initialTranslation = node.translation
+                // Scale magnitudes are unchanged under 180° rotation
+                node.updateLocalMatrix()
+            }
+            // Recalculate world transforms after mutating every local matrix
+            for node in nodes where node.parent == nil {
+                node.updateWorldTransform()
+            }
+        }
+
+# Sources/VRMMetalKit/Core/VRMModel.swift (revision 392d949), lines 881–897
+# applyVRM0InverseBindMatrixConjugation() — excerpt:
+
+    private func applyVRM0InverseBindMatrixConjugation() {
+        guard isVRM0 else { return }
+        let ry180 = float4x4(
+            SIMD4<Float>(-1, 0,  0, 0),
+            SIMD4<Float>( 0, 1,  0, 0),
+            SIMD4<Float>( 0, 0, -1, 0),
+            SIMD4<Float>( 0, 0,  0, 1)
+        )
+        for skin in skins {
+            for i in 0..<skin.inverseBindMatrices.count {
+                skin.inverseBindMatrices[i] = ry180 * skin.inverseBindMatrices[i]
+            }
+        }
+    }
+```
+
+The adapter shim (`adapters/vrm-metal-kit/Sources/VRMMetalKitAdapter/Operations.swift`) contains no orientation-flipping code. The only `.pi` occurrences in the shim are FOV degree-to-radian conversions and lookAt yaw/pitch conversions — all unrelated to VRM version handling.
+
+## 2026-05-26 — mrxz/vrm-validator coverage of VRM 0.x (slice 1 days 1–3 empirical check)
+
+**Validator binary:** `.tools/vrm-validator-cli` (shell wrapper at `/Users/arkavo/Projects/vrm-conformance/.tools/vrm-validator-cli` invoking `node .tools/vrm-validator/cli.js`; installed via `scripts/install-validator.sh`). Validator version: `2.0.0-dev.3.10` (mrxz/vrm-validator).
+
+**Test asset:** `assets/humanoid/avatarA_0_0.vrm` (VRM 0.x, exported by UniGLTF-2.64.1).
+
+**Result on `avatarA_0_0.vrm`:** ACCEPTED_WITH_WARNINGS. Exit code: 0.
+
+**Summary of issues reported:**
+- `numErrors`: 0
+- `numWarnings`: 16 (all `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE`, severity 1 — material requires a tangent space but mesh primitive does not provide it; runtime-generated tangent space may be non-portable)
+- `numInfos`: 4 (1× `INVALID_EXTENSION_NAME_FORMAT` for the `VRM` extension; 1× `UNSUPPORTED_EXTENSION` — "Cannot validate an extension as it is not supported by the validator: 'VRM'" at severity 2/info; 2× `UNUSED_OBJECT` for textures 24/25/26)
+- `numHints`: 0
+
+**Output (compact summary — full JSON available by re-running the validator):**
+
+```json
+{
+  "uri": "avatarA_0_0.vrm",
+  "validatorVersion": "2.0.0-dev.3.10",
+  "issues": {
+    "numErrors": 0,
+    "numWarnings": 16,
+    "numInfos": 4,
+    "numHints": 0
+  }
+}
+```
+
+Key messages:
+- `INVALID_EXTENSION_NAME_FORMAT` at `/extensionsUsed/0` (severity 1 / warning): VRM 0.x uses the bare `"VRM"` extension name, which does not comply with the glTF extension naming convention (`VENDOR_feature`).
+- `UNSUPPORTED_EXTENSION` at `/extensionsUsed/0` (severity 2 / info): mrxz/vrm-validator does not have a VRM 0.x schema validator; it validates only the glTF core structure, skipping the `VRM` extension blob entirely.
+- `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` ×14 (severity 1 / warning): tangent-space generation required at runtime. This is expected for VRM 0.x Unity exports and is not a conformance-relevant defect for this suite.
+- `UNUSED_OBJECT` ×3 for textures 24/25/26 (severity 2 / info): three embedded textures have no material reference in the glTF core. They may be referenced only inside the `VRM` extension blob (which the validator skips), so these are false positives from the validator's perspective.
+
+**Implication.**
+ACCEPTED_WITH_WARNINGS. The validator accepts VRM 0.x without errors; exit code 0 means the CI validator gate applies uniformly to 0.x assets without modification. The warnings are:
+1. `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` — expected characteristic of VRM 0.x exports; not a blocking defect for the conformance suite. No action needed; document as a per-corpus methodology note.
+2. `UNSUPPORTED_EXTENSION` for the `VRM` blob — the validator performs no VRM 0.x-specific validation. For 0.x corpus entries, this means CI catches only glTF-core structural issues, not VRM-extension correctness. Fall-back to local schema validation against `docs/upstream-specs/vrm-specification/specification/0.0/schema/` for VRM-extension correctness checks is available but not currently needed for slice 1, which focuses on renderer conformance rather than asset correctness.
+
+**No validator exemption needed for 0.x CI.** The existing `vrm-validator-wrap` invocation path works unchanged.
