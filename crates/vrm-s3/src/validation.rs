@@ -1,6 +1,15 @@
 use crate::manifest::{ManifestEntry, ManifestEntryKind};
+use vrm_ops::SpecVersion;
 
 const BLAKE3_LEN: usize = "blake3:".len() + 64;
+
+/// Returns `true` when the `test_id` naming convention signals a VRM 0.x asset.
+///
+/// Convention: a `test_id` is considered 0.x-named when it contains the
+/// substring `_v0_` anywhere, or ends with the suffix `_v0`.
+fn test_id_implies_v0(test_id: &str) -> bool {
+    test_id.contains("_v0_") || test_id.ends_with("_v0")
+}
 
 /// Validate a manifest's entries. Returns a list of errors (empty = valid).
 ///
@@ -163,5 +172,27 @@ fn validate_entry(i: usize, e: &ManifestEntry, errors: &mut Vec<String>) {
 
     if e.git_hash.len() < 7 {
         errors.push(format!("[{i}] git_hash too short: {}", e.git_hash));
+    }
+
+    // Cross-check: test_id naming convention must agree with spec_version field.
+    // A test_id is 0.x-named when it contains `_v0_` or ends with `_v0`.
+    // All other test_ids are treated as 1.0-named.
+    let id_is_v0 = test_id_implies_v0(&e.test_id);
+    match (id_is_v0, e.spec_version) {
+        (true, SpecVersion::V1) => {
+            errors.push(format!(
+                "[{i}] spec_version mismatch: test_id '{}' implies 0.x \
+                 (contains _v0_ or ends with _v0) but spec_version is 1.0",
+                e.test_id
+            ));
+        }
+        (false, SpecVersion::V0) => {
+            errors.push(format!(
+                "[{i}] spec_version mismatch: test_id '{}' implies 1.0 \
+                 (no _v0_ segment) but spec_version is 0.x",
+                e.test_id
+            ));
+        }
+        _ => {}
     }
 }
