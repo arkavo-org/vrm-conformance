@@ -347,6 +347,26 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the expressions_preset_basic v0+v1 pair — 4 assets total.
+    ///
+    /// This is the canonical normalization test pair that validates
+    /// `vrm-normalize::expressions` mapping (joy → happy, neutral → neutral)
+    /// and drives the cross-renderer round-trip property test.
+    ///
+    /// Outputs (2 v0 + 2 v1):
+    /// - `expressions_preset_basic_v0_joy.vrm` — VRM 0.x with `blendShapeMaster`
+    ///   preset=joy, weight=100, mesh/morph index 0.
+    /// - `expressions_preset_basic_v0_neutral.vrm` — VRM 0.x, preset=neutral.
+    /// - `expressions_preset_basic_happy.vrm` — VRM 1.0 with
+    ///   `VRMC_vrm.expressions.preset.happy`, weight=1.0, morph index 0.
+    /// - `expressions_preset_basic_neutral.vrm` — VRM 1.0, preset=neutral.
+    EmitExpressionsPresetBasic {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -1715,6 +1735,97 @@ pub fn run(cli: Cli) -> Result<()> {
                     "emitted {} v0 MToon basic sweep assets ({} skipped) to {}",
                     emitted.len(),
                     skipped.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
+        Cmd::EmitExpressionsPresetBasic {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::{
+                emit_with_sidecars_v0_with_expressions, emit_with_sidecars_v1_with_expressions,
+            };
+            use crate::sweep::{
+                expressions_preset_basic_v0_sweep, expressions_preset_basic_v1_sweep,
+            };
+
+            std::fs::create_dir_all(&output_dir)?;
+
+            let v0_variants = expressions_preset_basic_v0_sweep();
+            let v1_variants = expressions_preset_basic_v1_sweep();
+            let total = v0_variants.len() + v1_variants.len();
+            let mut emitted: Vec<String> = Vec::new();
+            let mut idx = 0;
+
+            // Emit v0 variants (blendShapeMaster with real binds).
+            for (id, expressions) in &v0_variants {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-expressions-preset-basic",
+                        "index": idx,
+                        "total": total,
+                        "id": id,
+                        "spec_version": "0.x"
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {} (v0)", idx + 1, total, id);
+                }
+                let params = MToonParams::defaults(id);
+                let stem = output_dir.join(id);
+                emit_with_sidecars_v0_with_expressions(&params, expressions, &stem)?;
+                emitted.push(id.clone());
+                idx += 1;
+            }
+
+            // Emit v1 variants (VRMC_vrm.expressions.preset with real binds).
+            // The mesh node index is not known at sweep-definition time; it is
+            // determined here (after the skeleton layout is fixed). For the
+            // standard minimal_skeleton, the mesh node is always appended after
+            // all skeleton nodes — currently index 13 (12 skeleton + root) for
+            // the default skeleton. However, rather than hard-coding that, we
+            // let emit_with_sidecars_v1_with_expressions handle it internally:
+            // it already builds the geometry and appends the mesh node at the
+            // right index. The `node` field in the sweep params is updated
+            // at dispatch time.
+            for (id, expr_params) in &v1_variants {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-expressions-preset-basic",
+                        "index": idx,
+                        "total": total,
+                        "id": id,
+                        "spec_version": "1.0"
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {} (v1)", idx + 1, total, id);
+                }
+                let params = MToonParams::defaults(id);
+                let stem = output_dir.join(id);
+                emit_with_sidecars_v1_with_expressions(&params, expr_params, &stem)?;
+                emitted.push(id.clone());
+                idx += 1;
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} expressions-preset-basic assets ({} v0 + {} v1) to {}",
+                    emitted.len(),
+                    v0_variants.len(),
+                    v1_variants.len(),
                     output_dir
                 );
             }

@@ -1972,3 +1972,154 @@ mod sweep_v0_tests {
         );
     }
 }
+
+// ── expressions_preset_basic sweeps (Task 17) ────────────────────────────────
+
+/// VRM 0.x expressions preset basic — canonical normalization test pair (v0 side).
+///
+/// 2 variants:
+/// - `expressions_preset_basic_v0_joy` — `blendShapeMaster` group with
+///   preset=joy, weight=100 (Unity convention) on mesh 0 / morph 0.
+/// - `expressions_preset_basic_v0_neutral` — preset=neutral, same binding.
+///
+/// These are the assets that validate `vrm-normalize::expressions` mapping
+/// (joy → happy, neutral → neutral) in Task 32 and drive the cross-renderer
+/// round-trip property test in Task 36.
+pub fn expressions_preset_basic_v0_sweep(
+) -> Vec<(String, crate::expressions_v0::ExpressionsV0Params)> {
+    use crate::expressions_v0::{
+        BlendShapeBind, BlendShapeGroup, BlendShapePreset, ExpressionsV0Params,
+    };
+
+    vec![
+        (
+            "expressions_preset_basic_v0_joy".to_string(),
+            ExpressionsV0Params {
+                groups: vec![BlendShapeGroup {
+                    name: "Joy".into(),
+                    preset: BlendShapePreset::Joy,
+                    binds: vec![BlendShapeBind {
+                        mesh_index: 0,
+                        morph_target_index: 0,
+                        weight_0_to_100: 100.0,
+                    }],
+                }],
+            },
+        ),
+        (
+            "expressions_preset_basic_v0_neutral".to_string(),
+            ExpressionsV0Params {
+                groups: vec![BlendShapeGroup {
+                    name: "Neutral".into(),
+                    preset: BlendShapePreset::Neutral,
+                    binds: vec![BlendShapeBind {
+                        mesh_index: 0,
+                        morph_target_index: 0,
+                        weight_0_to_100: 100.0,
+                    }],
+                }],
+            },
+        ),
+    ]
+}
+
+/// VRM 1.0 expressions preset basic — canonical normalization test pair (v1 side).
+///
+/// 2 variants:
+/// - `expressions_preset_basic_happy` — `VRMC_vrm.expressions.preset.happy`
+///   bound to mesh node / morph 0, weight=1.0 (glTF convention).
+/// - `expressions_preset_basic_neutral` — preset=neutral, same binding.
+///
+/// Pairs with [`expressions_preset_basic_v0_sweep`] for the canonical
+/// normalization round-trip test.
+pub fn expressions_preset_basic_v1_sweep() -> Vec<(String, crate::vrm_ext::ExpressionsV1Params)> {
+    use crate::vrm_ext::{ExpressionsV1Params, V1ExpressionPreset, V1MorphTargetBind};
+
+    // Note: the node index for the morph-target bind is set to 0 here as a
+    // placeholder. The actual mesh node index is determined at emit time
+    // (it depends on the skeleton node count). The dispatch in cli.rs passes
+    // the correct node index when calling emit_with_sidecars_v1_with_expressions.
+    // For the sweep definition itself we store 0 and the emitter will override.
+    vec![
+        (
+            "expressions_preset_basic_happy".to_string(),
+            ExpressionsV1Params {
+                preset_binds: vec![(
+                    V1ExpressionPreset::Happy,
+                    V1MorphTargetBind {
+                        node: 0,
+                        morph_target_index: 0,
+                        weight_0_to_1: 1.0,
+                    },
+                )],
+            },
+        ),
+        (
+            "expressions_preset_basic_neutral".to_string(),
+            ExpressionsV1Params {
+                preset_binds: vec![(
+                    V1ExpressionPreset::Neutral,
+                    V1MorphTargetBind {
+                        node: 0,
+                        morph_target_index: 0,
+                        weight_0_to_1: 1.0,
+                    },
+                )],
+            },
+        ),
+    ]
+}
+
+#[cfg(test)]
+mod expressions_basic_tests {
+    use super::*;
+
+    #[test]
+    fn v0_sweep_has_two_variants_joy_and_neutral() {
+        let sweep = expressions_preset_basic_v0_sweep();
+        assert_eq!(sweep.len(), 2);
+        let names: Vec<_> = sweep.iter().map(|(name, _)| name.as_str()).collect();
+        assert!(names.iter().any(|n| n.contains("joy")));
+        assert!(names.iter().any(|n| n.contains("neutral")));
+    }
+
+    #[test]
+    fn v1_sweep_has_two_variants_happy_and_neutral() {
+        let sweep = expressions_preset_basic_v1_sweep();
+        assert_eq!(sweep.len(), 2);
+        let names: Vec<_> = sweep.iter().map(|(name, _)| name.as_str()).collect();
+        assert!(names.iter().any(|n| n.contains("happy")));
+        assert!(names.iter().any(|n| n.contains("neutral")));
+    }
+
+    #[test]
+    fn v0_weight_is_unity_convention_100() {
+        let sweep = expressions_preset_basic_v0_sweep();
+        let joy = sweep.iter().find(|(name, _)| name.contains("joy")).unwrap();
+        assert_eq!(joy.1.groups[0].binds[0].weight_0_to_100, 100.0);
+    }
+
+    #[test]
+    fn v1_weight_is_gltf_convention_1() {
+        let sweep = expressions_preset_basic_v1_sweep();
+        let happy = sweep
+            .iter()
+            .find(|(name, _)| name.contains("happy"))
+            .unwrap();
+        assert_eq!(happy.1.preset_binds[0].1.weight_0_to_1, 1.0);
+    }
+
+    #[test]
+    fn v0_sweep_unique_ids() {
+        let sweep = expressions_preset_basic_v0_sweep();
+        let ids: std::collections::HashSet<_> = sweep.iter().map(|(n, _)| n.clone()).collect();
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn v1_sweep_unique_ids() {
+        let sweep = expressions_preset_basic_v1_sweep();
+        let ids: std::collections::HashSet<_> = sweep.iter().map(|(n, _)| n.clone()).collect();
+        assert_eq!(ids.len(), 2);
+    }
+}

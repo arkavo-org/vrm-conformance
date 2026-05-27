@@ -383,7 +383,19 @@ pub fn emit_vrm_v0(id: &str, materials: &[MToonParams], output: &Utf8Path) -> Re
     use crate::expressions_v0::ExpressionsV0Params;
 
     let expressions = ExpressionsV0Params { groups: vec![] };
-    let vrm_ext = crate::vrm_ext_v0::emit_vrm_extension(id, materials, &expressions);
+    emit_vrm_v0_with_expressions(id, materials, &expressions, output)
+}
+
+/// Like [`emit_vrm_v0`] but accepts caller-supplied `ExpressionsV0Params`
+/// so the canonical normalization test pair can embed real morph-target
+/// bindings in `blendShapeMaster.blendShapeGroups[]`.
+pub fn emit_vrm_v0_with_expressions(
+    id: &str,
+    materials: &[MToonParams],
+    expressions: &crate::expressions_v0::ExpressionsV0Params,
+    output: &Utf8Path,
+) -> Result<()> {
+    let vrm_ext = crate::vrm_ext_v0::emit_vrm_extension(id, materials, expressions);
 
     let doc = serde_json::json!({
         "asset": {
@@ -438,6 +450,158 @@ pub fn emit_with_sidecars_v0(params: &MToonParams, stem: &Utf8Path) -> Result<()
     Ok(())
 }
 
+/// Like [`emit_with_sidecars_v0`] but embeds caller-supplied
+/// `ExpressionsV0Params` into the `blendShapeMaster.blendShapeGroups[]`
+/// block. Used by `emit-expressions-preset-basic` for the v0 side of the
+/// canonical normalization test pair.
+pub fn emit_with_sidecars_v0_with_expressions(
+    params: &MToonParams,
+    expressions: &crate::expressions_v0::ExpressionsV0Params,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_v0_with_expressions(&params.id, &[params.clone()], expressions, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(params, None, &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan = build_default_test_plan(params, &asset_relpath);
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// Emit a VRM 1.0 asset triplet with caller-supplied `ExpressionsV1Params`
+/// wired into `VRMC_vrm.expressions.preset`.
+///
+/// The emitted `.vrm` is structurally identical to [`emit_vrm`] (sphere mesh +
+/// humanoid skeleton + five viseme morph-targets) except that the
+/// `expressions.preset` block is built from `expr_params` instead of the
+/// default viseme preset set. This is the v1 side of the canonical
+/// normalization test pair (`expressions_preset_basic`).
+///
+/// Note: the mesh still carries five morph-target accessors (the viseme
+/// geometry from `pack_mesh_with_morphs`). The expression preset binds in
+/// `expr_params` reference `morph_target_index: 0` on the mesh node, which
+/// IS a valid morph-target accessor index (the "aa" viseme delta). Option A
+/// per task spec: the binding is what we test, not the geometry's semantics.
+pub fn emit_with_sidecars_v1_with_expressions(
+    params: &MToonParams,
+    expr_params: &crate::vrm_ext::ExpressionsV1Params,
+    stem: &Utf8Path,
+) -> Result<()> {
+    use crate::vrm_ext::preset_expression_binds_from_params;
+
+    // Build the same geometry as emit_vrm: sphere + 5 viseme morph-targets.
+    let mesh = sphere(0.3, 24, 48);
+    let morphs = viseme_morph_deltas(&mesh.positions);
+    let (packed, morph_accessors) = crate::buffer::pack_mesh_with_morphs(&mesh, &morphs);
+
+    let skeleton = minimal_skeleton();
+    let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
+    let head_node = skeleton.bone_to_node["head"];
+
+    let mesh_node_index = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_mesh", params.id),
+        "mesh": 0
+    }));
+    let head = &mut nodes[head_node];
+    let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
+    head_children.push(json!(mesh_node_index));
+    head["children"] = Value::Array(head_children);
+
+    let targets: Vec<Value> = morph_accessors
+        .iter()
+        .map(|&idx| json!({ "POSITION": idx }))
+        .collect();
+
+    let extensions_used: Vec<&str> =
+        vec!["KHR_materials_unlit", "VRMC_vrm", "VRMC_materials_mtoon"];
+
+    let mut doc = json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
+        },
+        "extensionsUsed": extensions_used,
+        "extensionsRequired": ["VRMC_vrm"],
+        "scene": 0,
+        "scenes": [
+            { "nodes": [skeleton.root_node] }
+        ],
+        "nodes": nodes,
+        "meshes": [
+            {
+                "name": format!("{}_geom", params.id),
+                "primitives": [
+                    {
+                        "attributes": {
+                            "POSITION": 0,
+                            "NORMAL": 1,
+                            "TEXCOORD_0": 2
+                        },
+                        "indices": 3,
+                        "material": 0,
+                        "mode": 4,
+                        "targets": targets
+                    }
+                ]
+            }
+        ],
+        "materials": [base_material(params)],
+        "extensions": {
+            "VRMC_vrm": vrmc_vrm(&params.id, &skeleton.bone_to_node, mesh_node_index)
+        }
+    });
+
+    // Override expressions.preset with the caller-supplied binds, updating
+    // the node index to the actual mesh node index (the sweep uses 0 as a
+    // placeholder; the real mesh node is determined after skeleton layout).
+    let mut resolved = expr_params.clone();
+    for (_, bind) in &mut resolved.preset_binds {
+        bind.node = mesh_node_index as u32;
+    }
+    doc["extensions"]["VRMC_vrm"]["expressions"]["preset"] =
+        preset_expression_binds_from_params(&resolved);
+
+    for key in ["buffers", "bufferViews", "accessors"] {
+        doc[key] = packed.json[key].clone();
+    }
+
+    let vrm_path = stem.with_extension("vrm");
+    if let Some(parent) = vrm_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json_bytes = serde_json::to_vec(&doc)?;
+    let glb = write_glb(&GlbDocument {
+        json: json_bytes,
+        binary: packed.binary,
+    })?;
+    std::fs::write(&vrm_path, glb)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(params, None, &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan = build_default_test_plan(params, &asset_relpath);
+    // spec_version defaults to V1 (the back-compat default per TestPlan schema);
+    // explicit here for clarity.
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 /// Emit a `.skipped.json` marker file for a NotApplicable sweep variant.
 ///
 /// Instead of a `.vrm` asset, writes a small JSON file that records why the
@@ -460,7 +624,7 @@ pub fn emit_not_applicable_marker(
     let path = output_dir.join(format!("{id}.skipped.json"));
     std::fs::write(
         &path,
-        serde_json::to_string_pretty(&marker).map_err(|e| std::io::Error::other(e))?,
+        serde_json::to_string_pretty(&marker).map_err(std::io::Error::other)?,
     )?;
     Ok(())
 }

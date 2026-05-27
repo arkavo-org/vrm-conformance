@@ -41,6 +41,100 @@ fn lookat_block(lookat_type: LookAtType) -> Value {
 /// end-to-end through the VRMA expression sweep.
 pub const VISEME_PRESETS: [&str; 5] = ["aa", "ih", "ou", "ee", "oh"];
 
+/// VRM 1.0 expression preset names — the minimal set needed for slice 1.
+///
+/// The canonical `VRMC_vrm.expressions.preset.*` key names per spec.
+/// Weight range is 0–1 (glTF convention), NOT 0–100 (Unity/0.x convention).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum V1ExpressionPreset {
+    Happy,
+    Angry,
+    Sad,
+    Relaxed,
+    Surprised,
+    Neutral,
+    Aa,
+    Ih,
+    Ou,
+    Ee,
+    Oh,
+    Blink,
+    BlinkLeft,
+    BlinkRight,
+    LookUp,
+    LookDown,
+    LookLeft,
+    LookRight,
+}
+
+impl V1ExpressionPreset {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Happy => "happy",
+            Self::Angry => "angry",
+            Self::Sad => "sad",
+            Self::Relaxed => "relaxed",
+            Self::Surprised => "surprised",
+            Self::Neutral => "neutral",
+            Self::Aa => "aa",
+            Self::Ih => "ih",
+            Self::Ou => "ou",
+            Self::Ee => "ee",
+            Self::Oh => "oh",
+            Self::Blink => "blink",
+            Self::BlinkLeft => "blinkLeft",
+            Self::BlinkRight => "blinkRight",
+            Self::LookUp => "lookUp",
+            Self::LookDown => "lookDown",
+            Self::LookLeft => "lookLeft",
+            Self::LookRight => "lookRight",
+        }
+    }
+}
+
+/// A single morph-target bind for a VRM 1.0 expression preset.
+///
+/// Weight range is 0–1 (glTF convention, NOT Unity 0.x's 0–100).
+#[derive(Clone, Debug)]
+pub struct V1MorphTargetBind {
+    pub node: u32,
+    pub morph_target_index: u32,
+    /// Weight in 0–1 range per VRMC_vrm 1.0 spec.
+    pub weight_0_to_1: f32,
+}
+
+/// Parameters for one or more VRM 1.0 preset expression binds.
+///
+/// Each entry wires one named preset to a morph-target bind list.
+/// Used by the canonical normalization test pair (expressions_preset_basic)
+/// so a minimal but real expression binding can be embedded in the v1 asset.
+#[derive(Clone, Debug)]
+pub struct ExpressionsV1Params {
+    pub preset_binds: Vec<(V1ExpressionPreset, V1MorphTargetBind)>,
+}
+
+/// Build a `VRMC_vrm.expressions.preset` JSON map from caller-supplied
+/// `ExpressionsV1Params`. Each `(preset, bind)` pair contributes one key
+/// under `preset`; the key name is the preset's spec canonical string.
+///
+/// Unlike [`viseme_preset_binds`] which hard-codes the five viseme presets,
+/// this function lets the caller choose which preset(s) to emit — used by
+/// the normalization test pair (happy + neutral).
+pub fn preset_expression_binds_from_params(params: &ExpressionsV1Params) -> Value {
+    let mut map = serde_json::Map::new();
+    for (preset, bind) in &params.preset_binds {
+        map.insert(
+            preset.as_str().into(),
+            json!({
+                "morphTargetBinds": [
+                    { "node": bind.node, "index": bind.morph_target_index, "weight": bind.weight_0_to_1 }
+                ]
+            }),
+        );
+    }
+    Value::Object(map)
+}
+
 /// Build the `expressions.preset` JSON map binding each viseme preset to
 /// the corresponding morph target on `mesh_node`. The morph target indices
 /// (0..5) must match the order positions in [`VISEME_PRESETS`] and the
