@@ -2,6 +2,18 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-05-26 — VRoid Studio 2.12.0 0.x export availability (slice 1 days 1–3 empirical check)
+
+**Check.** VRoid Studio 2.12.0, File → Export, format dropdown inspected.
+
+**Result.** **DEFERRED** — requires manual GUI inspection (VRoid Studio has no CLI). Procedure documented in `scripts/check-vroid-studio-0x-export.sh`. User to run the procedure when Studio is accessible and update this entry with the result.
+
+**Pre-decision.** Slice 1 proceeds with the **fallback path** for now (use `avatarA_0_0` alone as Tier 2 canonical, defer `vroid_default_F_0_0` until Studio export availability is confirmed). This keeps slice 1 unblocked. If the manual check later confirms AVAILABLE, the VRoid fixture can be backfilled in a follow-up commit; if REMOVED, the fallback is already in place.
+
+**Implication if AVAILABLE (future):** re-export VRoid default character through the 0.x path; land as `assets/humanoid/vroid_default_F_0_0.vrm`. Slice 1 Tier 2 canonical fixture set grows by one.
+
+**Implication if REMOVED (current operating assumption):** slice 1 ships with `avatarA_0_0` alone as Tier 2 canonical. Alternate-source paths (older Studio installer; Hub-sourced content) can be explored in slice 2+ if needed.
+
 The methodology hazards in `docs/methodology.md` describe what divergence we *expect* between renderers (tone mapping, shadow noise, outline AA, …). This document records divergence the suite *actually observed* in our specific corpus + specific adapter pair, beyond those expected differences.
 
 ## Corpus-wide consensus, three-vrm 3.5.0 vs vrm-metal-kit `50cfd7d`
