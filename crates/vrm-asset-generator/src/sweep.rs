@@ -87,6 +87,16 @@ pub fn mtoon_basic_sweep() -> Vec<MToonParams> {
         out.push(p);
     }
 
+    // VRM 0.x slice-1 v1 counterparts — named to pair with mtoon_basic_v0_sweep()
+    // Applicable entries. The symmetry assertion in registry_symmetry_tests
+    // requires these IDs to exist.
+    out.push(MToonParams::defaults("mtoon_basic_lit_001"));
+    {
+        let mut p = MToonParams::defaults("mtoon_basic_shadeShift_neg05");
+        p.shading_shift_factor = -0.5;
+        out.push(p);
+    }
+
     // alphaMode × alphaCutoff (MASK) and transparentWithZWrite (BLEND).
     // Exercises VMK#264 (MToon shader discard_fragment defeats A2C on MASK)
     // by routing the renderer through its MASK pipeline; cross-renderer SSIM
@@ -2121,5 +2131,68 @@ mod expressions_basic_tests {
         let sweep = expressions_preset_basic_v1_sweep();
         let ids: std::collections::HashSet<_> = sweep.iter().map(|(n, _)| n.clone()).collect();
         assert_eq!(ids.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod registry_symmetry_tests {
+    use super::*;
+    use crate::SweepApplicability;
+
+    /// Slice 1 success criterion #6: every sweep ID ending in `_v0` (or
+    /// containing `_v0_`) must have a 1.0 counterpart registered.
+    /// Counterpart = same ID with `_v0` removed (or `_v0_` replaced with `_`).
+    /// Either the counterpart exists as Applicable, OR the v0 entry is
+    /// registered as NotApplicable.
+    #[test]
+    fn mtoon_basic_v0_applicable_entries_have_v1_counterparts() {
+        let v1_ids: std::collections::HashSet<String> = mtoon_basic_sweep()
+            .into_iter()
+            .map(|p| p.id.clone())
+            .collect();
+
+        let v0_entries = mtoon_basic_v0_sweep();
+        let mut missing_counterparts = Vec::new();
+
+        for (params, applicability) in v0_entries {
+            let v0_id = &params.id;
+            // Map v0 ID → v1 counterpart by stripping the `_v0` infix/suffix.
+            let counterpart_id = v0_id
+                .replace("_basic_v0_", "_basic_")
+                .replace("_v0_", "_")
+                .trim_end_matches("_v0")
+                .to_string();
+
+            if matches!(applicability, SweepApplicability::Applicable)
+                && !v1_ids.contains(&counterpart_id)
+            {
+                missing_counterparts.push(format!(
+                    "v0 sweep entry {v0_id} (Applicable) is missing 1.0 counterpart {counterpart_id}"
+                ));
+            }
+            // NotApplicable entries don't require counterparts.
+        }
+
+        assert!(
+            missing_counterparts.is_empty(),
+            "sweep registry symmetry violations:\n{}",
+            missing_counterparts.join("\n")
+        );
+    }
+
+    /// Same property for the v0+v1 expressions pair (Task 17).
+    /// Pairing is by ordering, not by ID-stripping, since the v0/v1 names
+    /// use different preset tokens (joy/happy, neutral/neutral).
+    #[test]
+    fn expressions_preset_basic_v0_and_v1_have_matching_variant_count() {
+        let v0 = expressions_preset_basic_v0_sweep();
+        let v1 = expressions_preset_basic_v1_sweep();
+        assert_eq!(
+            v0.len(),
+            v1.len(),
+            "expressions sweep variant count mismatch: v0={}, v1={}",
+            v0.len(),
+            v1.len()
+        );
     }
 }
