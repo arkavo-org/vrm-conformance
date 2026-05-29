@@ -4,7 +4,7 @@
 use crate::buffer::{pack_mesh, pack_mesh_with_morphs, pack_sphere_and_multichains};
 use crate::glb::{write_glb, GlbDocument};
 use crate::humanoid::minimal_skeleton;
-use crate::mesh::sphere;
+use crate::mesh::{quad, sphere};
 use crate::params::MToonParams;
 use crate::vrm_ext::{base_material, viseme_preset_binds, vrmc_vrm};
 use anyhow::Result;
@@ -307,6 +307,86 @@ pub fn emit_vrm_with_lookat_type(
         "materials": [base_material(params)],
         "extensions": {
             "VRMC_vrm": vrmc_vrm_with_lookat_type(&params.id, &skeleton.bone_to_node, mesh_node_index, lookat_type)
+        }
+    });
+
+    for key in ["buffers", "bufferViews", "accessors"] {
+        doc[key] = packed.json[key].clone();
+    }
+
+    let json_bytes = serde_json::to_vec(&doc)?;
+    let glb = write_glb(&GlbDocument {
+        json: json_bytes,
+        binary: packed.binary,
+    })?;
+
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(output, glb)?;
+    Ok(())
+}
+
+/// Emit a `.vrm` GLB carrying a single open quad (no morphs) as the only
+/// renderable, for the doubleSided back-face-culling spec test.
+///
+/// Unlike `emit_vrm` (closed sphere + viseme morphs), this is an open
+/// single-quad surface whose front face points +Z. Paired with a camera on
+/// the −Z side (see `build_doublesided_quad_test_plan`), the quad's BACK face
+/// is in frame, so back-face culling becomes observable: `doubleSided=false`
+/// culls it (all-background frame), `doubleSided=true` renders it. The minimal
+/// humanoid skeleton is retained only to satisfy VRMC_vrm validation; the rest
+/// pose is pure translation, so the quad's +Z normal survives into world space.
+pub fn emit_vrm_doublesided_quad(params: &MToonParams, output: &Utf8Path) -> Result<()> {
+    let mesh = quad(0.3);
+    let packed = pack_mesh(&mesh);
+
+    let skeleton = minimal_skeleton();
+    let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
+    let head_node = skeleton.bone_to_node["head"];
+
+    let mesh_node_index = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_quad", params.id),
+        "mesh": 0
+    }));
+    let head = &mut nodes[head_node];
+    let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
+    head_children.push(json!(mesh_node_index));
+    head["children"] = Value::Array(head_children);
+
+    let mut doc = json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
+        },
+        "extensionsUsed": ["KHR_materials_unlit", "VRMC_vrm", "VRMC_materials_mtoon"],
+        "extensionsRequired": ["VRMC_vrm"],
+        "scene": 0,
+        "scenes": [
+            { "nodes": [skeleton.root_node] }
+        ],
+        "nodes": nodes,
+        "meshes": [
+            {
+                "name": format!("{}_geom", params.id),
+                "primitives": [
+                    {
+                        "attributes": {
+                            "POSITION": 0,
+                            "NORMAL": 1,
+                            "TEXCOORD_0": 2
+                        },
+                        "indices": 3,
+                        "material": 0,
+                        "mode": 4
+                    }
+                ]
+            }
+        ],
+        "materials": [base_material(params)],
+        "extensions": {
+            "VRMC_vrm": vrmc_vrm(&params.id, &skeleton.bone_to_node, mesh_node_index)
         }
     });
 
@@ -1940,5 +2020,38 @@ mod extended_emit_integration_tests {
             !names.contains(&"VRMC_springBone_extended_collider"),
             "base sphere collider must NOT declare VRMC_springBone_extended_collider: {names:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod doublesided_quad_tests {
+    use super::*;
+    use crate::params::MToonParams;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    #[test]
+    fn doublesided_quad_emit_has_quad_geom_no_morphs_and_double_sided_flag() {
+        let mut params = MToonParams::defaults("ds_quad_test");
+        params.double_sided = true;
+        let tmp = tempdir().unwrap();
+        let vrm_path = Utf8Path::from_path(tmp.path()).unwrap().join("out.vrm");
+        emit_vrm_doublesided_quad(&params, &vrm_path).unwrap();
+
+        let bytes = std::fs::read(&vrm_path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+
+        // No morph targets on the quad primitive (a confounder we deliberately drop).
+        let prim = &doc["meshes"][0]["primitives"][0];
+        assert!(
+            prim.get("targets").is_none(),
+            "quad primitive must carry no morph targets"
+        );
+        // Material carries the doubleSided flag verbatim.
+        assert_eq!(doc["materials"][0]["doubleSided"], serde_json::json!(true));
+        // Quad geometry: accessor 0 = POSITION (4 verts), accessor 3 = indices (6).
+        assert_eq!(doc["accessors"][0]["count"], serde_json::json!(4));
+        assert_eq!(doc["accessors"][3]["count"], serde_json::json!(6));
     }
 }
