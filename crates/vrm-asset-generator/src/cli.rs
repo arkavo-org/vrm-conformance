@@ -261,6 +261,9 @@ pub enum Cmd {
     EmitSpringboneCouplingSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -278,6 +281,9 @@ pub enum Cmd {
     EmitSequenceSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -321,6 +327,9 @@ pub enum Cmd {
     EmitSpringboneGravityDirSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -330,9 +339,15 @@ pub enum Cmd {
     /// 3 drag shapes (flat, high→low, exp-decay). All use joint_count=4; the
     /// per-joint vector overrides the scalar for the swept axis. Exercises
     /// adapter-level discretization on non-uniform chains.
+    ///
+    /// Note: per-joint stiffness/drag vectors are VRM 1.0-only; this command
+    /// rejects `--spec-version 0.x` with NotApplicableReason::PerJointStiffnessV1Only.
     EmitSpringboneTaperSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -1163,10 +1178,12 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitSpringboneCouplingSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::emit::{
                 emit_with_sidecars_spring_bone, emit_with_sidecars_spring_bone_swing,
+                emit_with_sidecars_spring_bone_v0, emit_with_sidecars_spring_bone_v0_swing,
             };
             use crate::spring_bone::spring_bone_coupling_sweep;
 
@@ -1193,7 +1210,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 let stem = output_dir.join(&spring.id);
                 let mtoon = MToonParams::defaults(&spring.id);
-                emit_with_sidecars_spring_bone(&mtoon, spring, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_v0(&mtoon, spring, &stem)?
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone(&mtoon, spring, &stem)?
+                    }
+                }
                 emitted.push(stem);
 
                 // Swing variant (load-bearing for the matrix runner —
@@ -1219,7 +1243,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 prefixed.spring_name = format!("{swing_id}_chain");
                 let stem = output_dir.join(&swing_id);
                 let mtoon = MToonParams::defaults(&swing_id);
-                emit_with_sidecars_spring_bone_swing(&mtoon, &prefixed, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_v0_swing(&mtoon, &prefixed, &stem)?
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone_swing(&mtoon, &prefixed, &stem)?
+                    }
+                }
                 emitted.push(stem);
             }
 
@@ -1244,9 +1275,13 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitSequenceSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
-            use crate::emit::emit_with_sidecars_spring_bone_swing_sequence;
+            use crate::emit::{
+                emit_with_sidecars_spring_bone_swing_sequence,
+                emit_with_sidecars_spring_bone_v0_sequence,
+            };
             use crate::spring_bone::spring_bone_basic_sweep;
 
             std::fs::create_dir_all(&output_dir)?;
@@ -1274,7 +1309,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 prefixed.spring_name = format!("{seq_id}_chain");
                 let stem = output_dir.join(&seq_id);
                 let mtoon = MToonParams::defaults(&seq_id);
-                emit_with_sidecars_spring_bone_swing_sequence(&mtoon, &prefixed, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_v0_sequence(&mtoon, &prefixed, &stem)?
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone_swing_sequence(&mtoon, &prefixed, &stem)?
+                    }
+                }
                 emitted.push(stem);
             }
 
@@ -1516,10 +1558,12 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitSpringboneGravityDirSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::emit::{
                 emit_with_sidecars_spring_bone, emit_with_sidecars_spring_bone_swing,
+                emit_with_sidecars_spring_bone_v0, emit_with_sidecars_spring_bone_v0_swing,
             };
             use crate::sweep::spring_bone_gravity_dir_sweep;
 
@@ -1547,7 +1591,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 let stem = output_dir.join(&settle_id);
                 let mtoon = MToonParams::defaults(&settle_id);
-                emit_with_sidecars_spring_bone(&mtoon, spring, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_v0(&mtoon, spring, &stem)?
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone(&mtoon, spring, &stem)?
+                    }
+                }
                 emitted.push(stem);
                 idx += 1;
 
@@ -1570,7 +1621,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 prefixed.spring_name = format!("{swing_id}_chain");
                 let stem = output_dir.join(&swing_id);
                 let swing_mtoon = MToonParams::defaults(&swing_id);
-                emit_with_sidecars_spring_bone_swing(&swing_mtoon, &prefixed, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_v0_swing(&swing_mtoon, &prefixed, &stem)?
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone_swing(&swing_mtoon, &prefixed, &stem)?
+                    }
+                }
                 emitted.push(stem);
                 idx += 1;
             }
@@ -1594,12 +1652,20 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitSpringboneTaperSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::emit::{
                 emit_with_sidecars_spring_bone, emit_with_sidecars_spring_bone_swing,
             };
             use crate::sweep::spring_bone_taper_sweep;
+
+            if spec_version == vrm_ops::SpecVersion::V0 {
+                anyhow::bail!(
+                    "emit-springbone-taper-sweep has no VRM 0.x form: \
+                     NotApplicableReason::PerJointStiffnessV1Only"
+                );
+            }
 
             std::fs::create_dir_all(&output_dir)?;
             let variants = spring_bone_taper_sweep();

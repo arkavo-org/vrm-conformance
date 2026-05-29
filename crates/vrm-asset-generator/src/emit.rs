@@ -1559,6 +1559,30 @@ pub fn emit_with_sidecars_spring_bone_swing_sequence(
     Ok(())
 }
 
+/// 0.x sequence-mode spring-bone triplet: same `.vrm` as the v0 settle path
+/// (no animation in the asset), but the `.test.yaml` carries a `render_sequence`
+/// block. Mirrors `emit_with_sidecars_spring_bone_swing_sequence` over the v0 emit.
+pub fn emit_with_sidecars_spring_bone_v0_sequence(
+    mtoon: &MToonParams,
+    spring: &SpringBoneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_v0(mtoon, spring, &vrm_path)?;
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(mtoon, Some(spring), &vrm_path, &meta_path)?;
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan =
+        crate::sidecar::build_spring_bone_swing_sequence_test_plan(mtoon, &asset_relpath);
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    write_test_yaml(&plan, &yaml_path)?;
+    Ok(())
+}
+
 /// Emit a `.vrm` GLB identical in structure to `emit_vrm_with_spring_bone`
 /// but with VRMC_springBone colliders declared in the extension.
 ///

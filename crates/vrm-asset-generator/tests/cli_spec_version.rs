@@ -443,3 +443,82 @@ fn collider_sweep_v0_emits_only_sphere_cells() {
         "0.x collider sweep must emit at least one sphere cell with secondaryAnimation"
     );
 }
+
+#[test]
+fn gravity_dir_and_coupling_sweeps_emit_v0() {
+    for sub in [
+        "emit-springbone-gravity-dir-sweep",
+        "emit-springbone-coupling-sweep",
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join(sub);
+        let status = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+            .args([
+                sub,
+                "--spec-version",
+                "0.x",
+                "--output-dir",
+                out.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success(), "{sub} 0.x must exit 0");
+        let any_sa = std::fs::read_dir(&out)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "vrm"))
+            .any(|e| {
+                String::from_utf8_lossy(&std::fs::read(e.path()).unwrap())
+                    .contains("secondaryAnimation")
+            });
+        assert!(any_sa, "{sub} 0.x must emit secondaryAnimation");
+    }
+}
+
+#[test]
+fn taper_sweep_rejects_v0() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("taper0x");
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+        .args([
+            "emit-springbone-taper-sweep",
+            "--spec-version",
+            "0.x",
+            "--output-dir",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("PerJointStiffnessV1Only"));
+}
+
+#[test]
+fn sequence_sweep_v0_emits_render_sequence_block() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("seq0x");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+        .args([
+            "emit-sequence-sweep",
+            "--spec-version",
+            "0.x",
+            "--output-dir",
+            out.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let any_seq = std::fs::read_dir(&out)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().to_string_lossy().ends_with(".test.yaml"))
+        .any(|e| {
+            std::fs::read_to_string(e.path())
+                .unwrap()
+                .contains("render_sequence")
+        });
+    assert!(
+        any_seq,
+        "0.x sequence sweep .test.yaml must carry render_sequence block"
+    );
+}
