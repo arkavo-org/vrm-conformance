@@ -1072,6 +1072,7 @@ pub fn emit_vrm_with_spring_bone_v0(
         &[mtoon.clone()],
         &empty_expressions,
         Some(secondary),
+        &skeleton.bone_to_node,
     );
 
     // ── 3. glTF-level material (v0-compatible: KHR_materials_unlit only) ────
@@ -1365,6 +1366,7 @@ pub fn emit_vrm_with_spring_bone_colliders_v0(
         &[mtoon.clone()],
         &empty_expressions,
         Some(secondary),
+        &skeleton.bone_to_node,
     );
 
     // v0-compatible glTF material: KHR_materials_unlit only, no VRMC_materials_mtoon.
@@ -2310,6 +2312,7 @@ pub fn emit_vrm_with_spring_bone_multichain_v0(
         &[mtoon.clone()],
         &empty_expressions,
         Some(secondary),
+        &skeleton.bone_to_node,
     );
 
     // v0-compatible glTF material: KHR_materials_unlit only, no VRMC_materials_mtoon.

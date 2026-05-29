@@ -6,12 +6,20 @@ use crate::params::MToonParams;
 use serde_json::{json, Value};
 
 /// Build the full `VRM` extension block for a 0.x asset, with a caller-provided
-/// `secondaryAnimation` payload. Pass `None` for the empty default (material-only assets).
+/// `secondaryAnimation` payload and humanoid bone map.
+///
+/// `human_bones` maps VRM 0.x bone name → glTF node index. Pass an empty map
+/// for asset paths that have no skeleton (meshless MToon default). Pass
+/// `&skeleton.bone_to_node` for spring-bone paths that build a real skeleton.
+///
+/// Pass `None` for `secondary_animation` to get the empty default
+/// (material-only assets).
 pub fn emit_vrm_extension_with_secondary(
     title: &str,
     materials: &[MToonParams],
     expressions: &ExpressionsV0Params,
     secondary_animation: Option<Value>,
+    human_bones: &std::collections::BTreeMap<String, usize>,
 ) -> Value {
     let material_props: Vec<Value> = materials
         .iter()
@@ -24,6 +32,11 @@ pub fn emit_vrm_extension_with_secondary(
             "colliderGroups": []
         })
     });
+
+    let human_bones_json: Vec<Value> = human_bones
+        .iter()
+        .map(|(bone, node)| json!({ "bone": bone, "node": node, "useDefaultValues": true }))
+        .collect();
 
     json!({
         "exporterVersion": "vrm-asset-generator/0.x",
@@ -44,7 +57,7 @@ pub fn emit_vrm_extension_with_secondary(
             "otherLicenseUrl": ""
         },
         "humanoid": {
-            "humanBones": [],
+            "humanBones": human_bones_json,
             "armStretch": 0.05,
             "legStretch": 0.05,
             "upperArmTwist": 0.5,
@@ -70,13 +83,20 @@ pub fn emit_vrm_extension_with_secondary(
     })
 }
 
-/// Build the full `VRM` extension block for a 0.x asset (empty secondaryAnimation).
+/// Build the full `VRM` extension block for a 0.x asset (empty secondaryAnimation,
+/// empty humanBones). Used by the meshless MToon default path — no skeleton available.
 pub fn emit_vrm_extension(
     title: &str,
     materials: &[MToonParams],
     expressions: &ExpressionsV0Params,
 ) -> Value {
-    emit_vrm_extension_with_secondary(title, materials, expressions, None)
+    emit_vrm_extension_with_secondary(
+        title,
+        materials,
+        expressions,
+        None,
+        &std::collections::BTreeMap::new(),
+    )
 }
 
 #[cfg(test)]
@@ -163,13 +183,20 @@ mod tests {
 
     #[test]
     fn vrm_ext_carries_provided_secondary_animation() {
+        use std::collections::BTreeMap;
         let params = MToonParams::defaults("sa_test");
         let expressions = ExpressionsV0Params { groups: vec![] };
         let sa = serde_json::json!({
             "boneGroups": [{"comment": "x", "stiffiness": 0.5}],
             "colliderGroups": []
         });
-        let ext = emit_vrm_extension_with_secondary("sa_test", &[params], &expressions, Some(sa));
+        let ext = emit_vrm_extension_with_secondary(
+            "sa_test",
+            &[params],
+            &expressions,
+            Some(sa),
+            &BTreeMap::new(),
+        );
         assert_eq!(ext["secondaryAnimation"]["boneGroups"][0]["comment"], "x");
     }
 
@@ -184,6 +211,49 @@ mod tests {
                 .unwrap()
                 .len(),
             0
+        );
+    }
+
+    #[test]
+    fn human_bones_populated_from_map() {
+        use std::collections::BTreeMap;
+        let params = MToonParams::defaults("hb_test");
+        let expressions = ExpressionsV0Params { groups: vec![] };
+        let mut bones: BTreeMap<String, usize> = BTreeMap::new();
+        bones.insert("hips".to_string(), 0);
+        bones.insert("head".to_string(), 4);
+        let ext =
+            emit_vrm_extension_with_secondary("hb_test", &[params], &expressions, None, &bones);
+        let human_bones = ext["humanoid"]["humanBones"].as_array().unwrap();
+        assert_eq!(human_bones.len(), 2, "expected 2 human bone entries");
+        let hips_entry = human_bones
+            .iter()
+            .find(|e| e["bone"] == "hips")
+            .expect("hips entry missing");
+        assert_eq!(hips_entry["node"], 0, "hips node index should be 0");
+        assert_eq!(
+            hips_entry["useDefaultValues"], true,
+            "useDefaultValues should be true"
+        );
+        let head_entry = human_bones
+            .iter()
+            .find(|e| e["bone"] == "head")
+            .expect("head entry missing");
+        assert_eq!(head_entry["node"], 4, "head node index should be 4");
+    }
+
+    #[test]
+    fn emit_vrm_extension_still_has_empty_human_bones() {
+        // emit_vrm_extension (no-skeleton path) must still produce empty humanBones
+        // — the meshless MToon default is a known limitation and not in scope.
+        let params = MToonParams::defaults("empty_bones_test");
+        let expressions = ExpressionsV0Params { groups: vec![] };
+        let ext = emit_vrm_extension("empty_bones_test", &[params], &expressions);
+        let human_bones = ext["humanoid"]["humanBones"].as_array().unwrap();
+        assert_eq!(
+            human_bones.len(),
+            0,
+            "meshless path must keep empty humanBones"
         );
     }
 }

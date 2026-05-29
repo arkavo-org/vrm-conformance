@@ -1,5 +1,10 @@
 use camino::Utf8PathBuf;
-use vrm_asset_generator::{emit::emit_vrm, glb::extract_json_chunk, params::MToonParams};
+use vrm_asset_generator::{
+    emit::{emit_vrm, emit_vrm_with_spring_bone_v0},
+    glb::extract_json_chunk,
+    params::MToonParams,
+    spring_bone::SpringBoneParams,
+};
 use vrm_validator_wrap::{validate, ValidatorConfig};
 
 fn config_or_skip() -> Option<ValidatorConfig> {
@@ -119,4 +124,44 @@ fn emit_vrm_binds_five_visemes_to_mesh_morph_targets() {
 fn primitive_owner_node(doc: &serde_json::Value) -> Option<usize> {
     let nodes = doc["nodes"].as_array()?;
     nodes.iter().position(|n| n["mesh"].as_u64() == Some(0))
+}
+
+/// VRM 0.x spring-bone assets must populate `VRM.humanoid.humanBones` from
+/// the skeleton so real renderers (VRMMetalKit, three-vrm, UniVRM) can find
+/// the required hips bone and load the avatar successfully.
+#[test]
+fn spring_bone_v0_asset_has_non_empty_human_bones_with_hips() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = Utf8PathBuf::from_path_buf(dir.path().join("sb_v0_hips.vrm")).unwrap();
+
+    let mtoon = MToonParams::defaults("sb_v0_hips");
+    let spring = SpringBoneParams::defaults("sb_v0_hips");
+    emit_vrm_with_spring_bone_v0(&mtoon, &spring, &out).expect("v0 emission must succeed");
+
+    let bytes = std::fs::read(out.as_std_path()).unwrap();
+    let json_bytes = extract_json_chunk(&bytes).expect("GLB must have a JSON chunk");
+    let doc: serde_json::Value = serde_json::from_slice(&json_bytes).unwrap();
+
+    let human_bones = doc["extensions"]["VRM"]["humanoid"]["humanBones"]
+        .as_array()
+        .expect("humanoid.humanBones must be an array");
+
+    assert!(
+        !human_bones.is_empty(),
+        "humanoid.humanBones must not be empty in a v0 spring-bone asset"
+    );
+
+    let hips_entry = human_bones
+        .iter()
+        .find(|e| e["bone"].as_str() == Some("hips"))
+        .expect("humanoid.humanBones must contain a hips entry");
+
+    assert!(
+        hips_entry["node"].is_u64(),
+        "hips entry must have a numeric node index"
+    );
+    assert_eq!(
+        hips_entry["useDefaultValues"], true,
+        "hips entry must have useDefaultValues: true"
+    );
 }
