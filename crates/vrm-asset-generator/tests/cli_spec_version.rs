@@ -386,3 +386,60 @@ fn springbone_swing_sweep_v0_emits_secondary_animation_and_animation_block() {
         "0.x swing sweep .test.yaml must carry animation block"
     );
 }
+
+#[test]
+fn extended_collider_sweep_rejects_v0() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("ext0x");
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+        .args([
+            "emit-springbone-extended-sweep",
+            "--spec-version",
+            "0.x",
+            "--output-dir",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !o.status.success(),
+        "extended-collider sweep must reject 0.x"
+    );
+    assert!(String::from_utf8_lossy(&o.stderr).contains("ExtendedCollidersV1Only"));
+}
+
+#[test]
+fn collider_sweep_v0_emits_only_sphere_cells() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("coll0x");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+        .args([
+            "emit-springbone-collider-sweep",
+            "--spec-version",
+            "0.x",
+            "--output-dir",
+            out.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    // No emitted asset id should contain "capsule".
+    let any_capsule = std::fs::read_dir(&out)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().contains("capsule"));
+    assert!(!any_capsule, "0.x collider sweep must skip capsule cells");
+    // And at least one sphere cell WAS emitted with a secondaryAnimation.
+    let any_sa = std::fs::read_dir(&out)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "vrm"))
+        .any(|e| {
+            String::from_utf8_lossy(&std::fs::read(e.path()).unwrap())
+                .contains("secondaryAnimation")
+        });
+    assert!(
+        any_sa,
+        "0.x collider sweep must emit at least one sphere cell with secondaryAnimation"
+    );
+}

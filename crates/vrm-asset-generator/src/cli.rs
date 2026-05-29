@@ -286,9 +286,14 @@ pub enum Cmd {
     /// variants × settle + swing). Each asset has one collider (sphere or
     /// capsule) attached to the head node in the chain's path. The settle
     /// plan uses 60-step settle; the swing plan adds animate_root_transform.
+    /// At 0.x, capsule cells are skipped (no 0.x form); sphere cells are
+    /// emitted via the v0 secondaryAnimation path.
     EmitSpringboneColliderSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -297,10 +302,14 @@ pub enum Cmd {
     /// × settle + swing). Variants: 3 shapes (plane, inside-sphere, inside-capsule)
     /// × 3 placements + 3 shapes × 3 angle-limits (30°, 60°, 90°) = 18 base ×
     /// settle/swing = 36 plans. Uses VRMC_springBone_extended_collider-1.0
-    /// extension shapes and per-joint angleLimit.
+    /// extension shapes and per-joint angleLimit. Rejects 0.x (VRMC_springBone_extended_collider
+    /// is a 1.0-only extension).
     EmitSpringboneExtendedSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -1288,22 +1297,35 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitSpringboneColliderSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::emit::{
                 emit_with_sidecars_spring_bone_colliders,
                 emit_with_sidecars_spring_bone_colliders_swing,
+                emit_with_sidecars_spring_bone_colliders_v0,
+                emit_with_sidecars_spring_bone_colliders_v0_swing,
             };
             use crate::sweep::spring_bone_collider_sweep;
 
             std::fs::create_dir_all(&output_dir)?;
             let variants = spring_bone_collider_sweep();
-            // Each variant emits BOTH a settle and a swing plan — 24 × 2 = 48 plans.
+            // Each variant emits BOTH a settle and a swing plan — 24 × 2 = 48 plans (V1).
+            // At V0, capsule cells are skipped; total is dynamic.
             let total = variants.len() * 2;
             let mut emitted = Vec::new();
             let mut idx = 0;
 
             for (mtoon, scene) in &variants {
+                // At V0, skip any cell whose colliders contain a non-sphere shape.
+                if spec_version == vrm_ops::SpecVersion::V0
+                    && scene.colliders.iter().any(|c| {
+                        !matches!(c.shape, crate::spring_bone::ColliderShape::Sphere { .. })
+                    })
+                {
+                    continue;
+                }
+
                 // Settle variant: ID unchanged (matches the `springbone_collider_*` prefix)
                 let settle_id = mtoon.id.clone();
                 if emit_json {
@@ -1320,7 +1342,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 let stem = output_dir.join(&settle_id);
                 // Clone mtoon with settle ID (already correct), but ensure scene's spring ID matches.
-                emit_with_sidecars_spring_bone_colliders(mtoon, scene, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_colliders_v0(mtoon, scene, &stem)?;
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone_colliders(mtoon, scene, &stem)?;
+                    }
+                }
                 emitted.push(stem);
                 idx += 1;
 
@@ -1354,7 +1383,22 @@ pub fn run(cli: Cli) -> Result<()> {
                     s
                 };
                 let stem = output_dir.join(&swing_id);
-                emit_with_sidecars_spring_bone_colliders_swing(&swing_mtoon, &swing_scene, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_colliders_v0_swing(
+                            &swing_mtoon,
+                            &swing_scene,
+                            &stem,
+                        )?;
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone_colliders_swing(
+                            &swing_mtoon,
+                            &swing_scene,
+                            &stem,
+                        )?;
+                    }
+                }
                 emitted.push(stem);
                 idx += 1;
             }
@@ -1378,6 +1422,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitSpringboneExtendedSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::emit::{
@@ -1385,6 +1430,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 emit_with_sidecars_spring_bone_extended_swing,
             };
             use crate::sweep::spring_bone_extended_collider_sweep;
+
+            if spec_version == vrm_ops::SpecVersion::V0 {
+                anyhow::bail!(
+                    "emit-springbone-extended-sweep has no VRM 0.x form: \
+                     NotApplicableReason::ExtendedCollidersV1Only"
+                );
+            }
 
             std::fs::create_dir_all(&output_dir)?;
             let variants = spring_bone_extended_collider_sweep();
