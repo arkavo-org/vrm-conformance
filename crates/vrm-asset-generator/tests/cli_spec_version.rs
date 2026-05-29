@@ -234,3 +234,40 @@ fn applicable_texture_sweeps_emit_v0() {
         assert!(has_vrm, "{sub} must emit at least one .vrm at 0.x");
     }
 }
+
+#[test]
+fn notapplicable_sweeps_reject_v0() {
+    for (sub, reason) in [
+        (
+            "emit-shading-shift-texture-sweep",
+            "ShadingShiftTextureV1Only",
+        ),
+        (
+            "emit-rim-multiply-texture-sweep",
+            "RimMultiplyTextureV1Only",
+        ),
+        ("emit-texture-transform-sweep", "KhrTextureTransformV1Only"),
+    ] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let out = tmp.path().join(sub);
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+            .args([
+                sub,
+                "--spec-version",
+                "0.x",
+                "--output-dir",
+                out.to_str().unwrap(),
+            ])
+            .output()
+            .expect("run sweep");
+        assert!(
+            !output.status.success(),
+            "{sub} must reject --spec-version 0.x"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(reason),
+            "{sub} rejection must name {reason}; got: {stderr}"
+        );
+    }
+}

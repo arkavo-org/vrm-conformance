@@ -96,6 +96,9 @@ pub enum Cmd {
     EmitTextureTransformSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -144,6 +147,9 @@ pub enum Cmd {
     EmitShadingShiftTextureSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -156,6 +162,9 @@ pub enum Cmd {
     EmitRimMultiplyTextureSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -600,8 +609,15 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitShadingShiftTextureSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
+            if spec_version == vrm_ops::SpecVersion::V0 {
+                anyhow::bail!(
+                    "emit-shading-shift-texture-sweep has no VRM 0.x form: \
+                     NotApplicableReason::ShadingShiftTextureV1Only"
+                );
+            }
             use crate::sweep::mtoon_shading_shift_texture_sweep;
             std::fs::create_dir_all(&output_dir)?;
             let assets = mtoon_shading_shift_texture_sweep();
@@ -638,8 +654,15 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitRimMultiplyTextureSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
+            if spec_version == vrm_ops::SpecVersion::V0 {
+                anyhow::bail!(
+                    "emit-rim-multiply-texture-sweep has no VRM 0.x form: \
+                     NotApplicableReason::RimMultiplyTextureV1Only"
+                );
+            }
             use crate::sweep::mtoon_rim_multiply_texture_sweep;
             std::fs::create_dir_all(&output_dir)?;
             let assets = mtoon_rim_multiply_texture_sweep();
@@ -770,8 +793,15 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitTextureTransformSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
+            if spec_version == vrm_ops::SpecVersion::V0 {
+                anyhow::bail!(
+                    "emit-texture-transform-sweep has no VRM 0.x form: \
+                     NotApplicableReason::KhrTextureTransformV1Only"
+                );
+            }
             use crate::sweep::mtoon_texture_transform_sweep;
             std::fs::create_dir_all(&output_dir)?;
             let assets = mtoon_texture_transform_sweep();
