@@ -2,6 +2,27 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-05-28 — Material-name classification sweep: NEGATIVE on a sphere (reproducer geometry is insufficient)
+
+**What.** The `material_name_classification` sweep (`emit-material-name-classification-sweep`) was built to catch VMK's material-name → forced-double-sided + overlay-depth-bias misfire (the `Vita_clothing` z-fighting; root cause verified at `VRMRenderItemBuilder.swift:216`). Rendered the four single-sided variants — one MToon material under names `matname_plain` (control), `matname_clothing` (trips `cloth`), `matname_skirt` (trips `skirt`), `matname_body` (different category) — through three-vrm and VMK at the standard sweep sphere.
+
+**Result — the sweep does NOT reproduce the artifact.** Within each renderer, every name variant is **byte-identical** to the plain baseline:
+
+| renderer | clothing vs plain | skirt vs plain | body vs plain |
+|---|---|---|---|
+| three-vrm | SSIM 1.000000, identical SHA | 1.000000, identical | 1.000000, identical |
+| vrm-metal-kit | SSIM 1.000000, identical SHA | 1.000000, identical | 1.000000, identical |
+
+three-vrm being name-invariant is expected (conformant). **VMK being name-invariant here is the surprise** — VMK's name heuristic *does* fire in code (verified), but its two consequences are both **invisible on a convex opaque sphere**:
+1. **Forced double-sided / `cullMode(.none)`** — a convex sphere's backfaces are always occluded by its own frontfaces, so culling backfaces vs not produces identical pixels.
+2. **Overlay depth bias (pull toward camera)** — with nothing behind the sphere to z-fight (only the background, which always loses the depth test), pulling it forward changes nothing visible.
+
+**Why this matters / correction to the reproducer design.** The `Vita_clothing` artifact requires geometry the sweep sphere lacks: (a) **thin / non-convex** surface (a cape/dress) so backface culling is visible, and (b) **layered** geometry behind it so the slope-scaled depth bias produces silhouette z-fighting. The classification *happens* on the sphere; its *visible damage* needs the right geometry. So the spec at `docs/superpowers/specs/2026-05-28-material-name-classification-reproducer.md` is correct about the mechanism but its sphere-based variant set is **insufficient to surface it** — a real limitation found by rendering rather than assuming.
+
+**Next (reproducer v2, not yet built).** Re-emit the same material-name × doubleSided matrix on **thin two-layer geometry** (e.g. the existing spring-bone chain mesh, or a double quad: an inner plane + an outer thin shell) so both consequences become pixel-visible. Then VMK should diverge on the `*cloth*`/`*skirt*` variants while three-vrm/UniVRM stay invariant. The current sphere sweep is retained as a **control** proving the classification is pixel-invisible on convex opaque geometry (itself a useful baseline). The methodology pin (`docs/methodology.md`, "Face culling honors `material.doubleSided`, not material name") stands — only the asset geometry needs upgrading to exercise it.
+
+**Boundary.** Conformance-side only; no VMK changes; no fix-option chosen. The VMK root cause remains as documented for the maintainer.
+
 ## 2026-05-28 — VMK 180° flip MATERIALIZES on VRM 0.x humanoids (real-adapter render; Task 27 prediction contradicted)
 
 **What.** Rendering VRM 0.x humanoid fixtures through two real adapters at the slice-1 `-Z` camera convention shows a consistent orientation divergence: **three-vrm renders the avatar's front; vrm-metal-kit renders the back (back of head, bare back).** Consensus fails on both 0.x fixtures tested.
