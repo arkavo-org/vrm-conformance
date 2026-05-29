@@ -15,6 +15,7 @@ pub mod mtoon_v0;
 pub mod params;
 pub mod sidecar;
 pub mod spring_bone;
+pub mod spring_bone_v0;
 pub mod sweep;
 pub mod texture;
 pub mod vrm_ext;
