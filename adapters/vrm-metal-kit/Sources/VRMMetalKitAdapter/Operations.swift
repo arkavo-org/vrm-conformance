@@ -372,7 +372,16 @@ final class Operations: @unchecked Sendable {
         else {
             return invalidParams("ambient.{color,intensity} required")
         }
-        session.directionalDir = dir
+        // VMK#299: VRMMetalKit rotates VRM 0.x models 180° about Y on load. The
+        // camera is conjugated in handleSetCamera; the directional light lives in
+        // the same world space, so conjugate it by the same Ry180 — otherwise the
+        // rotated 0.x model is lit from the mirrored side (a constant shading
+        // offset vs the un-rotated 1.0 / three-vrm / godot reference).
+        var lightDir = dir
+        if session.sourceSpecVersion == "0.x" {
+            lightDir = SIMD3<Float>(-dir.x, dir.y, -dir.z)
+        }
+        session.directionalDir = lightDir
         session.directionalColor = color
         session.directionalIntensity = intensity
         session.ambientColor = ambColor
