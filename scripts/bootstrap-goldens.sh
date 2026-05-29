@@ -129,7 +129,7 @@ else
         cargo run --release -q -p vrm-asset-generator -- emit-texture-transform-sweep \
             --output-dir "$UVXFORM_DIR" --json >/dev/null
     else
-        echo "    SKIP emit-texture-transform-sweep: NotApplicable at VRM 0.x (no --spec-version flag)"
+        echo "    SKIP emit-texture-transform-sweep: NotApplicable at VRM 0.x (rejects --spec-version 0.x with a structured NotApplicableReason)"
         UVXFORM_DIR=""
     fi
 
@@ -152,7 +152,7 @@ else
         cargo run --release -q -p vrm-asset-generator -- emit-shading-shift-texture-sweep \
             --output-dir "$SHADINGSHIFTTEX_DIR" --json >/dev/null
     else
-        echo "    SKIP emit-shading-shift-texture-sweep: NotApplicable at VRM 0.x (no --spec-version flag)"
+        echo "    SKIP emit-shading-shift-texture-sweep: NotApplicable at VRM 0.x (rejects --spec-version 0.x with a structured NotApplicableReason)"
         SHADINGSHIFTTEX_DIR=""
     fi
 
@@ -163,7 +163,7 @@ else
         cargo run --release -q -p vrm-asset-generator -- emit-rim-multiply-texture-sweep \
             --output-dir "$RIMTEX_DIR" --json >/dev/null
     else
-        echo "    SKIP emit-rim-multiply-texture-sweep: NotApplicable at VRM 0.x (no --spec-version flag)"
+        echo "    SKIP emit-rim-multiply-texture-sweep: NotApplicable at VRM 0.x (rejects --spec-version 0.x with a structured NotApplicableReason)"
         RIMTEX_DIR=""
     fi
 
@@ -210,7 +210,7 @@ else
         cargo run --release -q -p vrm-asset-generator -- emit-springbone-extended-sweep \
             --output-dir "$EXTENDED_DIR" --json >/dev/null
     else
-        echo "    SKIP emit-springbone-extended-sweep: NotApplicable at VRM 0.x (no --spec-version flag)"
+        echo "    SKIP emit-springbone-extended-sweep: NotApplicable at VRM 0.x (rejects --spec-version 0.x with a structured NotApplicableReason)"
         EXTENDED_DIR=""
     fi
 
@@ -227,7 +227,7 @@ else
         cargo run --release -q -p vrm-asset-generator -- emit-springbone-taper-sweep \
             --output-dir "$TAPER_DIR" --json >/dev/null
     else
-        echo "    SKIP emit-springbone-taper-sweep: NotApplicable at VRM 0.x (no --spec-version flag)"
+        echo "    SKIP emit-springbone-taper-sweep: NotApplicable at VRM 0.x (rejects --spec-version 0.x with a structured NotApplicableReason)"
         TAPER_DIR=""
     fi
 
