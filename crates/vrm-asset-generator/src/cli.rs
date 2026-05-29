@@ -62,6 +62,9 @@ pub enum Cmd {
     EmitEmissiveSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -75,6 +78,9 @@ pub enum Cmd {
     EmitFirstPersonSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -105,6 +111,9 @@ pub enum Cmd {
     EmitShadeMultiplyTextureSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -120,6 +129,9 @@ pub enum Cmd {
     EmitMatcapTextureSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -156,6 +168,9 @@ pub enum Cmd {
     EmitOutlineWidthMultiplyTextureSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -168,6 +183,9 @@ pub enum Cmd {
     EmitPbrTexturesSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -498,6 +516,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitPbrTexturesSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::sweep::mtoon_pbr_textures_sweep;
@@ -519,7 +538,10 @@ pub fn run(cli: Cli) -> Result<()> {
                     eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
                 }
                 let stem = output_dir.join(&p.id);
-                emit_with_sidecars(p, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => emit_with_sidecars_v0(p, &stem)?,
+                    vrm_ops::SpecVersion::V1 => emit_with_sidecars(p, &stem)?,
+                }
                 emitted.push(stem);
             }
             if emit_json {
@@ -536,6 +558,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitOutlineWidthMultiplyTextureSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::sweep::mtoon_outline_width_multiply_texture_sweep;
@@ -557,7 +580,10 @@ pub fn run(cli: Cli) -> Result<()> {
                     eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
                 }
                 let stem = output_dir.join(&p.id);
-                emit_with_sidecars(p, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => emit_with_sidecars_v0(p, &stem)?,
+                    vrm_ops::SpecVersion::V1 => emit_with_sidecars(p, &stem)?,
+                }
                 emitted.push(stem);
             }
             if emit_json {
@@ -650,6 +676,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitMatcapTextureSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::sweep::mtoon_matcap_texture_sweep;
@@ -671,7 +698,10 @@ pub fn run(cli: Cli) -> Result<()> {
                     eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
                 }
                 let stem = output_dir.join(&p.id);
-                emit_with_sidecars(p, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => emit_with_sidecars_v0(p, &stem)?,
+                    vrm_ops::SpecVersion::V1 => emit_with_sidecars(p, &stem)?,
+                }
                 emitted.push(stem);
             }
             if emit_json {
@@ -693,6 +723,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitShadeMultiplyTextureSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::sweep::mtoon_shade_multiply_texture_sweep;
@@ -714,7 +745,10 @@ pub fn run(cli: Cli) -> Result<()> {
                     eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
                 }
                 let stem = output_dir.join(&p.id);
-                emit_with_sidecars(p, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => emit_with_sidecars_v0(p, &stem)?,
+                    vrm_ops::SpecVersion::V1 => emit_with_sidecars(p, &stem)?,
+                }
                 emitted.push(stem);
             }
             if emit_json {
@@ -779,6 +813,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitFirstPersonSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::sweep::mtoon_first_person_sweep;
@@ -801,7 +836,10 @@ pub fn run(cli: Cli) -> Result<()> {
                     eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
                 }
                 let stem = output_dir.join(&p.id);
-                emit_with_sidecars(p, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => emit_with_sidecars_v0(p, &stem)?,
+                    vrm_ops::SpecVersion::V1 => emit_with_sidecars(p, &stem)?,
+                }
                 emitted.push(stem);
             }
 
@@ -824,6 +862,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitEmissiveSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::sweep::mtoon_emissive_sweep;
@@ -847,7 +886,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
 
                 let stem = output_dir.join(&p.id);
-                emit_with_sidecars(p, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => emit_with_sidecars_v0(p, &stem)?,
+                    vrm_ops::SpecVersion::V1 => emit_with_sidecars(p, &stem)?,
+                }
                 emitted.push(stem);
             }
 

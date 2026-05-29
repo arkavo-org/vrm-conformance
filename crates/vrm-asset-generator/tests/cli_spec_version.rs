@@ -203,3 +203,34 @@ fn emit_sweep_v0_assets_pass_validator() {
         );
     }
 }
+
+#[test]
+fn applicable_texture_sweeps_emit_v0() {
+    for sub in [
+        "emit-emissive-sweep",
+        "emit-shade-multiply-texture-sweep",
+        "emit-matcap-texture-sweep",
+        "emit-outline-width-multiply-texture-sweep",
+        "emit-pbr-textures-sweep",
+        "emit-first-person-sweep",
+    ] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let out = tmp.path().join(sub);
+        let status = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+            .args([
+                sub,
+                "--spec-version",
+                "0.x",
+                "--output-dir",
+                out.to_str().unwrap(),
+            ])
+            .status()
+            .expect("run sweep");
+        assert!(status.success(), "{sub} --spec-version 0.x must exit 0");
+        let has_vrm = std::fs::read_dir(&out)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.path().extension().is_some_and(|x| x == "vrm"));
+        assert!(has_vrm, "{sub} must emit at least one .vrm at 0.x");
+    }
+}
