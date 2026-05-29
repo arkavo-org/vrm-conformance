@@ -385,6 +385,21 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the doubleSided back-face-culling spec-test pair (2 triplets).
+    ///
+    /// `doublesided_quad_{false,true}`: an open quad viewed from BEHIND (camera
+    /// on the −Z side), so back-face culling is observable. doubleSided=false
+    /// culls the quad (all-background frame); doubleSided=true renders it. The
+    /// false variant's plan carries a cross_variant block requiring the two
+    /// renders to diverge (cross-variant SSIM ≤ 0.85). See
+    /// docs/superpowers/specs/2026-05-28-doublesided-cross-variant-spec-test-design.md.
+    EmitDoublesidedSpecTest {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -1895,6 +1910,29 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitDoublesidedSpecTest {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_doublesided_spec_test_pair;
+            let stems = emit_doublesided_spec_test_pair(&output_dir)?;
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": stems.len(),
+                    "output_dir": output_dir,
+                    "assets": stems
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} doubleSided spec-test assets to {}",
+                    stems.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -2222,6 +2260,26 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "ok": { "type": "boolean" },
                                 "count": { "type": "integer" },
                                 "output_dir": { "type": "string" }
+                            }
+                        }
+                    },
+                    "emit-doublesided-spec-test": {
+                        "summary": "Emit the doubleSided back-face-culling spec-test pair (doublesided_quad_false/true): an open quad viewed from behind so culling is observable. The false variant's plan carries a cross_variant SSIM assertion requiring the two renders to diverge.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": { "type": "boolean" }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
                             }
                         }
                     }

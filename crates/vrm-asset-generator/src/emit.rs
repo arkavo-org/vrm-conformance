@@ -8,7 +8,7 @@ use crate::mesh::{quad, sphere};
 use crate::params::MToonParams;
 use crate::vrm_ext::{base_material, viseme_preset_binds, vrmc_vrm};
 use anyhow::Result;
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use serde_json::{json, Value};
 
 pub fn emit_vrm(params: &MToonParams, output: &Utf8Path) -> Result<()> {
@@ -453,6 +453,27 @@ pub fn emit_with_sidecars_doublesided_quad(
     );
     write_test_yaml(&plan, &yaml_path)?;
     Ok(())
+}
+
+/// Emit the doubleSided back-face-culling spec-test pair: two triplets,
+/// `doublesided_quad_false` and `doublesided_quad_true`, identical except for
+/// the `double_sided` flag and the `false` variant's cross_variant block.
+/// Returns the emitted stems (without extension). UniVRM is the reference golden.
+pub fn emit_doublesided_spec_test_pair(output_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    std::fs::create_dir_all(output_dir)?;
+
+    let mut false_params = MToonParams::defaults("doublesided_quad_false");
+    false_params.double_sided = false;
+    let mut true_params = MToonParams::defaults("doublesided_quad_true");
+    true_params.double_sided = true;
+
+    let false_stem = output_dir.join("doublesided_quad_false");
+    emit_with_sidecars_doublesided_quad(&false_params, &false_stem, Some("doublesided_quad_true"))?;
+
+    let true_stem = output_dir.join("doublesided_quad_true");
+    emit_with_sidecars_doublesided_quad(&true_params, &true_stem, None)?;
+
+    Ok(vec![false_stem, true_stem])
 }
 
 /// Emits `<stem>.vrm`, `<stem>.meta.json`, and `<stem>.test.yaml` from a
@@ -2057,6 +2078,34 @@ mod doublesided_quad_tests {
     use crate::params::MToonParams;
     use camino::Utf8Path;
     use tempfile::tempdir;
+
+    #[test]
+    fn doublesided_spec_test_pair_emits_two_triplets_false_has_cross_variant() {
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        emit_doublesided_spec_test_pair(dir).unwrap();
+
+        for id in ["doublesided_quad_false", "doublesided_quad_true"] {
+            assert!(dir.join(format!("{id}.vrm")).exists(), "{id}.vrm missing");
+            assert!(
+                dir.join(format!("{id}.test.yaml")).exists(),
+                "{id}.test.yaml missing"
+            );
+            assert!(
+                dir.join(format!("{id}.meta.json")).exists(),
+                "{id}.meta.json missing"
+            );
+        }
+
+        // The false plan declares the cross-variant assertion; the true plan does not.
+        let false_yaml =
+            std::fs::read_to_string(dir.join("doublesided_quad_false.test.yaml")).unwrap();
+        assert!(false_yaml.contains("cross_variant"));
+        assert!(false_yaml.contains("doublesided_quad_true"));
+        let true_yaml =
+            std::fs::read_to_string(dir.join("doublesided_quad_true.test.yaml")).unwrap();
+        assert!(!true_yaml.contains("cross_variant"));
+    }
 
     #[test]
     fn doublesided_quad_emit_has_quad_geom_no_morphs_and_double_sided_flag() {
