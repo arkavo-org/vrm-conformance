@@ -48,7 +48,11 @@ using UniVRM10;
 // as a pure DTO file.
 namespace Conformance
 {
-    internal static class SpecVersionDetector
+    // public (not internal): called from the PlayMode batch runner
+    // (Conformance.Tests.Play) and EditMode tests (Conformance.Tests), which
+    // live in separate assemblies — internal is invisible across the asmdef
+    // boundary (CS0122).
+    public static class SpecVersionDetector
     {
         /// <summary>
         /// Read the first JSON chunk of a GLB file and return "0.x" if the
