@@ -974,31 +974,30 @@ pub fn emit_with_sidecars_spring_bone(
     Ok(())
 }
 
-/// Emit a VRM **0.x** asset triplet carrying a `secondaryAnimation` spring-bone
-/// chain: `<stem>.vrm`, `<stem>.meta.json`, `<stem>.test.yaml`.
+/// Emit a VRM **0.x** `.vrm` GLB carrying a `secondaryAnimation` spring-bone
+/// chain (no sidecars).
 ///
 /// The geometry is **identical** to [`emit_vrm_with_spring_bone`] — sphere mesh +
 /// humanoid skeleton + spring chain nodes + skinned chain cylinder + inverse-bind
 /// matrices via `pack_sphere_and_chain` — so the physics is visually observable
 /// in pixel space. Only the material / extension layer changes:
 ///
-/// - `extensionsUsed`: `["KHR_materials_unlit", "VRM"]`. The sphere and chain
-///   primitives both reference `material: 0` (the same `base_material` as the
-///   v1 path), and `KHR_materials_unlit` must be declared because `base_material`
-///   uses it. `VRM` covers the 0.x extension block.
+/// - `extensionsUsed`: `["KHR_materials_unlit", "VRM"]`. Both primitives
+///   reference `material: 0` — an unlit-only glTF material with MToon carried
+///   in `VRM.materialProperties` (not in the glTF material's `extensions`
+///   block, which would require `VRMC_materials_mtoon` in `extensionsUsed`
+///   and violate the 0.x asset contract). `KHR_materials_unlit` is declared
+///   because the glTF material uses it; `VRM` covers the 0.x extension block.
 /// - `extensions`: `{ "VRM": … }` assembled by
 ///   [`crate::vrm_ext_v0::emit_vrm_extension_with_secondary`] with
 ///   `secondaryAnimation` built by
 ///   [`crate::spring_bone_v0::build_secondary_animation`].
 /// - No `VRMC_vrm`, no `VRMC_springBone`, no `extensionsRequired` (0.x assets
 ///   have none by spec).
-///
-/// The `.test.yaml` is tagged `spec_version: "0.x"` and carries
-/// `physics: { settle_steps: 30 }` (via `build_spring_bone_test_plan`).
-pub fn emit_with_sidecars_spring_bone_v0(
+pub fn emit_vrm_with_spring_bone_v0(
     mtoon: &MToonParams,
     spring: &SpringBoneParams,
-    stem: &Utf8Path,
+    output: &Utf8Path,
 ) -> Result<()> {
     // ── 1. Geometry assembly (mirror emit_vrm_with_spring_bone exactly) ──────
     let mesh = sphere(0.3, 24, 48);
@@ -1154,9 +1153,8 @@ pub fn emit_with_sidecars_spring_bone_v0(
         doc[key] = packed.json[key].clone();
     }
 
-    // ── 4. Write GLB ─────────────────────────────────────────────────────────
-    let vrm_path = stem.with_extension("vrm");
-    if let Some(parent) = vrm_path.parent() {
+    // ── 5. Write GLB ─────────────────────────────────────────────────────────
+    if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let json_bytes = serde_json::to_vec(&doc)?;
@@ -1164,9 +1162,25 @@ pub fn emit_with_sidecars_spring_bone_v0(
         json: json_bytes,
         binary: packed.binary,
     })?;
-    std::fs::write(&vrm_path, glb)?;
+    std::fs::write(output, glb)?;
 
-    // ── 5. Sidecars ──────────────────────────────────────────────────────────
+    Ok(())
+}
+
+/// Emit a VRM **0.x** asset triplet carrying a `secondaryAnimation` spring-bone
+/// chain: `<stem>.vrm`, `<stem>.meta.json`, `<stem>.test.yaml` (settle plan).
+///
+/// Calls [`emit_vrm_with_spring_bone_v0`] for the `.vrm`, then writes the
+/// `.meta.json` and a settle `.test.yaml` tagged `spec_version: "0.x"` with
+/// `physics: { settle_steps: 30 }` (via `build_spring_bone_test_plan`).
+pub fn emit_with_sidecars_spring_bone_v0(
+    mtoon: &MToonParams,
+    spring: &SpringBoneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_v0(mtoon, spring, &vrm_path)?;
+
     let meta_path = stem.with_extension("meta.json");
     write_meta_json(mtoon, Some(spring), &vrm_path, &meta_path)?;
 
@@ -1176,6 +1190,37 @@ pub fn emit_with_sidecars_spring_bone_v0(
         .map(|n| n.to_string())
         .unwrap_or_default();
     let mut plan = crate::sidecar::build_spring_bone_test_plan(mtoon, &asset_relpath);
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// Same VRM body as [`emit_with_sidecars_spring_bone_v0`], but the emitted
+/// `.test.yaml` carries an additional `animation.root_transform` block (swing
+/// plan). Mirrors [`emit_with_sidecars_spring_bone_swing`] for the 0.x corpus.
+///
+/// The `.vrm` is produced by [`emit_vrm_with_spring_bone_v0`] — geometry and
+/// extension layout are identical to the settle variant. Only the test plan
+/// differs: `spec_version: "0.x"` and `animation.root_transform` present
+/// (via `build_spring_bone_swing_test_plan`).
+pub fn emit_with_sidecars_spring_bone_v0_swing(
+    mtoon: &MToonParams,
+    spring: &SpringBoneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_v0(mtoon, spring, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(mtoon, Some(spring), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan = crate::sidecar::build_spring_bone_swing_test_plan(mtoon, &asset_relpath);
     plan.spec_version = vrm_test_plan::SpecVersion::V0;
     write_test_yaml(&plan, &yaml_path)?;
 
@@ -2299,6 +2344,25 @@ mod spring_bone_v0_tests {
         // test.yaml is tagged 0.x
         let yaml = std::fs::read_to_string(stem.with_extension("test.yaml")).unwrap();
         assert!(yaml.contains("0.x") || yaml.contains("\"0.x\""));
+    }
+
+    #[test]
+    fn emit_spring_bone_v0_swing_has_animation_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stem = camino::Utf8PathBuf::from_path_buf(tmp.path().join("swing_sb_v0")).unwrap();
+        let mtoon = crate::params::MToonParams::defaults("swing_sb_v0");
+        let spring = crate::spring_bone::SpringBoneParams::defaults("swing_sb_v0");
+        emit_with_sidecars_spring_bone_v0_swing(&mtoon, &spring, &stem).unwrap();
+        let yaml = std::fs::read_to_string(stem.with_extension("test.yaml")).unwrap();
+        assert!(
+            yaml.contains("animation"),
+            "swing plan must carry animate_root_transform"
+        );
+        assert!(yaml.contains("0.x"), "plan must be tagged spec_version 0.x");
+        // .vrm still carries the secondaryAnimation (same asset as settle)
+        let vrm_bytes = std::fs::read(stem.with_extension("vrm")).unwrap();
+        let text = String::from_utf8_lossy(&vrm_bytes);
+        assert!(text.contains("secondaryAnimation"));
     }
 
     #[test]
