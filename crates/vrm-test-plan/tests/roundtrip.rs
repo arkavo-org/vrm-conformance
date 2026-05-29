@@ -179,6 +179,7 @@ fn plan_without_physics_serializes_without_field() {
         physics: None,
         animation: None,
         render_sequence: None,
+        cross_variant: None,
     };
     let yaml = serde_yml::to_string(&plan).unwrap();
     assert!(

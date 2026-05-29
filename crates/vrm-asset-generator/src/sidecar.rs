@@ -93,6 +93,7 @@ pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> Tes
         physics: None,
         animation: None,
         render_sequence: None,
+        cross_variant: None,
     }
 }
 

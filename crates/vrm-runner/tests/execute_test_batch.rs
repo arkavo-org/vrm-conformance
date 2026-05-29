@@ -99,6 +99,7 @@ fn synthetic_plan(id: &str) -> TestPlan {
         physics: None,
         animation: None,
         render_sequence: None,
+        cross_variant: None,
     }
 }
 

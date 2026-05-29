@@ -29,6 +29,25 @@ pub struct TestPlan {
     pub animation: Option<AnimationConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_sequence: Option<RenderSequenceBlock>,
+    /// Cross-variant SSIM assertion. When present, this test's render and the
+    /// render of `sibling_id` (SAME renderer) MUST visibly differ. See
+    /// `CrossVariantAssertion`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cross_variant: Option<CrossVariantAssertion>,
+}
+
+/// Cross-variant SSIM assertion: the render of THIS test and the render of
+/// `sibling_id` (same renderer) MUST visibly differ. Pass iff their SSIM is
+/// at or below `max_ssim`. Used by the doubleSided back-face-culling spec
+/// test, where doubleSided=false culls the surface (all-background frame) and
+/// doubleSided=true renders it — a conformant renderer's two outputs diverge;
+/// a name-heuristic renderer's do not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CrossVariantAssertion {
+    /// Test id (and asset stem) of the sibling variant to compare against.
+    pub sibling_id: String,
+    /// Pass iff `ssim(this_render, sibling_render) <= max_ssim`.
+    pub max_ssim: f32,
 }
 
 /// Optional physics-stepping config for spring-bone / collider tests.
@@ -700,6 +719,7 @@ render_sequence:
             physics: None,
             animation: None,
             render_sequence: None,
+            cross_variant: None,
         }
     }
 
@@ -756,5 +776,31 @@ render_sequence:
             plan.validate(),
             Err(TestPlanError::BothAnimationAndRenderSequence)
         );
+    }
+
+    #[test]
+    fn cross_variant_round_trips_and_is_omitted_when_absent() {
+        // Absent → key not serialized (keeps the existing corpus byte-stable).
+        let plan = make_minimal_plan();
+        assert!(plan.cross_variant.is_none());
+        let yaml = serde_yml::to_string(&plan).unwrap();
+        assert!(
+            !yaml.contains("cross_variant"),
+            "cross_variant must be omitted when None"
+        );
+
+        // Present → round-trips through YAML.
+        let mut plan2 = make_minimal_plan();
+        plan2.cross_variant = Some(CrossVariantAssertion {
+            sibling_id: "sibling_xyz".into(),
+            max_ssim: 0.85,
+        });
+        let yaml2 = serde_yml::to_string(&plan2).unwrap();
+        let back: TestPlan = serde_yml::from_str(&yaml2).unwrap();
+        let cv = back
+            .cross_variant
+            .expect("cross_variant present after round-trip");
+        assert_eq!(cv.sibling_id, "sibling_xyz");
+        assert!((cv.max_ssim - 0.85).abs() < 1e-6);
     }
 }
