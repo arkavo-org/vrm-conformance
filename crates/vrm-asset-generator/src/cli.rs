@@ -367,6 +367,24 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the material-name render-classification sweep (6 variants).
+    ///
+    /// One MToon material under heuristic-tripping names (`matname_clothing_*`,
+    /// `matname_skirt_*`) vs control names (`matname_plain_*`, `matname_body_*`)
+    /// crossed with the glTF `doubleSided` flag. Every variant is byte-identical
+    /// except its material name and `doubleSided`; a conformant renderer's output
+    /// is invariant to the name, while a name-heuristic renderer (VMK forces
+    /// `cloth`-named materials double-sided + applies an overlay depth bias) diverges
+    /// on the trip-token variants. Deterministic reproducer for the `Vita_clothing`
+    /// z-fighting artifact. See
+    /// docs/superpowers/specs/2026-05-28-material-name-classification-reproducer.md.
+    EmitMaterialNameClassificationSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -1826,6 +1844,52 @@ pub fn run(cli: Cli) -> Result<()> {
                     emitted.len(),
                     v0_variants.len(),
                     v1_variants.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
+        Cmd::EmitMaterialNameClassificationSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::sweep::material_name_classification_sweep;
+            std::fs::create_dir_all(&output_dir)?;
+            let assets = material_name_classification_sweep();
+            let total = assets.len();
+
+            let mut emitted = Vec::new();
+            for (i, p) in assets.iter().enumerate() {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-material-name-classification-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": p.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+                }
+
+                let stem = output_dir.join(&p.id);
+                emit_with_sidecars(p, &stem)?;
+                emitted.push(stem);
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} material-name-classification assets to {}",
+                    emitted.len(),
                     output_dir
                 );
             }
