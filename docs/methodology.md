@@ -250,3 +250,36 @@ Out of scope for slice 1 (per `docs/superpowers/specs/2026-05-26-vrm-0x-conforma
 - VRMA × 0.x. Slice 3.
 - Spring-bone v0 parametric (`secondaryAnimation` emit). Slice 2.
 - Full MToon parametric parity (44 variants × 0.x). Slice 2.
+
+## Face culling honors `material.doubleSided`, not material name
+
+glTF 2.0 and VRM make `material.doubleSided` the **sole authority** on back-face
+culling. A conformant renderer MUST NOT change culling, depth bias, or render
+category based on substrings of the *material name* (e.g. `cloth`, `skirt`,
+`tops`, `body`). Material name is metadata, not a rendering directive.
+
+**Why this is a pin.** VRMMetalKit classifies any material whose name contains a
+clothing token as `faceCategory = "clothing"` (`VRMRenderer.swift:1866`), then
+unconditionally forces `effectiveDoubleSided = true`
+(`VRMRenderItemBuilder.swift:216`) — ignoring the glTF `doubleSided` flag — and
+applies an overlay depth bias (`slopeScale 2.0`) intended for layered
+VRChat-style avatars. On a single-material VRM 0.0 outfit named `Vita_clothing`
+this produces silhouette z-fighting fringe (the slope-scaled bias explodes
+edge-on) and dark backface bleed (inward-normal faces drawn by the forced
+double-siding). This is the same defect *class* as orientation-from-heuristic
+(VMK 180° flip, VMK#299): a name/heuristic overriding declared spec data.
+
+**How the suite catches it.** The `material_name_classification` sweep
+(`emit-material-name-classification-sweep`) emits one MToon material under
+heuristic-tripping names (`matname_clothing_*`, `matname_skirt_*`) and control
+names (`matname_plain_*`, `matname_body_*`) crossed with the glTF `doubleSided`
+flag. Every variant is byte-identical except its material name and `doubleSided`.
+**Conformant output is invariant to the material name at a fixed `doubleSided`**
+(consensus SSIM ≈ 1.0 among conformant renderers); a name-heuristic renderer
+diverges on the trip-token variants. This isolates the name-classification
+defect deterministically on the standard sweep sphere — no GPU, model file, or
+humanoid geometry required, and distinct from the orientation finding (a sphere
+is rotationally symmetric, so the 180° flip does not confound this comparison).
+
+Renderers MAY use material name for *non-visible* optimizations only (e.g.
+batching hints) — never for anything that changes pixels.
