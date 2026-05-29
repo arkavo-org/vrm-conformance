@@ -240,6 +240,26 @@ The `_v0_quirk_*` sweep prefix is reserved for slice 2's intentional probes of 0
 
 These exist explicitly to surface adapter behavior on the weird parts of 0.x.
 
+### Spring-bone cross-version triage order (read within-renderer cross-version first)
+
+When a spring-bone sweep diverges between the 0.x and 1.0 corpora, triage in the
+**reverse** of the usual cross-renderer-first reflex: read **within-renderer,
+cross-version first** (e.g. VMK 0.x vs VMK 1.0 on the same axis), and only then
+read cross-renderer.
+
+Rationale: spring-bone simulation is integrator-sensitive — renderers legitimately
+differ in integration scheme (Verlet vs semi-implicit Euler), sub-stepping, and
+the order damping is applied. So a *cross-renderer* disagreement at a fixed spec
+version is often just integrator variance, not a conformance defect. But a
+*within-renderer, cross-version* disagreement — the same engine, same integrator,
+fed our 0.x `secondaryAnimation` emit vs our 1.0 `VRMC_springBone` emit of the
+**same** `SpringBoneParams` — isolates a coordinate/unit/field-mapping bug in one
+of our two emit paths (e.g. a `gravityDir` sign flip, the `stiffiness`-vs-`stiffness`
+field-name mismatch, or a degrees/radians error), because the only thing that
+varied is the extension we emitted. That is the cleaner falsification; read it first.
+
+See `docs/superpowers/specs/2026-05-26-vrm-0x-conformance-design.md` (Slice 2).
+
 ### What slice 1 does NOT cover
 
 Out of scope for slice 1 (per `docs/superpowers/specs/2026-05-26-vrm-0x-conformance-design.md`):
@@ -248,8 +268,8 @@ Out of scope for slice 1 (per `docs/superpowers/specs/2026-05-26-vrm-0x-conforma
 - Side-channel "native orientation" render as a supplementary artifact. Deferred to v2 — the back-of-head failure mode (if it materializes) is already legibly diagnostic on its own.
 - VRM 1.1 plumbing. The `SpecVersion::{V0, V1}` enum extends cleanly when 1.1 lands; sweep registry stays.
 - VRMA × 0.x. Slice 3.
-- Spring-bone v0 parametric (`secondaryAnimation` emit). Slice 2.
-- Full MToon parametric parity (44 variants × 0.x). Slice 2.
+- Spring-bone v0 parametric (`secondaryAnimation` emit). Slice 2 — **now implemented** (`spring_bone_v0.rs`; settle/swing/collider-sphere/multichain/sequence sweeps route through `--spec-version 0.x`).
+- Full MToon parametric parity (44 variants × 0.x). Slice 2 — **now implemented** (all applicable MToon/texture sweeps accept `--spec-version 0.x`; the v1-only axes reject it with a structured `NotApplicableReason`).
 
 ## Face culling honors `material.doubleSided`, not material name
 
