@@ -607,6 +607,52 @@ fn sequence_sweep_v0_emits_render_sequence_block() {
     );
 }
 
+/// End-to-end camera-convention guard: a 0.x asset's `.test.yaml` must place
+/// the camera on the −Z side. VRM 0.x avatars face −Z; the runner's
+/// validate_camera_convention rejects 0.x plans with a +Z camera.
+#[test]
+fn emit_default_v0_test_yaml_has_negative_z_camera() {
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct CameraPos {
+        position: [f32; 3],
+    }
+    #[derive(Deserialize)]
+    struct PlanCamera {
+        camera: CameraPos,
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let out = std::process::Command::new(bin())
+        .args([
+            "emit-default",
+            "--id",
+            "cam_conv_v0",
+            "--spec-version",
+            "0.x",
+            "--output-dir",
+            tmp.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("run vrm-asset-generator");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let yaml_path = tmp.path().join("cam_conv_v0.test.yaml");
+    assert!(yaml_path.exists(), "test.yaml must be emitted");
+    let yaml_text = std::fs::read_to_string(&yaml_path).expect("read test.yaml");
+    let plan: PlanCamera = serde_yml::from_str(&yaml_text).expect("test.yaml must be valid YAML");
+    assert!(
+        plan.camera.position[2] < 0.0,
+        "0.x test plan camera z must be negative (got {}); VRM 0.x avatars face -Z",
+        plan.camera.position[2]
+    );
+}
+
 /// Drift guard: every sweep subcommand has a DECIDED VRM 0.x behavior.
 ///
 /// Applicable sweeps must exit 0 and emit at least one `.vrm`.

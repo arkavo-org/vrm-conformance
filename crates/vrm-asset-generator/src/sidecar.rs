@@ -472,6 +472,17 @@ pub fn write_test_yaml(plan: &TestPlan, out: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+/// Tag a test plan as VRM 0.x: set the spec version AND move the camera to the
+/// −Z side. VRM 0.x avatars face −Z (spec 0.0 README:238), so the camera must be
+/// at negative Z to see the front; the runner's validate_camera_convention
+/// rejects 0.x plans with a +Z camera. All v0 plans derive their camera from
+/// build_default_test_plan (+Z), so this flip is required for every 0.x plan.
+pub fn tag_plan_vrm0(plan: &mut TestPlan) {
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    // Force the camera onto the −Z side (target stays at the avatar; up unchanged).
+    plan.camera.position[2] = -plan.camera.position[2].abs();
+}
+
 #[cfg(test)]
 mod doublesided_plan_tests {
     use super::*;
@@ -574,6 +585,24 @@ mod render_sequence_tests {
 
         // Validator accepts (no animation + render_sequence collision).
         assert!(plan.validate().is_ok(), "plan should validate");
+    }
+}
+
+#[cfg(test)]
+mod tag_plan_vrm0_tests {
+    use super::*;
+
+    #[test]
+    fn tag_plan_vrm0_moves_camera_to_negative_z() {
+        let p = MToonParams::defaults("cam_v0");
+        let mut plan = build_default_test_plan(&p, "cam_v0.vrm");
+        assert!(plan.camera.position[2] > 0.0, "default plan starts +Z");
+        tag_plan_vrm0(&mut plan);
+        assert_eq!(plan.spec_version, vrm_test_plan::SpecVersion::V0);
+        assert!(
+            plan.camera.position[2] < 0.0,
+            "0.x plan camera must be on the -Z side"
+        );
     }
 }
 

@@ -573,7 +573,7 @@ pub fn emit_with_sidecars_v0(params: &MToonParams, stem: &Utf8Path) -> Result<()
         .unwrap_or_default();
     let mut plan = build_default_test_plan(params, &asset_relpath);
     // Tag the plan as VRM 0.x so runners and validators know the spec target.
-    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    crate::sidecar::tag_plan_vrm0(&mut plan);
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
@@ -600,7 +600,7 @@ pub fn emit_with_sidecars_v0_with_expressions(
         .map(|n| n.to_string())
         .unwrap_or_default();
     let mut plan = build_default_test_plan(params, &asset_relpath);
-    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    crate::sidecar::tag_plan_vrm0(&mut plan);
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
@@ -1190,7 +1190,7 @@ pub fn emit_with_sidecars_spring_bone_v0(
         .map(|n| n.to_string())
         .unwrap_or_default();
     let mut plan = crate::sidecar::build_spring_bone_test_plan(mtoon, &asset_relpath);
-    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    crate::sidecar::tag_plan_vrm0(&mut plan);
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
@@ -1221,7 +1221,7 @@ pub fn emit_with_sidecars_spring_bone_v0_swing(
         .map(|n| n.to_string())
         .unwrap_or_default();
     let mut plan = crate::sidecar::build_spring_bone_swing_test_plan(mtoon, &asset_relpath);
-    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    crate::sidecar::tag_plan_vrm0(&mut plan);
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
@@ -1471,7 +1471,7 @@ pub fn emit_with_sidecars_spring_bone_colliders_v0(
         .unwrap_or_default();
     let mut plan =
         crate::sidecar::build_spring_bone_collider_test_plan(mtoon, scene, &asset_relpath);
-    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    crate::sidecar::tag_plan_vrm0(&mut plan);
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
@@ -1499,7 +1499,7 @@ pub fn emit_with_sidecars_spring_bone_colliders_v0_swing(
         .unwrap_or_default();
     let mut plan =
         crate::sidecar::build_spring_bone_collider_swing_test_plan(mtoon, scene, &asset_relpath);
-    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    crate::sidecar::tag_plan_vrm0(&mut plan);
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
@@ -1578,7 +1578,7 @@ pub fn emit_with_sidecars_spring_bone_v0_sequence(
         .unwrap_or_default();
     let mut plan =
         crate::sidecar::build_spring_bone_swing_sequence_test_plan(mtoon, &asset_relpath);
-    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    crate::sidecar::tag_plan_vrm0(&mut plan);
     write_test_yaml(&plan, &yaml_path)?;
     Ok(())
 }
@@ -2381,7 +2381,7 @@ pub fn emit_with_sidecars_spring_bone_multichain_v0(
         .unwrap_or_default();
     let mut plan =
         crate::sidecar::build_spring_bone_multichain_test_plan(mtoon, scene, &asset_relpath);
-    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    crate::sidecar::tag_plan_vrm0(&mut plan);
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
@@ -2408,7 +2408,7 @@ pub fn emit_with_sidecars_spring_bone_multichain_v0_swing(
         .unwrap_or_default();
     let mut plan =
         crate::sidecar::build_spring_bone_multichain_swing_test_plan(mtoon, scene, &asset_relpath);
-    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    crate::sidecar::tag_plan_vrm0(&mut plan);
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
