@@ -323,12 +323,25 @@ final class Operations: @unchecked Sendable {
         guard let session = lookupSession(sessionId) else {
             return invalidParams("unknown session_id: \(sessionId)")
         }
-        guard let position = parseVec3(obj["position"]),
-              let target   = parseVec3(obj["target"]),
-              let up       = parseVec3(obj["up"]),
-              let fov      = parseFloat(obj["fov_degrees"])
+        guard let parsedPosition = parseVec3(obj["position"]),
+              let parsedTarget   = parseVec3(obj["target"]),
+              let up             = parseVec3(obj["up"]),
+              let fov            = parseFloat(obj["fov_degrees"])
         else {
             return invalidParams("position/target/up must each be [number; 3]; fov_degrees must be a number")
+        }
+        // VMK#299: VRMMetalKit rotates VRM 0.x models 180° about Y on load
+        // (buildNodeHierarchy isVRM0 branch) to migrate -Z→+Z facing. The
+        // conformance suite sends the spec-correct -Z-side camera for 0.x;
+        // conjugate it by the same Ry180 so we render the avatar's FRONT,
+        // matching the un-normalised adapters (three-vrm, godot, UniVRM).
+        // Ry180: (x,y,z) → (-x, y, -z). The up vector (0,1,0) is invariant.
+        // VRM 1.0 path is UNCHANGED — VMK does not normalise 1.0 assets.
+        var position = parsedPosition
+        var target   = parsedTarget
+        if session.sourceSpecVersion == "0.x" {
+            position = SIMD3<Float>(-position.x, position.y, -position.z)
+            target   = SIMD3<Float>(-target.x,   target.y,  -target.z)
         }
         session.cameraPosition = position
         session.cameraTarget = target
