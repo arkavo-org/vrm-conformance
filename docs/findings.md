@@ -84,7 +84,11 @@ When the user runs the deferred bootstrap and the announcement-ready state is re
 
 **Check.** VRoid Studio 2.12.0, File → Export, format dropdown inspected.
 
-**Result.** **DEFERRED** — requires manual GUI inspection (VRoid Studio has no CLI). Procedure documented in `scripts/check-vroid-studio-0x-export.sh`. User to run the procedure when Studio is accessible and update this entry with the result.
+**Result.** **RESOLVED 2026-05-28 — AVAILABLE.** VRoid Studio **2.13.0** still ships the VRM 0.x export path. Confirmed empirically: `AvatarSample_U` was exported at spec 0.0 (`AvatarSample_U_0.0.vrm.glb`, exporter `VRoid Studio-2.13.0`, generator `UniGLTF-2.64.1`) and passes mrxz/vrm-validator `2.0.0-dev.3.10` with **0 errors** (22 warnings, all expected for VRM 0.x and benign: `UNSUPPORTED_EXTENSION` + `INVALID_EXTENSION_NAME_FORMAT` on the bare `VRM` extension name — 0.x predates the glTF `VENDOR_name` convention that 1.0's `VRMC_*` namespace satisfies — plus `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` (VRoid exports no tangents) and `UNUSED_OBJECT` on three unused textures). Topology: VRM 0.0, 54 humanoid bones, 14 blendShape groups, 22 secondaryAnimation bone groups, 21 materials, ~179k verts, `CC_BY`.
+
+The original 2026-05-26 check targeted 2.12.0 and was DEFERRED pending GUI inspection (VRoid Studio has no CLI; procedure in `scripts/check-vroid-studio-0x-export.sh`).
+
+**Tier 2 fixture landed (Task 19 Path AVAILABLE).** Sourced as `avatarU_0_0.vrm` — sibling of `avatarA_0_0`, not redistributed in-repo. `scripts/install-humanoid-fixtures.sh` symlinks `AvatarSample_U_0.0.vrm.glb → avatarU_0_0.vrm`; render plan at `test-plans/manual/humanoid/avatarU_0_0.test.yaml` (same camera/lighting as `avatarA_0_0` for apples-to-apples). No `vroid_default_F_0_0` was needed — `AvatarSample_U` serves the second-canonical-0.x-humanoid role.
 
 **Pre-decision.** Slice 1 proceeds with the **fallback path** for now (use `avatarA_0_0` alone as Tier 2 canonical, defer `vroid_default_F_0_0` until Studio export availability is confirmed). This keeps slice 1 unblocked. If the manual check later confirms AVAILABLE, the VRoid fixture can be backfilled in a follow-up commit; if REMOVED, the fallback is already in place.
 

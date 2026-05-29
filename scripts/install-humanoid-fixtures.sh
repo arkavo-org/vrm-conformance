@@ -50,6 +50,7 @@ install_one() {
 echo "==> Installing humanoid fixtures into $DEST"
 install_one "AvatarSample_A_1.0.vrm.glb" "avatarA_1_0.vrm" || true
 install_one "AvatarSample_A_0.0.vrm.glb" "avatarA_0_0.vrm" || true
+install_one "AvatarSample_U_0.0.vrm.glb" "avatarU_0_0.vrm" || true
 # Tier 2 canonical-content fixtures (RFC 0005): VRoid Studio exports with
 # permissive license metadata set at export time. The .meta.json sidecar
 # next to the symlink is committed to git (gitignore negation).
