@@ -2,7 +2,7 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
-## 2026-05-29 — First VRM 0.x render through VMK: spring-bone physics conformant; three emit-side gaps fixed; VMK#299 reclassified as accepted normalization
+## 2026-05-29 — VRM 0.x rendered through VMK + golden UniVRM: VMK adheres on static, diverges from the golden on dynamic spring-bone; three emit-side gaps fixed; VMK#299 reclassified
 
 **What.** First attempt to render the Slice-2 VRM 0.x corpus through a real adapter (VMK / VRMMetalKit 0.16.0, rev `392d949`, Xcode 26.5 / M4 Max) — the deferred D4 task, scoped to VMK. Running it surfaced that the Slice-1/Slice-2 v0 emit was **never render-ready** (it had only ever been gltf-validator-gated, and mrxz/vrm-validator does no VRM-extension semantic checks). Three gaps, all on the suite side, fixed in order:
 
@@ -21,19 +21,26 @@ This document records cross-renderer divergence findings produced by the suite, 
 
 The signal is the **axis-invariance**: gravity, stiffness, drag, joint-count, and segment-length variants all land within ~0.002 of each other at each stage. If VMK parsed any 0.x `secondaryAnimation` field differently from the 1.0 `VRMC_springBone` equivalent (a `gravityDir` sign, a stiffness scale, a `dragForce` unit), that axis would separate from the pack — none do. VMK's 0.x spring-bone simulation matches its 1.0 simulation. The uniform offset is the orientation-normalization residual: conjugating the light closed ~0.03 of it (it was lighting the 180°-rotated model from the mirrored side); the remaining ~0.043 is anti-aliasing from the 180° rasterization of the thin chain cylinder, not a physics or material defect.
 
-**Cross-renderer consensus (VMK vs godot-vrm 4.6.3, both at 0.x).** Added godot as the second real adapter (the humanBones fix unblocked it too). Two sweeps, cross-renderer SSIM, both axis-invariant:
+**Cross-renderer consensus, anchored on the golden (UniVRM v0.131.0 / Unity 6000.4.6f1), 0.x.** Three real adapters: VMK, godot-vrm 4.6.3, and **UniVRM (the VRM-consortium golden reference)**. Per-axis SSIM vs UniVRM, both sweeps axis-invariant:
 
-| sweep | VMK-0x vs godot-0x | within-VMK 0.x-vs-1.0 |
-|---|---|---|
-| settle (static gravity) | **0.9696 – 0.9703** | 0.9557 – 0.9573 |
-| swing (`animate_root_transform`, dynamic) | **0.8456 – 0.8484** | **0.9606 – 0.9615** |
+| sweep | godot vs UniVRM (golden) | VMK vs UniVRM (golden) | VMK vs godot |
+|---|---|---|---|
+| settle (static gravity) | 0.9589 – 0.9599 | 0.9413 – 0.9423 | 0.9696 – 0.9703 |
+| swing (`animate_root_transform`, dynamic) | **0.9685 – 0.9688** | **0.8377 – 0.8405** | 0.8456 – 0.8484 |
 
-**The swing drop is integrator variance, not a VMK defect — and the within-renderer-cross-version triage is what proves it.** Under static settle, VMK and godot agree at ~0.97 (above the cross-renderer band). Under dynamic swing they fall to ~0.85, uniformly across all axes. The methodology triage order (`docs/methodology.md`, "Spring-bone cross-version triage order") says to read within-renderer cross-version *first*: VMK 0.x-swing vs VMK 1.0-swing is **~0.96** — i.e. VMK is self-consistent across versions under motion, so its `animate_root_transform` is NOT mirrored by the Ry180 (the obvious failure mode — un-conjugated translation — is refuted). The remaining cross-renderer swing delta is therefore genuine integrator variance (Verlet vs semi-implicit Euler / sub-stepping / damping order) between VMK and godot, which the pin explicitly classes as expected, not a conformance defect. This is the pin working as designed: it separated "VMK's own emit/handling is consistent" (it is) from "two engines integrate motion differently" (they do).
+**Settle — VMK adheres.** VMK agrees with the golden at ~0.94 (godot ~0.96), axis-invariant, no outlier flagged. The ~0.017 VMK<godot gap is ordinary VMK MToon shader variance, not orientation/physics (it would be axis-dependent otherwise).
 
-**Net VMK 0.x spring-bone verdict: conformant.** No per-axis `secondaryAnimation` parsing divergence (axis-invariant on every test), self-consistent across versions for both settle and swing, and in strong static agreement with godot. The only cross-renderer gap is dynamic integrator variance, expected.
+**Swing — VMK is the lone outlier; it does NOT match the golden on dynamic spring-bone.** godot tracks UniVRM at **~0.97** under motion; VMK sits at **~0.84 vs both** UniVRM and godot. Two independent implementations (UniVRM + godot) cluster at 0.97; VMK is the outlier. This **corrects an earlier golden-less read** in this branch's history that called the swing delta "symmetric integrator variance, VMK conformant" — with the golden in the comparison it is not symmetric: godot+UniVRM agree, VMK diverges.
+
+Root-cause direction (ruled the inverse out): swing-vs-own-settle deflection is UniVRM 0.857 (most) / godot 0.887 / **VMK 0.928 (least)** — all three apply the root motion, but **VMK's chain under-deflects**: its spring-bone inertial response to the root acceleration is weaker than the reference cluster. Uniform across every physics axis (drag/stiffness/gravity/joints/segment all 0.8405), so it is a global dynamics difference, not a per-parameter `secondaryAnimation` parse bug. It is **version-independent**: VMK 0.x-swing vs VMK 1.0-swing is ~0.96 (self-consistent), so VMK does the same under-deflection in its 1.0 path — the 0.x run surfaced it, it is not 0.x-specific. Consistent with VMK's known spring-bone-under-motion area (VMK#270 rotational-inertia, VMK#283 timestep).
+
+**Methodology note — this is why UniVRM-as-golden matters.** The within-renderer-cross-version triage (VMK self-consistency ~0.96) correctly ruled out a *0.x-emit* bug (un-conjugated `animate_root_transform`), but it could NOT by itself decide whether the cross-renderer swing delta was "everyone differs (integrator variance)" or "VMK is wrong." Only adding the golden resolved it: godot independently matching UniVRM at 0.97 makes VMK the outlier. A 2-way consensus without the golden produced the wrong verdict.
+
+**Net VMK VRM 0.0 adherence verdict.** Static/structural: **adheres** (loads with the humanBones fix; settle matches the golden at ~0.94, axis-invariant). Dynamic spring-bone: **diverges from the golden** (~0.84 vs the UniVRM+godot 0.97 cluster) — VMK under-deflects the chain under root motion, uniformly across axes, version-independent. Not a 0.x conformance defect per se, but a VMK spring-bone-dynamics divergence from the consortium reference that the 0.x verification surfaced.
 
 **Boundary / remaining.**
-- Cross-renderer consensus here is **2-way (VMK + godot)**. three-vrm (needs Playwright chromium) and UniVRM (needs Unity, not installed here) would complete the 4-way; see `docs/superpowers/plans/2026-05-29-vrm-0x-slice2-d4-render-runbook.md`.
+- Consensus here is **3-way incl. the golden** (VMK + godot + UniVRM); Unity 6000.4.6f1 was present locally after all. three-vrm (needs Playwright chromium) would make it 4-way; see `docs/superpowers/plans/2026-05-29-vrm-0x-slice2-d4-render-runbook.md`.
+- The dynamic spring-bone divergence (VMK under-deflects vs the golden) is a **candidate VMK issue to file/confirm upstream** — it is version-independent, so reproduce it on a 1.0 humanoid swing too before filing. Conformance-side only; no VMK code changed.
 - The v0 **MToon** sweeps remain un-renderable (meshless) — a separate emit fix (geometry + skeleton in `emit_vrm_v0`) is needed before the 0.x MToon material signal can be read on any adapter.
 - The v0 **MToon** sweeps remain un-renderable (meshless) — a separate emit fix (geometry + skeleton in `emit_vrm_v0`) is needed before the 0.x MToon material signal can be read on any adapter.
 - No VMK code changed; the Ry180 camera/light conjugation lives entirely in the conformance adapter, accepting VMK's documented normalization.
