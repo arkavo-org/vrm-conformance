@@ -740,6 +740,38 @@ pub fn mtoon_basic_v0_sweep() -> Vec<(MToonParams, crate::SweepApplicability)> {
     out
 }
 
+/// Material-name render-classification reproducer (the VMK `Vita_clothing`
+/// z-fighting quirk). Emits ONE MToon material under heuristic-tripping names
+/// (`*clothing*`, `*skirt*`) vs control names (`*plain*`, `*body*`) crossed
+/// with the glTF `doubleSided` flag. Every variant is byte-identical except
+/// `id` (which becomes `material.name`, see mtoon_v0.rs:26 / vrm_ext.rs:324)
+/// and `double_sided`. A conformant renderer's output is invariant to the
+/// material name at a fixed `doubleSided`; a name-heuristic renderer (VMK:
+/// `cloth` → forced double-sided + overlay depth bias) diverges on the trip
+/// tokens. See docs/superpowers/specs/2026-05-28-material-name-classification-reproducer.md.
+pub fn material_name_classification_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    // Single-sided group: all should render identically; VMK diverges on the
+    // names that contain a clothing token.
+    out.push(MToonParams::defaults("matname_plain_singlesided"));
+    out.push(MToonParams::defaults("matname_clothing_singlesided"));
+    out.push(MToonParams::defaults("matname_skirt_singlesided"));
+
+    // Double-sided group: the plain/clothing pair should match each other.
+    let mut plain_ds = MToonParams::defaults("matname_plain_doublesided");
+    plain_ds.double_sided = true;
+    out.push(plain_ds);
+    let mut cloth_ds = MToonParams::defaults("matname_clothing_doublesided");
+    cloth_ds.double_sided = true;
+    out.push(cloth_ds);
+
+    // Control for a different name-category path (`body` → not "clothing").
+    out.push(MToonParams::defaults("matname_body_singlesided"));
+
+    out
+}
+
 fn fmt_num<T: std::fmt::Display + Copy + PartialOrd + Default>(v: T) -> String
 where
     f64: From<T>,
@@ -2194,5 +2226,94 @@ mod registry_symmetry_tests {
             v0.len(),
             v1.len()
         );
+    }
+}
+
+#[cfg(test)]
+mod material_name_classification_tests {
+    use super::*;
+
+    // VMK (and similar renderers) classify render behavior by substrings of
+    // the *material name* — e.g. a name containing "cloth" is forced
+    // double-sided + given an overlay depth bias (VRMRenderItemBuilder.swift:216).
+    // glTF/VRM make `material.doubleSided` the sole authority. This sweep emits
+    // ONE MToon material under heuristic-tripping vs control names crossed with
+    // the glTF doubleSided flag; conformant output is invariant to the name.
+    // See docs/superpowers/specs/2026-05-28-material-name-classification-reproducer.md.
+
+    #[test]
+    fn sweep_has_six_variants() {
+        assert_eq!(material_name_classification_sweep().len(), 6);
+    }
+
+    #[test]
+    fn variant_ids_are_the_designed_set() {
+        let ids: Vec<String> = material_name_classification_sweep()
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                "matname_plain_singlesided",
+                "matname_clothing_singlesided",
+                "matname_skirt_singlesided",
+                "matname_plain_doublesided",
+                "matname_clothing_doublesided",
+                "matname_body_singlesided",
+            ]
+        );
+    }
+
+    #[test]
+    fn trip_token_variants_contain_heuristic_substrings() {
+        let by_id = |id: &str| -> MToonParams {
+            material_name_classification_sweep()
+                .into_iter()
+                .find(|p| p.id == id)
+                .unwrap_or_else(|| panic!("missing variant {id}"))
+        };
+        // The material name IS params.id (mtoon_v0.rs:26, vrm_ext.rs:324), so
+        // these names are what a name-heuristic renderer matches on.
+        assert!(by_id("matname_clothing_singlesided").id.contains("cloth"));
+        assert!(by_id("matname_skirt_singlesided").id.contains("skirt"));
+        assert!(!by_id("matname_plain_singlesided").id.contains("cloth"));
+        assert!(!by_id("matname_plain_singlesided").id.contains("skirt"));
+    }
+
+    #[test]
+    fn double_sided_flag_matches_name_suffix() {
+        for p in material_name_classification_sweep() {
+            if p.id.ends_with("_doublesided") {
+                assert!(p.double_sided, "{} must set double_sided=true", p.id);
+            } else {
+                assert!(!p.double_sided, "{} must set double_sided=false", p.id);
+            }
+        }
+    }
+
+    #[test]
+    fn variants_differ_only_by_id_and_double_sided() {
+        // The whole point: within a doubleSided value, the materials are
+        // byte-identical except the name. A conformant renderer must produce
+        // identical pixels; a name-heuristic renderer diverges on the trip
+        // tokens. We assert the params themselves are equal modulo id +
+        // double_sided by normalizing both fields and comparing serialized form.
+        let sweep = material_name_classification_sweep();
+        let normalize = |p: &MToonParams| -> String {
+            let mut q = p.clone();
+            q.id = "NORM".to_string();
+            q.double_sided = false;
+            serde_json::to_string(&q).unwrap()
+        };
+        let baseline = normalize(&sweep[0]);
+        for p in &sweep {
+            assert_eq!(
+                normalize(p),
+                baseline,
+                "variant {} differs from baseline in a field other than id/double_sided",
+                p.id
+            );
+        }
     }
 }
