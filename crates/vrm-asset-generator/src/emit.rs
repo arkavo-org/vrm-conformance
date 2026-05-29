@@ -803,7 +803,8 @@ pub fn emit_vrm_with_spring_bone(
         spring_bone.joint_count,
         spring_bone.segment_length_m,
         /* radius */ 0.025,
-        chain_top_y,
+        [0.0, chain_top_y, 0.0],
+        [0.0, -1.0, 0.0],
         /* ring_segments */ 12,
     );
 
@@ -1019,7 +1020,8 @@ pub fn emit_vrm_with_spring_bone_v0(
         spring.joint_count,
         spring.segment_length_m,
         /* radius */ 0.025,
-        chain_top_y,
+        [0.0, chain_top_y, 0.0],
+        [0.0, -1.0, 0.0],
         /* ring_segments */ 12,
     );
 
@@ -1273,7 +1275,8 @@ pub fn emit_vrm_with_spring_bone_colliders_v0(
         spring.joint_count,
         spring.segment_length_m,
         /* radius */ 0.025,
-        chain_top_y,
+        [0.0, chain_top_y, 0.0],
+        [0.0, -1.0, 0.0],
         /* ring_segments */ 12,
     );
 
@@ -1620,7 +1623,8 @@ pub fn emit_vrm_with_spring_bone_colliders(
         spring_bone.joint_count,
         spring_bone.segment_length_m,
         /* radius */ 0.025,
-        chain_top_y,
+        [0.0, chain_top_y, 0.0],
+        [0.0, -1.0, 0.0],
         /* ring_segments */ 12,
     );
 
@@ -1949,7 +1953,8 @@ pub fn emit_vrm_with_spring_bone_multichain(
             spring_params.joint_count,
             spring_params.segment_length_m,
             0.025,
-            chain_top_y,
+            [0.0, chain_top_y, 0.0],
+            [0.0, -1.0, 0.0],
             12,
         );
 
@@ -2199,7 +2204,8 @@ pub fn emit_vrm_with_spring_bone_multichain_v0(
             spring_params.joint_count,
             spring_params.segment_length_m,
             0.025,
-            chain_top_y,
+            [0.0, chain_top_y, 0.0],
+            [0.0, -1.0, 0.0],
             12,
         );
 

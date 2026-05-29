@@ -520,7 +520,7 @@ mod tests {
     #[test]
     fn pack_sphere_and_chain_emits_11_accessors() {
         let s = sphere(0.3, 8, 16);
-        let c = build_chain_cylinder(4, 0.05, 0.02, 1.31, 8);
+        let c = build_chain_cylinder(4, 0.05, 0.02, [0.0, 1.31, 0.0], [0.0, -1.0, 0.0], 8);
         let ibm: Vec<[f32; 16]> = (0..4).map(|_| [0.0; 16]).collect();
         let packed = pack_sphere_and_chain(&s, &c, &ibm);
 

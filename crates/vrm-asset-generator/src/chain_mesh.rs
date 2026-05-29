@@ -3,32 +3,22 @@
 //! Generated meshes for spring-bone tests need to deform under physics —
 //! without a mesh weighted to the chain joints, chain motion is invisible
 //! and cross-renderer diffing produces a null signal. This module emits
-//! a vertical cylinder whose rings of vertices are hard-weighted to the
-//! corresponding chain joint, so when a renderer's spring-bone physics
-//! moves a joint, the cylinder bends with it.
+//! a cylinder whose rings of vertices are hard-weighted to the corresponding
+//! chain joint, so when a renderer's spring-bone physics moves a joint, the
+//! cylinder bends with it.
 //!
 //! Geometry is authored in **bind-pose world space** — i.e., the rest pose
 //! of each joint. The inverse-bind matrices (computed in `emit.rs` based
-//! on each joint's world Y position) cancel that out so the skinning math
+//! on each joint's world position) cancel that out so the skinning math
 //! sees the mesh in joint-local space at bind time.
 //!
-//! ## Status: deferred infrastructure
+//! ## Status: wired
 //!
-//! The cylinder + `buffer::pack_sphere_and_chain` + skin JSON wiring all
-//! exist and were locally smoke-tested against both adapters. three-vrm
-//! renders the result correctly (sphere + chain coexist). VRMMetalKit
-//! drops the non-skinned sphere mesh when any skin is present in the
-//! glTF document, even with the sphere annotated as `firstPerson.type
-//! = "both"` and parented under hips — so adding the chain skin to the
-//! spring-bone emit path regresses the avg_luminance property assertions
-//! (the sphere is what they measure).
-//!
-//! Filed upstream as
-//! [arkavo-org/VRMMetalKit#181](https://github.com/arkavo-org/VRMMetalKit/issues/181)
-//! (non-skinned meshes dropped when skin is present). Until that lands,
-//! `emit_vrm_with_spring_bone` keeps the sphere-only mesh. The chain
-//! geometry + IBM packing here is unit-tested standalone and ready to
-//! wire when the upstream issue is resolved.
+//! The chain cylinder is emitted alongside the head sphere by both
+//! `emit_vrm_with_spring_bone` (1.0) and `emit_vrm_with_spring_bone_v0` (0.x).
+//! VRMMetalKit 0.13.1 closed the non-skinned-mesh-drop bug
+//! ([VRMMetalKit#181](https://github.com/arkavo-org/VRMMetalKit/issues/181)),
+//! so sphere + chain coexist across all renderers.
 
 use glam::{Vec2, Vec3};
 
@@ -46,21 +36,19 @@ pub struct SkinnedMeshData {
     pub weights: Vec<[f32; 4]>,
 }
 
-/// Build a vertical cylinder running from `top_world_y` straight down by
-/// `joint_count * segment_length_m`. The cylinder has one vertex ring per
-/// joint plus one bottom-cap ring (so N+1 rings total for N joints), each
-/// with `ring_segments` vertices around the chain axis. Each ring is
-/// hard-weighted to its corresponding joint — ring 0 to joint 0, ring 1 to
-/// joint 1, ..., ring N to joint N-1 (the tail ring shares joint N-1 so
-/// the cylinder ends cleanly at the chain tip).
+/// Build a cylinder of `joint_count + 1` rings starting at `top_world` and
+/// stepping `segment_length_m` along `axis` per ring. Each ring is a circle
+/// of `ring_segments` verts in the plane perpendicular to `axis`, hard-weighted
+/// to its joint (ring N reuses joint N-1 so the tail caps cleanly).
 ///
-/// X = sideways, Y = down the chain, Z = forward. Cylinder is centered on
-/// the chain axis at X=0, Z=0.
+/// For `axis` parallel to ±Y the in-plane basis is pinned to (+X, +Z) so the
+/// historical vertical layout is reproduced byte-for-byte.
 pub fn build_chain_cylinder(
     joint_count: u32,
     segment_length_m: f32,
     radius: f32,
-    top_world_y: f32,
+    top_world: [f32; 3],
+    axis: [f32; 3],
     ring_segments: u32,
 ) -> SkinnedMeshData {
     assert!(joint_count > 0, "chain mesh needs at least 1 joint");
@@ -70,6 +58,10 @@ pub fn build_chain_cylinder(
     let n_segs = ring_segments as usize;
     let n_verts = n_rings * n_segs;
 
+    let a = Vec3::from_array(axis).normalize();
+    let top = Vec3::from_array(top_world);
+    let (u, v) = perp_basis(a);
+
     let mut positions = Vec::with_capacity(n_verts);
     let mut normals = Vec::with_capacity(n_verts);
     let mut uvs = Vec::with_capacity(n_verts);
@@ -77,36 +69,26 @@ pub fn build_chain_cylinder(
     let mut weights = Vec::with_capacity(n_verts);
 
     for ring in 0..n_rings {
-        // Ring 0 sits at the top (joint 0 position). Ring N (the tail
-        // ring) sits at the chain tip (joint_count * segment below top).
-        let y = top_world_y - (ring as f32) * segment_length_m;
-
-        // Each ring is weighted to its corresponding joint. Ring N (the
-        // bottom cap) is weighted to the LAST joint (index joint_count-1)
-        // so the tail of the cylinder tracks the chain tip.
+        let center = top + a * (ring as f32 * segment_length_m);
         let weighted_joint = ring.min(joint_count as usize - 1) as u16;
 
         for seg in 0..n_segs {
             let phi = (seg as f32) * 2.0 * std::f32::consts::PI / (n_segs as f32);
-            let cos_p = phi.cos();
-            let sin_p = phi.sin();
-            let n = Vec3::new(cos_p, 0.0, sin_p);
-            let p = Vec3::new(radius * cos_p, y, radius * sin_p);
+            let radial = u * phi.cos() + v * phi.sin();
+            let p = center + radial * radius;
             let uv = Vec2::new(
                 (seg as f32) / (n_segs as f32),
                 (ring as f32) / (n_rings as f32 - 1.0).max(1.0),
             );
 
             positions.push(p.into());
-            normals.push(n.into());
+            normals.push(radial.into());
             uvs.push(uv.into());
             joints.push([weighted_joint, 0, 0, 0]);
             weights.push([1.0, 0.0, 0.0, 0.0]);
         }
     }
 
-    // Triangles: between ring r and ring r+1, n_segs quads, each split into
-    // two triangles. Total = 2 * n_segs * (n_rings - 1) triangles.
     let mut indices = Vec::with_capacity(2 * n_segs * (n_rings - 1) * 3);
     for r in 0..n_rings - 1 {
         for s in 0..n_segs {
@@ -115,8 +97,6 @@ pub fn build_chain_cylinder(
             let i01 = (r * n_segs + s_next) as u32;
             let i10 = ((r + 1) * n_segs + s) as u32;
             let i11 = ((r + 1) * n_segs + s_next) as u32;
-            // Outward-facing (right-handed winding with normals pointing
-            // outward): i00, i10, i01; i01, i10, i11.
             indices.extend_from_slice(&[i00, i10, i01, i01, i10, i11]);
         }
     }
@@ -131,13 +111,31 @@ pub fn build_chain_cylinder(
     }
 }
 
+/// Orthonormal basis (u, v) spanning the plane perpendicular to unit `a`.
+/// Pinned to (+X, +Z) when `a` is parallel to ±Y so the legacy vertical
+/// cylinder is reproduced exactly.
+fn perp_basis(a: Vec3) -> (Vec3, Vec3) {
+    if a.x.abs() < 1e-6 && a.z.abs() < 1e-6 {
+        (Vec3::X, Vec3::Z)
+    } else {
+        let u = a.cross(Vec3::Y).normalize();
+        let v = a.cross(u).normalize();
+        (u, v)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // Helper: default -Y axis reproduces the legacy vertical layout.
+    fn down_cyl(joints: u32, seg: f32, r: f32, top_y: f32, segs: u32) -> SkinnedMeshData {
+        build_chain_cylinder(joints, seg, r, [0.0, top_y, 0.0], [0.0, -1.0, 0.0], segs)
+    }
+
     #[test]
     fn vertex_count_matches_rings_times_segments() {
-        let m = build_chain_cylinder(4, 0.05, 0.02, 1.31, 8);
+        let m = down_cyl(4, 0.05, 0.02, 1.31, 8);
         // 4 joints + 1 tail ring = 5 rings, 8 segments per ring = 40 verts.
         assert_eq!(m.positions.len(), 40);
         assert_eq!(m.normals.len(), 40);
@@ -149,7 +147,7 @@ mod tests {
     #[test]
     fn index_count_matches_quads_per_ring_gap() {
         // 4 ring-gaps × 8 segs × 2 tris × 3 indices = 192 indices.
-        let m = build_chain_cylinder(4, 0.05, 0.02, 1.31, 8);
+        let m = down_cyl(4, 0.05, 0.02, 1.31, 8);
         assert_eq!(m.indices.len(), 192);
         let n_verts = m.positions.len() as u32;
         for &i in &m.indices {
@@ -159,7 +157,7 @@ mod tests {
 
     #[test]
     fn ring_zero_sits_at_top_world_y() {
-        let m = build_chain_cylinder(4, 0.05, 0.02, 1.31, 8);
+        let m = down_cyl(4, 0.05, 0.02, 1.31, 8);
         for v in &m.positions[..8] {
             assert!((v[1] - 1.31).abs() < 1e-6, "ring 0 vertex Y = {}", v[1]);
         }
@@ -168,7 +166,7 @@ mod tests {
     #[test]
     fn tail_ring_extends_to_chain_tip() {
         // top=1.31, 4 joints @ 0.05 each, tail ring at top - 4*0.05 = 1.11
-        let m = build_chain_cylinder(4, 0.05, 0.02, 1.31, 8);
+        let m = down_cyl(4, 0.05, 0.02, 1.31, 8);
         let last_ring_start = m.positions.len() - 8;
         for v in &m.positions[last_ring_start..] {
             assert!((v[1] - 1.11).abs() < 1e-6, "tail ring Y = {}", v[1]);
@@ -177,7 +175,7 @@ mod tests {
 
     #[test]
     fn each_ring_is_hard_weighted_to_its_joint() {
-        let m = build_chain_cylinder(4, 0.05, 0.02, 1.31, 8);
+        let m = down_cyl(4, 0.05, 0.02, 1.31, 8);
         // Rings 0..3 weight to joints 0..3. Ring 4 (tail) reuses joint 3.
         for ring in 0..5_usize {
             let expected_joint = ring.min(3) as u16;
@@ -196,13 +194,38 @@ mod tests {
     #[test]
     fn ring_vertices_are_at_correct_radius() {
         let radius = 0.025_f32;
-        let m = build_chain_cylinder(4, 0.05, radius, 1.31, 12);
+        let m = down_cyl(4, 0.05, radius, 1.31, 12);
         for v in &m.positions {
             let r = (v[0] * v[0] + v[2] * v[2]).sqrt();
             assert!(
                 (r - radius).abs() < 1e-6,
                 "vertex at radius {r}, expected {radius}"
             );
+        }
+    }
+
+    #[test]
+    fn default_axis_reproduces_legacy_vertical_positions() {
+        let m = down_cyl(4, 0.05, 0.02, 1.31, 8);
+        for v in &m.positions[..8] {
+            assert!((v[1] - 1.31).abs() < 1e-6, "ring0 Y={}", v[1]);
+            let r = (v[0] * v[0] + v[2] * v[2]).sqrt();
+            assert!((r - 0.02).abs() < 1e-6);
+        }
+        let last = m.positions.len() - 8;
+        for v in &m.positions[last..] {
+            assert!((v[1] - 1.11).abs() < 1e-6, "tail Y={}", v[1]);
+        }
+    }
+
+    #[test]
+    fn forward_axis_walks_along_z() {
+        let m = build_chain_cylinder(2, 0.05, 0.02, [0.0, 1.16, 0.0], [0.0, 0.0, 1.0], 8);
+        let last = m.positions.len() - 8;
+        let cz: f32 = m.positions[last..].iter().map(|v| v[2]).sum::<f32>() / 8.0;
+        assert!((cz - 0.10).abs() < 1e-5, "tail ring center Z={cz}");
+        for v in &m.positions[last..] {
+            assert!((v[2] - 0.10).abs() < 1e-5, "tail vert Z={}", v[2]);
         }
     }
 }
