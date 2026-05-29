@@ -2,6 +2,30 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-05-29 — First VRM 0.x render through VMK: spring-bone physics conformant; three emit-side gaps fixed; VMK#299 reclassified as accepted normalization
+
+**What.** First attempt to render the Slice-2 VRM 0.x corpus through a real adapter (VMK / VRMMetalKit 0.16.0, rev `392d949`, Xcode 26.5 / M4 Max) — the deferred D4 task, scoped to VMK. Running it surfaced that the Slice-1/Slice-2 v0 emit was **never render-ready** (it had only ever been gltf-validator-gated, and mrxz/vrm-validator does no VRM-extension semantic checks). Three gaps, all on the suite side, fixed in order:
+
+1. **0.x camera was +Z (should be −Z).** All 9 v0 emit sites set `spec_version = V0` but left the +Z default camera from `build_default_test_plan`; the runner's `validate_camera_convention` correctly rejected every 0.x plan ("0.x avatars face -Z; camera must be at negative Z"). Fixed: `tag_plan_vrm0()` now flips the camera to the −Z side at all 9 sites.
+2. **`humanoid.humanBones` was empty.** `vrm_ext_v0.rs` hardcoded `humanBones: []`, so VMK's loader rejected the assets: `VRMModel.load failed: missingRequiredBone(bone: hips, availableBones: [])`. Fixed: the v0 spring-bone emit paths now populate `humanBones` from the skeleton's `bone_to_node` (the 0.x array form `[{bone,node,useDefaultValues}]`).
+3. **v0 MToon sweeps are meshless** (`emit_vrm_v0` emits no geometry) — they validate structurally but have nothing to render. **Not fixed** (deeper change: the v0 MToon path needs a sphere + skeleton like the 1.0 emit). The spring-bone v0 path is unaffected (it carries sphere + chain geometry), so the 0.x render signal in this entry is **spring-bone only**.
+
+**VMK#299 reclassified as accepted normalization (per maintainer direction).** VMK applies a load-bearing Ry180 to 0.x models (`buildNodeHierarchy` `isVRM0` branch — migrates −Z→+Z facing for physics/animation/culling/`+X=left` parity). Rather than flag this as the orientation divergence #299 documents, the conformance **adapter now compensates**: `handleSetCamera` and `handleSetLighting` conjugate the camera and directional light by the same Ry180 when `sourceSpecVersion == "0.x"`, so VMK renders the avatar's front under the suite's spec-correct −Z camera. This treats VMK's normalization as a feature (the suite's job becomes testing VMK's 0.x **material/physics**, not its facing). Both conjugations are gated strictly on 0.x; the VRM 1.0 path is byte-unchanged.
+
+**Result — VMK's 0.x spring-bone physics is conformant with its 1.0.** Within-renderer cross-version SSIM (the methodology triage order) over the full 20-variant settle sweep, VMK 0.x (`secondaryAnimation`) vs VMK 1.0 (`VRMC_springBone`), same `SpringBoneParams`:
+
+| stage | SSIM range across all axes | spread |
+|---|---|---|
+| camera conjugated only | 0.9271 – 0.9282 | 0.0011 |
+| camera + light conjugated | 0.9557 – 0.9573 | 0.0016 |
+
+The signal is the **axis-invariance**: gravity, stiffness, drag, joint-count, and segment-length variants all land within ~0.002 of each other at each stage. If VMK parsed any 0.x `secondaryAnimation` field differently from the 1.0 `VRMC_springBone` equivalent (a `gravityDir` sign, a stiffness scale, a `dragForce` unit), that axis would separate from the pack — none do. VMK's 0.x spring-bone simulation matches its 1.0 simulation. The uniform offset is the orientation-normalization residual: conjugating the light closed ~0.03 of it (it was lighting the 180°-rotated model from the mirrored side); the remaining ~0.043 is anti-aliasing from the 180° rasterization of the thin chain cylinder, not a physics or material defect.
+
+**Boundary / remaining.**
+- This is a **within-renderer cross-version** result (the cleanest VMK-isolating signal). The **cross-renderer** 0.x consensus (VMK vs godot/three-vrm/UniVRM) — the full D4 deliverable — is still to run; see `docs/superpowers/plans/2026-05-29-vrm-0x-slice2-d4-render-runbook.md`. godot is available locally; three-vrm/UniVRM need their toolchains.
+- The v0 **MToon** sweeps remain un-renderable (meshless) — a separate emit fix (geometry + skeleton in `emit_vrm_v0`) is needed before the 0.x MToon material signal can be read on any adapter.
+- No VMK code changed; the Ry180 camera/light conjugation lives entirely in the conformance adapter, accepting VMK's documented normalization.
+
 ## 2026-05-28 — Material-name classification sweep: NEGATIVE on a sphere (reproducer geometry is insufficient)
 
 **What.** The `material_name_classification` sweep (`emit-material-name-classification-sweep`) was built to catch VMK's material-name → forced-double-sided + overlay-depth-bias misfire (the `Vita_clothing` z-fighting; root cause verified at `VRMRenderItemBuilder.swift:216`). Rendered the four single-sided variants — one MToon material under names `matname_plain` (control), `matname_clothing` (trips `cloth`), `matname_skirt` (trips `skirt`), `matname_body` (different category) — through three-vrm and VMK at the standard sweep sphere.
