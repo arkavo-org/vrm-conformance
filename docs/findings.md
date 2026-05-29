@@ -21,8 +21,20 @@ This document records cross-renderer divergence findings produced by the suite, 
 
 The signal is the **axis-invariance**: gravity, stiffness, drag, joint-count, and segment-length variants all land within ~0.002 of each other at each stage. If VMK parsed any 0.x `secondaryAnimation` field differently from the 1.0 `VRMC_springBone` equivalent (a `gravityDir` sign, a stiffness scale, a `dragForce` unit), that axis would separate from the pack — none do. VMK's 0.x spring-bone simulation matches its 1.0 simulation. The uniform offset is the orientation-normalization residual: conjugating the light closed ~0.03 of it (it was lighting the 180°-rotated model from the mirrored side); the remaining ~0.043 is anti-aliasing from the 180° rasterization of the thin chain cylinder, not a physics or material defect.
 
+**Cross-renderer consensus (VMK vs godot-vrm 4.6.3, both at 0.x).** Added godot as the second real adapter (the humanBones fix unblocked it too). Two sweeps, cross-renderer SSIM, both axis-invariant:
+
+| sweep | VMK-0x vs godot-0x | within-VMK 0.x-vs-1.0 |
+|---|---|---|
+| settle (static gravity) | **0.9696 – 0.9703** | 0.9557 – 0.9573 |
+| swing (`animate_root_transform`, dynamic) | **0.8456 – 0.8484** | **0.9606 – 0.9615** |
+
+**The swing drop is integrator variance, not a VMK defect — and the within-renderer-cross-version triage is what proves it.** Under static settle, VMK and godot agree at ~0.97 (above the cross-renderer band). Under dynamic swing they fall to ~0.85, uniformly across all axes. The methodology triage order (`docs/methodology.md`, "Spring-bone cross-version triage order") says to read within-renderer cross-version *first*: VMK 0.x-swing vs VMK 1.0-swing is **~0.96** — i.e. VMK is self-consistent across versions under motion, so its `animate_root_transform` is NOT mirrored by the Ry180 (the obvious failure mode — un-conjugated translation — is refuted). The remaining cross-renderer swing delta is therefore genuine integrator variance (Verlet vs semi-implicit Euler / sub-stepping / damping order) between VMK and godot, which the pin explicitly classes as expected, not a conformance defect. This is the pin working as designed: it separated "VMK's own emit/handling is consistent" (it is) from "two engines integrate motion differently" (they do).
+
+**Net VMK 0.x spring-bone verdict: conformant.** No per-axis `secondaryAnimation` parsing divergence (axis-invariant on every test), self-consistent across versions for both settle and swing, and in strong static agreement with godot. The only cross-renderer gap is dynamic integrator variance, expected.
+
 **Boundary / remaining.**
-- This is a **within-renderer cross-version** result (the cleanest VMK-isolating signal). The **cross-renderer** 0.x consensus (VMK vs godot/three-vrm/UniVRM) — the full D4 deliverable — is still to run; see `docs/superpowers/plans/2026-05-29-vrm-0x-slice2-d4-render-runbook.md`. godot is available locally; three-vrm/UniVRM need their toolchains.
+- Cross-renderer consensus here is **2-way (VMK + godot)**. three-vrm (needs Playwright chromium) and UniVRM (needs Unity, not installed here) would complete the 4-way; see `docs/superpowers/plans/2026-05-29-vrm-0x-slice2-d4-render-runbook.md`.
+- The v0 **MToon** sweeps remain un-renderable (meshless) — a separate emit fix (geometry + skeleton in `emit_vrm_v0`) is needed before the 0.x MToon material signal can be read on any adapter.
 - The v0 **MToon** sweeps remain un-renderable (meshless) — a separate emit fix (geometry + skeleton in `emit_vrm_v0`) is needed before the 0.x MToon material signal can be read on any adapter.
 - No VMK code changed; the Ry180 camera/light conjugation lives entirely in the conformance adapter, accepting VMK's documented normalization.
 
