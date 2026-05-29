@@ -183,8 +183,11 @@ pub fn minimal_skeleton() -> Skeleton {
 }
 
 /// Append N child nodes to the parent at `parent_node_index`, forming a
-/// linear chain. Each chain node carries `translation = (0, -segment_length_m, 0)`
-/// relative to its parent (the chain hangs straight down in rest pose).
+/// linear chain. By default each chain node carries
+/// `translation = (0, -segment_length_m, 0)` relative to its parent (the
+/// chain hangs straight down in rest pose). Use [`append_spring_chain_axis`]
+/// to orient the chain in an arbitrary direction.
+///
 /// Returns the new chain node indices in head-to-tail order.
 ///
 /// This mutates `skeleton.nodes_json` in place; the new nodes are appended
@@ -196,6 +199,27 @@ pub fn append_spring_chain(
     joint_count: u32,
     segment_length_m: f32,
 ) -> Vec<usize> {
+    append_spring_chain_axis(
+        skeleton,
+        parent_node_index,
+        joint_count,
+        segment_length_m,
+        [0.0, -1.0, 0.0],
+    )
+}
+
+/// Like [`append_spring_chain`] but lays the chain along `chain_axis`
+/// (a unit direction in the parent's local space) instead of straight -Y.
+///
+/// Each chain node's `translation` is `chain_axis * segment_length_m`.
+/// Returns the new chain node indices in head-to-tail order.
+pub fn append_spring_chain_axis(
+    skeleton: &mut Skeleton,
+    parent_node_index: usize,
+    joint_count: u32,
+    segment_length_m: f32,
+    chain_axis: [f32; 3],
+) -> Vec<usize> {
     if joint_count == 0 {
         return Vec::new();
     }
@@ -206,7 +230,11 @@ pub fn append_spring_chain(
         .expect("skeleton nodes_json must be an array");
     let mut chain_indices = Vec::with_capacity(joint_count as usize);
 
-    let segment_translation = json!([0.0, -segment_length_m, 0.0]);
+    let segment_translation = json!([
+        chain_axis[0] * segment_length_m,
+        chain_axis[1] * segment_length_m,
+        chain_axis[2] * segment_length_m,
+    ]);
 
     // Reserve indices and emit each chain node. The parent of the first
     // chain node is parent_node_index; the parent of each subsequent chain
@@ -239,4 +267,36 @@ pub fn append_spring_chain(
     parent["children"] = Value::Array(parent_children);
 
     chain_indices
+}
+
+#[cfg(test)]
+mod chain_axis_tests {
+    use super::*;
+
+    #[test]
+    fn chain_extends_along_given_axis() {
+        let mut sk = minimal_skeleton();
+        let head = sk.bone_to_node["head"];
+        let idxs = append_spring_chain_axis(&mut sk, head, 3, 0.05, [0.0, 0.0, 1.0]);
+        let nodes = sk.nodes_json.as_array().unwrap();
+        for &i in &idxs {
+            let t = nodes[i]["translation"].as_array().unwrap();
+            assert!((t[0].as_f64().unwrap() - 0.0).abs() < 1e-6);
+            assert!((t[1].as_f64().unwrap() - 0.0).abs() < 1e-6);
+            assert!((t[2].as_f64().unwrap() - 0.05).abs() < 1e-6, "Z segment");
+        }
+        // leaf (last) has no children -> forces 7cm synthesis in 0.x
+        let leaf = *idxs.last().unwrap();
+        assert!(nodes[leaf].get("children").is_none());
+    }
+
+    #[test]
+    fn default_axis_still_points_down() {
+        let mut sk = minimal_skeleton();
+        let head = sk.bone_to_node["head"];
+        let idxs = append_spring_chain(&mut sk, head, 2, 0.05);
+        let nodes = sk.nodes_json.as_array().unwrap();
+        let t = nodes[idxs[0]]["translation"].as_array().unwrap();
+        assert!((t[1].as_f64().unwrap() - (-0.05)).abs() < 1e-6, "-Y");
+    }
 }
