@@ -7,10 +7,10 @@ use anyhow::Result;
 use camino::Utf8Path;
 use serde_json::json;
 use vrm_test_plan::{
-    AmbientLight, AnimationConfig, BboxRegion, Camera, ColorSpace, ConformanceStatus, Diff,
-    DiffMode, DirectionalLight, Lighting, Output, PhysicsConfig, PostProcessing, PropertyAssertion,
-    RenderSequenceBlock, RootTransformAnimation, SequenceFormat, SequenceRootTransformAnimation,
-    TestPlan, ToneMapping, VrmaAnimation,
+    AmbientLight, AnimationConfig, BboxRegion, Camera, ColorSpace, ConformanceStatus,
+    CrossVariantAssertion, Diff, DiffMode, DirectionalLight, Lighting, Output, PhysicsConfig,
+    PostProcessing, PropertyAssertion, RenderSequenceBlock, RootTransformAnimation, SequenceFormat,
+    SequenceRootTransformAnimation, TestPlan, ToneMapping, VrmaAnimation,
 };
 
 pub fn write_meta_json(
@@ -95,6 +95,36 @@ pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> Tes
         render_sequence: None,
         cross_variant: None,
     }
+}
+
+/// Build the test plan for one doubleSided back-face-culling spec-test variant.
+///
+/// Camera sits on the −Z side looking toward +Z, so it views the quad's BACK
+/// face (the quad's front normal is +Z). Camera-behind is deliberate over
+/// rotating the quad 180° — it avoids confounding with VMK's documented
+/// 180°-flip bug (VMK#299). When `cross_variant_sibling` is set (the `false`
+/// variant), attaches a CrossVariantAssertion requiring the two renders to
+/// diverge at or below SSIM 0.85.
+pub fn build_doublesided_quad_test_plan(
+    params: &MToonParams,
+    asset_relpath: &str,
+    cross_variant_sibling: Option<&str>,
+) -> TestPlan {
+    let mut plan = build_default_test_plan(params, asset_relpath);
+    plan.spec_section = "glTF material.doubleSided (back-face culling)".into();
+    plan.camera = Camera {
+        position: [0.0, 1.36, -1.5],
+        target: [0.0, 1.36, 0.0],
+        up: [0.0, 1.0, 0.0],
+        fov_degrees: 30.0,
+    };
+    if let Some(sibling) = cross_variant_sibling {
+        plan.cross_variant = Some(CrossVariantAssertion {
+            sibling_id: sibling.to_string(),
+            max_ssim: 0.85,
+        });
+    }
+    plan
 }
 
 /// Per-cluster conformance threshold. See `docs/methodology.md` and
@@ -440,6 +470,40 @@ pub fn write_test_yaml(plan: &TestPlan, out: &Utf8Path) -> Result<()> {
     let yaml = serde_yml::to_string(plan)?;
     std::fs::write(out, yaml)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod doublesided_plan_tests {
+    use super::*;
+
+    #[test]
+    fn doublesided_quad_plan_has_back_camera_and_cross_variant_on_false_only() {
+        let p = MToonParams::defaults("doublesided_quad_false");
+        let plan = build_doublesided_quad_test_plan(
+            &p,
+            "doublesided_quad_false.vrm",
+            Some("doublesided_quad_true"),
+        );
+        // Camera sits behind the quad (−Z side) so the back face is in frame.
+        assert!(
+            plan.camera.position[2] < 0.0,
+            "camera must be on the -Z side, got {:?}",
+            plan.camera.position
+        );
+        let cv = plan
+            .cross_variant
+            .as_ref()
+            .expect("false variant carries cross_variant");
+        assert_eq!(cv.sibling_id, "doublesided_quad_true");
+        assert!((cv.max_ssim - 0.85).abs() < 1e-6);
+        assert!(plan.validate().is_ok());
+
+        // True variant carries no cross_variant (single, non-redundant declaration).
+        let p_true = MToonParams::defaults("doublesided_quad_true");
+        let plan_true =
+            build_doublesided_quad_test_plan(&p_true, "doublesided_quad_true.vrm", None);
+        assert!(plan_true.cross_variant.is_none());
+    }
 }
 
 #[cfg(test)]

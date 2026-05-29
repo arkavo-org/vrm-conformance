@@ -427,6 +427,34 @@ fn scene_uses_extended_collider(scene: &SpringBoneSceneParams) -> bool {
     has_extended_shape || has_angle_limit
 }
 
+/// Emit the doubleSided quad triplet (`.vrm` + `.meta.json` + `.test.yaml`).
+/// `cross_variant_sibling` names the opposite variant for the cross-variant
+/// SSIM assertion; set it on the `false` variant only.
+pub fn emit_with_sidecars_doublesided_quad(
+    params: &MToonParams,
+    stem: &Utf8Path,
+    cross_variant_sibling: Option<&str>,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_doublesided_quad(params, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(params, None, &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan = crate::sidecar::build_doublesided_quad_test_plan(
+        params,
+        &asset_relpath,
+        cross_variant_sibling,
+    );
+    write_test_yaml(&plan, &yaml_path)?;
+    Ok(())
+}
+
 /// Emits `<stem>.vrm`, `<stem>.meta.json`, and `<stem>.test.yaml` from a
 /// single MToonParams value.
 pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
