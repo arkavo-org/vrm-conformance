@@ -362,6 +362,8 @@ pub enum Cmd {
         output_dir: Utf8PathBuf,
         #[arg(long)]
         json: bool,
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
     },
 
     /// Emit the VRMA humanoid bone sweep (~15 plans). Each variant
@@ -1739,10 +1741,13 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::EmitSpringboneMultichainSweep {
             output_dir,
             json: emit_json,
+            spec_version,
         } => {
             use crate::emit::{
                 emit_with_sidecars_spring_bone_multichain,
                 emit_with_sidecars_spring_bone_multichain_swing,
+                emit_with_sidecars_spring_bone_multichain_v0,
+                emit_with_sidecars_spring_bone_multichain_v0_swing,
             };
             use crate::sweep::spring_bone_multichain_sweep;
 
@@ -1769,7 +1774,14 @@ pub fn run(cli: Cli) -> Result<()> {
                     eprintln!("[{:3}/{}] {}", idx + 1, total, settle_id);
                 }
                 let stem = output_dir.join(&settle_id);
-                emit_with_sidecars_spring_bone_multichain(mtoon, scene, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_multichain_v0(mtoon, scene, &stem)?;
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone_multichain(mtoon, scene, &stem)?;
+                    }
+                }
                 emitted.push(stem);
                 idx += 1;
 
@@ -1801,7 +1813,22 @@ pub fn run(cli: Cli) -> Result<()> {
                     s
                 };
                 let stem = output_dir.join(&swing_id);
-                emit_with_sidecars_spring_bone_multichain_swing(&swing_mtoon, &swing_scene, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_multichain_v0_swing(
+                            &swing_mtoon,
+                            &swing_scene,
+                            &stem,
+                        )?;
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone_multichain_swing(
+                            &swing_mtoon,
+                            &swing_scene,
+                            &stem,
+                        )?;
+                    }
+                }
                 emitted.push(stem);
                 idx += 1;
             }

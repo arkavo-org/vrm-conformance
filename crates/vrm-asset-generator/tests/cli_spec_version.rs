@@ -494,6 +494,90 @@ fn taper_sweep_rejects_v0() {
 }
 
 #[test]
+#[ignore = "requires .tools/vrm-validator-cli"]
+fn springbone_multichain_v0_passes_validator() {
+    use camino::Utf8PathBuf;
+    use vrm_asset_generator::emit::emit_with_sidecars_spring_bone_multichain_v0;
+    use vrm_asset_generator::sweep::spring_bone_multichain_sweep;
+    use vrm_validator_wrap::{validate, ValidatorConfig};
+
+    let cfg = match ValidatorConfig::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "SKIP: validator shim not reachable ({e}). Set VRM_VALIDATOR_BIN to an absolute path \
+                 or run scripts/install-validator.sh from the workspace root."
+            );
+            return;
+        }
+    };
+
+    // Use the first variant of the multichain sweep.
+    let variants = spring_bone_multichain_sweep();
+    let (mtoon, scene) = &variants[0];
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let stem = Utf8PathBuf::from_path_buf(tmp.path().join("mc_v0_val")).expect("utf8 path");
+    emit_with_sidecars_spring_bone_multichain_v0(mtoon, scene, &stem)
+        .expect("emission must succeed");
+
+    let vrm = stem.with_extension("vrm");
+    let report = validate(&cfg, &vrm).expect("validator must run");
+
+    if report.issues.num_errors > 0 {
+        let summary = report
+            .issues
+            .messages
+            .iter()
+            .filter(|m| m.severity == 0)
+            .map(|m| format!("{}: {}", m.code, m.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        panic!(
+            "VRM 0.x multichain asset has {} validator errors: {summary}",
+            report.issues.num_errors
+        );
+    }
+    eprintln!(
+        "springbone_multichain_v0_passes_validator: 0 errors, {} warnings",
+        report.issues.num_warnings
+    );
+}
+
+#[test]
+fn springbone_multichain_sweep_v0_exits_0_and_emits_secondary_animation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("mc0x");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+        .args([
+            "emit-springbone-multichain-sweep",
+            "--spec-version",
+            "0.x",
+            "--output-dir",
+            out.to_str().unwrap(),
+        ])
+        .status()
+        .expect("run emit-springbone-multichain-sweep");
+    assert!(
+        status.success(),
+        "emit-springbone-multichain-sweep --spec-version 0.x must exit 0"
+    );
+    // At least one .vrm must exist and contain "secondaryAnimation".
+    let any_sa = std::fs::read_dir(&out)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "vrm"))
+        .any(|e| {
+            String::from_utf8_lossy(&std::fs::read(e.path()).unwrap())
+                .contains("secondaryAnimation")
+        });
+    assert!(
+        any_sa,
+        "0.x multichain sweep must emit at least one .vrm with secondaryAnimation"
+    );
+}
+
+#[test]
 fn sequence_sweep_v0_emits_render_sequence_block() {
     let tmp = tempfile::tempdir().unwrap();
     let out = tmp.path().join("seq0x");

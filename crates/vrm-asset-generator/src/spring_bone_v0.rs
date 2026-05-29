@@ -75,10 +75,118 @@ pub fn build_secondary_animation(params: &SpringBoneParams, first_bone_node: usi
     build_secondary_animation_with_colliders(params, first_bone_node, &[])
 }
 
+/// Build `secondaryAnimation` with N boneGroups, one per chain.
+///
+/// `springs[i]` drives boneGroup i; `first_bone_nodes[i]` is the root node index of
+/// chain i. The top-level `colliderGroups` is always empty — the multichain sweep has
+/// no colliders. Each boneGroup uses `colliderGroups: []` accordingly.
+///
+/// # Panics
+/// Panics (debug only) if `springs.len() != first_bone_nodes.len()`.
+pub fn build_secondary_animation_multi(
+    springs: &[crate::spring_bone::SpringBoneParams],
+    first_bone_nodes: &[usize],
+) -> Value {
+    assert_eq!(
+        springs.len(),
+        first_bone_nodes.len(),
+        "springs and first_bone_nodes must have the same length"
+    );
+
+    let bone_groups: Vec<Value> = springs
+        .iter()
+        .zip(first_bone_nodes.iter())
+        .map(|(params, &first_bone_node)| {
+            json!({
+                "comment": params.spring_name,
+                "stiffiness": params.stiffness,
+                "gravityPower": params.gravity_power,
+                "gravityDir": {
+                    "x": params.gravity_dir[0],
+                    "y": params.gravity_dir[1],
+                    "z": params.gravity_dir[2]
+                },
+                "dragForce": params.drag_force,
+                "center": -1,
+                "hitRadius": params.hit_radius,
+                "bones": [first_bone_node],
+                "colliderGroups": []
+            })
+        })
+        .collect();
+
+    json!({
+        "boneGroups": bone_groups,
+        "colliderGroups": []
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::spring_bone::SpringBoneParams;
+
+    // ── multi-chain builder tests ────────────────────────────────────────────
+
+    #[test]
+    fn multi_three_chains_produces_three_bone_groups() {
+        let springs: Vec<SpringBoneParams> = (0..3)
+            .map(|i| SpringBoneParams::defaults(format!("chain_{i}")))
+            .collect();
+        let first_bone_nodes: Vec<usize> = vec![10, 20, 30];
+        let sa = build_secondary_animation_multi(&springs, &first_bone_nodes);
+
+        let groups = sa["boneGroups"]
+            .as_array()
+            .expect("boneGroups must be an array");
+        assert_eq!(groups.len(), 3, "3 springs → 3 boneGroups");
+    }
+
+    #[test]
+    fn multi_bone_group_bones_match_first_bone_nodes() {
+        let springs: Vec<SpringBoneParams> = (0..3)
+            .map(|i| SpringBoneParams::defaults(format!("mc_{i}")))
+            .collect();
+        let first_bone_nodes: Vec<usize> = vec![5, 11, 99];
+        let sa = build_secondary_animation_multi(&springs, &first_bone_nodes);
+        let groups = sa["boneGroups"].as_array().unwrap();
+        for (i, &expected_node) in first_bone_nodes.iter().enumerate() {
+            assert_eq!(
+                groups[i]["bones"][0], expected_node,
+                "boneGroups[{i}].bones[0] must be first_bone_nodes[{i}]={expected_node}"
+            );
+        }
+    }
+
+    #[test]
+    fn multi_each_bone_group_has_stiffiness_key() {
+        let springs: Vec<SpringBoneParams> = (0..3)
+            .map(|i| SpringBoneParams::defaults(format!("stiff_{i}")))
+            .collect();
+        let first_bone_nodes: Vec<usize> = vec![1, 2, 3];
+        let sa = build_secondary_animation_multi(&springs, &first_bone_nodes);
+        let groups = sa["boneGroups"].as_array().unwrap();
+        for (i, g) in groups.iter().enumerate() {
+            assert!(
+                g.get("stiffiness").is_some(),
+                "boneGroups[{i}] must have `stiffiness` key (0.x spec typo)"
+            );
+        }
+    }
+
+    #[test]
+    fn multi_top_level_collider_groups_empty() {
+        let springs: Vec<SpringBoneParams> = vec![SpringBoneParams::defaults("mc_cg")];
+        let sa = build_secondary_animation_multi(&springs, &[7]);
+        let cgs = sa["colliderGroups"]
+            .as_array()
+            .expect("colliderGroups array");
+        assert_eq!(
+            cgs.len(),
+            0,
+            "multichain has no colliders → empty colliderGroups"
+        );
+    }
 
     #[test]
     fn single_chain_has_one_bone_group_with_spec_field_names() {

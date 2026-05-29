@@ -2132,6 +2132,288 @@ pub fn emit_vrm_with_spring_bone_multichain(
     Ok(())
 }
 
+/// Emit a VRM **0.x** `.vrm` GLB with N parallel spring-bone chains
+/// (`secondaryAnimation.boneGroups`).
+///
+/// The geometry is **identical** to [`emit_vrm_with_spring_bone_multichain`] —
+/// sphere mesh + humanoid skeleton + N intermediate nodes (radially placed under
+/// head) + N chain node trees + N skinned cylinder meshes + N skins packed via
+/// `pack_sphere_and_multichains`. Only the material/extension layer changes:
+///
+/// - `extensionsUsed`: `["KHR_materials_unlit", "VRM"]`.
+/// - Material: `v0_material` (unlit-only, no `VRMC_materials_mtoon`).
+/// - `extensions.VRM` assembled by
+///   [`crate::vrm_ext_v0::emit_vrm_extension_with_secondary`] with
+///   `secondaryAnimation` built by
+///   [`crate::spring_bone_v0::build_secondary_animation_multi`].
+/// - No `VRMC_vrm`, no `VRMC_springBone`, no `extensionsRequired`.
+pub fn emit_vrm_with_spring_bone_multichain_v0(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    output: &Utf8Path,
+) -> Result<()> {
+    let n_chains = scene.springs.len();
+    assert!(n_chains >= 1, "multichain v0 emit needs at least 1 chain");
+
+    let mesh = sphere(0.3, 24, 48);
+
+    let mut skeleton = crate::humanoid::minimal_skeleton();
+    let head_node = skeleton.bone_to_node["head"];
+    let head_world = crate::humanoid::rest_pose_world_position("head");
+    let head_world_y = head_world[1];
+
+    const CHAIN_RADIAL_M: f32 = 0.05;
+
+    let mut chain_joint_nodes: Vec<Vec<usize>> = Vec::with_capacity(n_chains);
+    let mut chain_meshes: Vec<crate::chain_mesh::SkinnedMeshData> = Vec::with_capacity(n_chains);
+    let mut inv_binds: Vec<Vec<[f32; 16]>> = Vec::with_capacity(n_chains);
+
+    for (c_idx, spring_params) in scene.springs.iter().enumerate() {
+        let angle = (c_idx as f32) * 2.0 * std::f32::consts::PI / (n_chains as f32);
+        let (sin_a, cos_a) = angle.sin_cos();
+        let rx = CHAIN_RADIAL_M * sin_a;
+        let rz = CHAIN_RADIAL_M * cos_a;
+
+        let nodes = skeleton.nodes_json.as_array_mut().unwrap();
+        let inter_idx = nodes.len();
+        nodes.push(json!({
+            "name": format!("{}_chain{}_inter", mtoon.id, c_idx),
+            "translation": [rx, 0.0, rz],
+        }));
+        let head_ref = nodes.get_mut(head_node).unwrap();
+        let mut hc = head_ref["children"].as_array().cloned().unwrap_or_default();
+        hc.push(json!(inter_idx));
+        head_ref["children"] = Value::Array(hc);
+
+        let chain_nodes = crate::humanoid::append_spring_chain(
+            &mut skeleton,
+            inter_idx,
+            spring_params.joint_count,
+            spring_params.segment_length_m,
+        );
+
+        let chain_top_y = head_world_y - spring_params.segment_length_m;
+        let chain_mesh = crate::chain_mesh::build_chain_cylinder(
+            spring_params.joint_count,
+            spring_params.segment_length_m,
+            0.025,
+            chain_top_y,
+            12,
+        );
+
+        let ibm: Vec<[f32; 16]> = (0..spring_params.joint_count)
+            .map(|i| {
+                let jy = head_world_y - ((i + 1) as f32) * spring_params.segment_length_m;
+                #[rustfmt::skip]
+                let m = [
+                    1.0, 0.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0, 0.0,
+                    0.0, 0.0, 1.0, 0.0,
+                    0.0, -jy, 0.0, 1.0,
+                ];
+                m
+            })
+            .collect();
+
+        chain_joint_nodes.push(chain_nodes);
+        chain_meshes.push(chain_mesh);
+        inv_binds.push(ibm);
+    }
+
+    let chains_for_pack: Vec<(&crate::chain_mesh::SkinnedMeshData, &[[f32; 16]])> = chain_meshes
+        .iter()
+        .zip(inv_binds.iter())
+        .map(|(cm, ibm)| (cm, ibm.as_slice()))
+        .collect();
+    let packed = pack_sphere_and_multichains(&mesh, &chains_for_pack);
+
+    let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
+
+    // Sphere mesh node — child of head.
+    let sphere_mesh_node = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_mesh", mtoon.id),
+        "mesh": 0
+    }));
+    let head_ref = &mut nodes[head_node];
+    let mut hc = head_ref["children"].as_array().cloned().unwrap_or_default();
+    hc.push(json!(sphere_mesh_node));
+    head_ref["children"] = Value::Array(hc);
+
+    // Chain mesh nodes — children of hips (scene stays single-rooted).
+    for c_idx in 0..n_chains {
+        let chain_mesh_node = nodes.len();
+        nodes.push(json!({
+            "name": format!("{}_chain{}_mesh", mtoon.id, c_idx),
+            "mesh": 1 + c_idx,
+            "skin": c_idx
+        }));
+        let hips_ref = &mut nodes[skeleton.root_node];
+        let mut hips_children = hips_ref["children"].as_array().cloned().unwrap_or_default();
+        hips_children.push(json!(chain_mesh_node));
+        hips_ref["children"] = Value::Array(hips_children);
+    }
+
+    // Collect the per-chain first-bone node indices (root of each chain).
+    let per_chain_first_nodes: Vec<usize> =
+        chain_joint_nodes.iter().map(|chain| chain[0]).collect();
+
+    // Meshes: sphere (index 0) + N chain cylinders (index 1..N).
+    let mut meshes: Vec<Value> = vec![json!({
+        "name": format!("{}_geom", mtoon.id),
+        "primitives": [{
+            "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 },
+            "indices": 3,
+            "material": 0,
+            "mode": 4
+        }]
+    })];
+    for c_idx in 0..n_chains {
+        let base = 4 + c_idx * 7;
+        meshes.push(json!({
+            "name": format!("{}_chain{}_geom", mtoon.id, c_idx),
+            "primitives": [{
+                "attributes": {
+                    "POSITION": base,
+                    "NORMAL": base + 1,
+                    "TEXCOORD_0": base + 2,
+                    "JOINTS_0": base + 4,
+                    "WEIGHTS_0": base + 5
+                },
+                "indices": base + 3,
+                "material": 0,
+                "mode": 4
+            }]
+        }));
+    }
+
+    // Skins: one per chain. inverseBindMatrices accessor index = 4 + i*7 + 6.
+    let skins: Vec<Value> = (0..n_chains)
+        .map(|c_idx| {
+            let ibm_acc = 4 + c_idx * 7 + 6;
+            json!({
+                "joints": chain_joint_nodes[c_idx],
+                "inverseBindMatrices": ibm_acc,
+                "skeleton": chain_joint_nodes[c_idx][0]
+            })
+        })
+        .collect();
+
+    // VRM 0.x extension block.
+    let empty_expressions = crate::expressions_v0::ExpressionsV0Params { groups: vec![] };
+    let secondary = crate::spring_bone_v0::build_secondary_animation_multi(
+        &scene.springs,
+        &per_chain_first_nodes,
+    );
+    let vrm_ext = crate::vrm_ext_v0::emit_vrm_extension_with_secondary(
+        &mtoon.id,
+        &[mtoon.clone()],
+        &empty_expressions,
+        Some(secondary),
+    );
+
+    // v0-compatible glTF material: KHR_materials_unlit only, no VRMC_materials_mtoon.
+    let v0_material = json!({
+        "name": mtoon.id,
+        "pbrMetallicRoughness": {
+            "baseColorFactor": mtoon.base_color_factor,
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.9
+        },
+        "alphaMode": "OPAQUE",
+        "doubleSided": mtoon.double_sided,
+        "extensions": {
+            "KHR_materials_unlit": {}
+        }
+    });
+
+    let mut doc = json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
+        },
+        "extensionsUsed": ["KHR_materials_unlit", "VRM"],
+        "scene": 0,
+        "scenes": [{ "nodes": [skeleton.root_node] }],
+        "nodes": nodes,
+        "meshes": meshes,
+        "skins": skins,
+        "materials": [v0_material],
+        "extensions": {
+            "VRM": vrm_ext
+        }
+    });
+
+    for key in ["buffers", "bufferViews", "accessors"] {
+        doc[key] = packed.json[key].clone();
+    }
+
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json_bytes = serde_json::to_vec(&doc)?;
+    let glb = write_glb(&GlbDocument {
+        json: json_bytes,
+        binary: packed.binary,
+    })?;
+    std::fs::write(output, glb)?;
+    Ok(())
+}
+
+/// Emits `<stem>.vrm` (VRM 0.x multi-chain spring-bone), `<stem>.meta.json`,
+/// and `<stem>.test.yaml` (settle variant, `spec_version: "0.x"`).
+pub fn emit_with_sidecars_spring_bone_multichain_v0(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_multichain_v0(mtoon, scene, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    let spring_bone = &scene.springs[0];
+    write_meta_json(mtoon, Some(spring_bone), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan =
+        crate::sidecar::build_spring_bone_multichain_test_plan(mtoon, scene, &asset_relpath);
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// Same as [`emit_with_sidecars_spring_bone_multichain_v0`] but the `.test.yaml`
+/// carries an `animation.root_transform` block (swing variant, `spec_version: "0.x"`).
+pub fn emit_with_sidecars_spring_bone_multichain_v0_swing(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_multichain_v0(mtoon, scene, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    let spring_bone = &scene.springs[0];
+    write_meta_json(mtoon, Some(spring_bone), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan =
+        crate::sidecar::build_spring_bone_multichain_swing_test_plan(mtoon, scene, &asset_relpath);
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 /// Emits `<stem>.vrm` (MToon + multi-chain spring-bone), `<stem>.meta.json`,
 /// and `<stem>.test.yaml` (settle variant).
 pub fn emit_with_sidecars_spring_bone_multichain(
@@ -2884,5 +3166,99 @@ mod doublesided_quad_tests {
         // Quad geometry: accessor 0 = POSITION (4 verts), accessor 3 = indices (6).
         assert_eq!(doc["accessors"][0]["count"], serde_json::json!(4));
         assert_eq!(doc["accessors"][3]["count"], serde_json::json!(6));
+    }
+}
+
+#[cfg(test)]
+mod multichain_v0_emit_tests {
+    use super::*;
+    use crate::params::MToonParams;
+    use crate::spring_bone::*;
+    use crate::sweep::spring_bone_multichain_sweep;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    #[test]
+    fn multichain_v0_emit_has_secondary_animation_and_n_bone_groups() {
+        // Take the first variant from the multichain sweep.
+        let variants = spring_bone_multichain_sweep();
+        let (mtoon, scene) = &variants[0];
+
+        let tmp = tempdir().unwrap();
+        let stem = Utf8Path::from_path(tmp.path()).unwrap().join("mc_v0_test");
+        emit_with_sidecars_spring_bone_multichain_v0(mtoon, scene, &stem).unwrap();
+
+        let vrm_path = stem.with_extension("vrm");
+        let bytes = std::fs::read(&vrm_path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+
+        // Must carry secondaryAnimation (not VRMC_springBone).
+        let sa = &doc["extensions"]["VRM"]["secondaryAnimation"];
+        assert!(
+            !sa.is_null(),
+            "0.x multichain asset must have extensions.VRM.secondaryAnimation"
+        );
+
+        // boneGroups count must equal scene.springs.len().
+        let bone_groups = sa["boneGroups"].as_array().expect("boneGroups array");
+        assert_eq!(
+            bone_groups.len(),
+            scene.springs.len(),
+            "boneGroups.len() must equal scene.springs.len()"
+        );
+    }
+
+    #[test]
+    fn multichain_v0_emit_carries_vrm_extension_not_vrmc() {
+        let mtoon = MToonParams::defaults("mc_v0_ext_check");
+        let scene = SpringBoneSceneParams {
+            springs: vec![
+                SpringBoneParams::defaults("chain_a"),
+                SpringBoneParams::defaults("chain_b"),
+            ],
+            colliders: vec![],
+            collider_groups: vec![],
+            spring_collider_groups: vec![vec![], vec![]],
+        };
+        let tmp = tempdir().unwrap();
+        let vrm_path = Utf8Path::from_path(tmp.path()).unwrap().join("out.vrm");
+        emit_vrm_with_spring_bone_multichain_v0(&mtoon, &scene, &vrm_path).unwrap();
+
+        let bytes = std::fs::read(&vrm_path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+
+        // extensionsUsed must contain "VRM" and "KHR_materials_unlit".
+        let ext_used = doc["extensionsUsed"]
+            .as_array()
+            .expect("extensionsUsed array");
+        let ext_names: Vec<&str> = ext_used.iter().filter_map(|v| v.as_str()).collect();
+        assert!(
+            ext_names.contains(&"VRM"),
+            "extensionsUsed must contain VRM"
+        );
+        assert!(
+            ext_names.contains(&"KHR_materials_unlit"),
+            "extensionsUsed must contain KHR_materials_unlit"
+        );
+        // Must NOT contain VRMC_springBone.
+        assert!(
+            !ext_names.contains(&"VRMC_springBone"),
+            "0.x asset must not declare VRMC_springBone"
+        );
+        // Must NOT contain extensionsRequired (0.x has none).
+        assert!(
+            doc.get("extensionsRequired").is_none(),
+            "0.x asset must not have extensionsRequired"
+        );
+
+        // N skins — one per chain.
+        let skins = doc["skins"].as_array().expect("skins array");
+        assert_eq!(skins.len(), 2, "one skin per chain");
+
+        // Sphere + N chain meshes.
+        let meshes = doc["meshes"].as_array().expect("meshes array");
+        assert_eq!(meshes.len(), 3, "sphere + 2 chain meshes");
     }
 }
