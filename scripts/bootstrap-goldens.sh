@@ -94,13 +94,13 @@ mkdir -p "$ASSETS_DIR"
 if [ "${QUICK:-0}" = "1" ]; then
     echo "==> QUICK mode: emitting assets only"
     cargo run --release -q -p vrm-asset-generator -- emit-default \
-        --id mtoon_default --output-dir "$ASSETS_DIR" "${SPEC_FLAG[@]}" >/dev/null
+        --id mtoon_default --output-dir "$ASSETS_DIR" ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
     if [ "$SPEC_VERSION" = "0.x" ]; then
         # emit-springbone has no --spec-version flag; use a second emit-default
         # for the spring-bone smoke asset at 0.x instead.
         echo "    SKIP emit-springbone: no --spec-version flag; emitting emit-default springbone_default_0x as smoke substitute"
         cargo run --release -q -p vrm-asset-generator -- emit-default \
-            --id springbone_default_0x --output-dir "$ASSETS_DIR" "${SPEC_FLAG[@]}" >/dev/null
+            --id springbone_default_0x --output-dir "$ASSETS_DIR" ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
     else
         cargo run --release -q -p vrm-asset-generator -- emit-springbone \
             --id springbone_default --output-dir "$ASSETS_DIR" >/dev/null
@@ -108,19 +108,19 @@ if [ "${QUICK:-0}" = "1" ]; then
 else
     echo "==> Emitting MToon sweep"
     cargo run --release -q -p vrm-asset-generator -- emit-sweep \
-        --output-dir "$ASSETS_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$ASSETS_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     echo "==> Emitting MToon emissive sweep (14 plans, VRMC_materials_hdr_emissiveMultiplier)"
     EMISSIVE_DIR="$GOLDENS_DIR/_assets_emissive"
     rm -rf "$EMISSIVE_DIR"; mkdir -p "$EMISSIVE_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-emissive-sweep \
-        --output-dir "$EMISSIVE_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$EMISSIVE_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     echo "==> Emitting VRMC_vrm.firstPerson sweep (4 plans, third-person camera)"
     FIRSTPERSON_DIR="$GOLDENS_DIR/_assets_firstperson"
     rm -rf "$FIRSTPERSON_DIR"; mkdir -p "$FIRSTPERSON_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-first-person-sweep \
-        --output-dir "$FIRSTPERSON_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$FIRSTPERSON_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     if [ "$SPEC_VERSION" != "0.x" ]; then
         echo "==> Emitting KHR_texture_transform sweep (8 plans, textured MToon)"
@@ -137,13 +137,13 @@ else
     SHADETEX_DIR="$GOLDENS_DIR/_assets_shadetex"
     rm -rf "$SHADETEX_DIR"; mkdir -p "$SHADETEX_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-shade-multiply-texture-sweep \
-        --output-dir "$SHADETEX_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$SHADETEX_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     echo "==> Emitting MToon matcapTexture sweep (5 plans, view-space matcap)"
     MATCAP_DIR="$GOLDENS_DIR/_assets_matcap"
     rm -rf "$MATCAP_DIR"; mkdir -p "$MATCAP_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-matcap-texture-sweep \
-        --output-dir "$MATCAP_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$MATCAP_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     if [ "$SPEC_VERSION" != "0.x" ]; then
         echo "==> Emitting MToon shadingShiftTexture sweep (5 plans, per-pixel boundary)"
@@ -171,23 +171,23 @@ else
     OUTLINETEX_DIR="$GOLDENS_DIR/_assets_outlinetex"
     rm -rf "$OUTLINETEX_DIR"; mkdir -p "$OUTLINETEX_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-outline-width-multiply-texture-sweep \
-        --output-dir "$OUTLINETEX_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$OUTLINETEX_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     echo "==> Emitting glTF-core PBR textures sweep (6 plans, normalTexture + occlusionTexture)"
     PBRTEX_DIR="$GOLDENS_DIR/_assets_pbrtex"
     rm -rf "$PBRTEX_DIR"; mkdir -p "$PBRTEX_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-pbr-textures-sweep \
-        --output-dir "$PBRTEX_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$PBRTEX_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     echo "==> Emitting spring-bone settle sweep"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-sweep \
-        --output-dir "$ASSETS_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$ASSETS_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     echo "==> Emitting spring-bone swing sweep (separate dir; same .vrm bodies)"
     SWING_DIR="$GOLDENS_DIR/_assets_swing"
     rm -rf "$SWING_DIR"; mkdir -p "$SWING_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-swing-sweep \
-        --output-dir "$SWING_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$SWING_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     # Phase 2-6 sweeps (VRMC_springBone gap closure design):
     #   - colliders: 24 cartesian × settle/swing = 48 plans
@@ -201,7 +201,7 @@ else
     COLLIDER_DIR="$GOLDENS_DIR/_assets_collider"
     rm -rf "$COLLIDER_DIR"; mkdir -p "$COLLIDER_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-collider-sweep \
-        --output-dir "$COLLIDER_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$COLLIDER_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     if [ "$SPEC_VERSION" != "0.x" ]; then
         echo "==> Emitting extended-collider sweep (phase 3: 36 plans)"
@@ -218,7 +218,7 @@ else
     GRAVITY_DIR="$GOLDENS_DIR/_assets_gravity"
     rm -rf "$GRAVITY_DIR"; mkdir -p "$GRAVITY_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-gravity-dir-sweep \
-        --output-dir "$GRAVITY_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$GRAVITY_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     if [ "$SPEC_VERSION" != "0.x" ]; then
         echo "==> Emitting per-joint taper sweep (phase 5: 14 plans)"
@@ -235,7 +235,7 @@ else
     MULTICHAIN_DIR="$GOLDENS_DIR/_assets_multichain"
     rm -rf "$MULTICHAIN_DIR"; mkdir -p "$MULTICHAIN_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-multichain-sweep \
-        --output-dir "$MULTICHAIN_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$MULTICHAIN_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
     if [ "$SPEC_VERSION" != "0.x" ]; then
         echo "==> Emitting VRMA humanoid sweep (VRMA phase 3: 15 plans)"
@@ -274,7 +274,7 @@ else
     VMK162_DIR="$GOLDENS_DIR/_assets_vmk162"
     rm -rf "$VMK162_DIR"; mkdir -p "$VMK162_DIR"
     cargo run --release -q -p vrm-asset-generator -- emit-springbone-coupling-sweep \
-        --output-dir "$VMK162_DIR" --json "${SPEC_FLAG[@]}" >/dev/null
+        --output-dir "$VMK162_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 fi
 
 # mapfile -t TEST_PLANS isn't available on macOS's bundled bash 3.2.
