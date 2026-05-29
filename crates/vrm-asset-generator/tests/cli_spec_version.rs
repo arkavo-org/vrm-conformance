@@ -5,6 +5,55 @@ fn bin() -> &'static str {
 }
 
 #[test]
+#[ignore = "requires .tools/vrm-validator-cli"]
+fn emit_spring_bone_v0_passes_validator() {
+    use camino::Utf8PathBuf;
+    use vrm_asset_generator::emit::emit_with_sidecars_spring_bone_v0;
+    use vrm_asset_generator::{params::MToonParams, spring_bone::SpringBoneParams};
+    use vrm_validator_wrap::{validate, ValidatorConfig};
+
+    let cfg = match ValidatorConfig::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "SKIP: validator shim not reachable ({e}). Set VRM_VALIDATOR_BIN to an absolute path \
+                 (e.g. VRM_VALIDATOR_BIN=$(git rev-parse --show-toplevel)/.tools/vrm-validator-cli) \
+                 or run scripts/install-validator.sh from the workspace root."
+            );
+            return;
+        }
+    };
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let stem = Utf8PathBuf::from_path_buf(tmp.path().join("sb_v0_val")).expect("utf8 path");
+    let mtoon = MToonParams::defaults("sb_v0_val");
+    let spring = SpringBoneParams::defaults("sb_v0_val");
+    emit_with_sidecars_spring_bone_v0(&mtoon, &spring, &stem).expect("emission must succeed");
+
+    let vrm = stem.with_extension("vrm");
+    let report = validate(&cfg, &vrm).expect("validator must run");
+
+    if report.issues.num_errors > 0 {
+        let summary = report
+            .issues
+            .messages
+            .iter()
+            .filter(|m| m.severity == 0)
+            .map(|m| format!("{}: {}", m.code, m.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        panic!(
+            "VRM 0.x spring-bone asset has {} validator errors: {summary}",
+            report.issues.num_errors
+        );
+    }
+    eprintln!(
+        "emit_spring_bone_v0_passes_validator: 0 errors, {} warnings",
+        report.issues.num_warnings
+    );
+}
+
+#[test]
 fn emit_default_accepts_spec_version_v0() {
     let tmp = tempfile::tempdir().unwrap();
     let out = Command::new(bin())

@@ -974,6 +974,214 @@ pub fn emit_with_sidecars_spring_bone(
     Ok(())
 }
 
+/// Emit a VRM **0.x** asset triplet carrying a `secondaryAnimation` spring-bone
+/// chain: `<stem>.vrm`, `<stem>.meta.json`, `<stem>.test.yaml`.
+///
+/// The geometry is **identical** to [`emit_vrm_with_spring_bone`] — sphere mesh +
+/// humanoid skeleton + spring chain nodes + skinned chain cylinder + inverse-bind
+/// matrices via `pack_sphere_and_chain` — so the physics is visually observable
+/// in pixel space. Only the material / extension layer changes:
+///
+/// - `extensionsUsed`: `["KHR_materials_unlit", "VRM"]`. The sphere and chain
+///   primitives both reference `material: 0` (the same `base_material` as the
+///   v1 path), and `KHR_materials_unlit` must be declared because `base_material`
+///   uses it. `VRM` covers the 0.x extension block.
+/// - `extensions`: `{ "VRM": … }` assembled by
+///   [`crate::vrm_ext_v0::emit_vrm_extension_with_secondary`] with
+///   `secondaryAnimation` built by
+///   [`crate::spring_bone_v0::build_secondary_animation`].
+/// - No `VRMC_vrm`, no `VRMC_springBone`, no `extensionsRequired` (0.x assets
+///   have none by spec).
+///
+/// The `.test.yaml` is tagged `spec_version: "0.x"` and carries
+/// `physics: { settle_steps: 30 }` (via `build_spring_bone_test_plan`).
+pub fn emit_with_sidecars_spring_bone_v0(
+    mtoon: &MToonParams,
+    spring: &SpringBoneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    // ── 1. Geometry assembly (mirror emit_vrm_with_spring_bone exactly) ──────
+    let mesh = sphere(0.3, 24, 48);
+
+    let mut skeleton = crate::humanoid::minimal_skeleton();
+    let head_node = skeleton.bone_to_node["head"];
+    let chain_nodes = crate::humanoid::append_spring_chain(
+        &mut skeleton,
+        head_node,
+        spring.joint_count,
+        spring.segment_length_m,
+    );
+
+    let head_world = crate::humanoid::rest_pose_world_position("head");
+    let head_world_y = head_world[1];
+    let chain_top_y = head_world_y - spring.segment_length_m;
+
+    let chain_mesh = crate::chain_mesh::build_chain_cylinder(
+        spring.joint_count,
+        spring.segment_length_m,
+        /* radius */ 0.025,
+        chain_top_y,
+        /* ring_segments */ 12,
+    );
+
+    let inv_bind: Vec<[f32; 16]> = (0..spring.joint_count)
+        .map(|i| {
+            let jy = head_world_y - ((i + 1) as f32) * spring.segment_length_m;
+            #[rustfmt::skip]
+            let m = [
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, -jy, 0.0, 1.0,
+            ];
+            m
+        })
+        .collect();
+
+    let packed = crate::buffer::pack_sphere_and_chain(&mesh, &chain_mesh, &inv_bind);
+
+    let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
+
+    // Sphere mesh node — child of head (identical to v1 wiring).
+    let mesh_node_index = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_mesh", mtoon.id),
+        "mesh": 0
+    }));
+    let head = &mut nodes[head_node];
+    let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
+    head_children.push(json!(mesh_node_index));
+    head["children"] = Value::Array(head_children);
+
+    // Chain-skinned node — child of hips so the scene stays single-rooted.
+    let chain_mesh_node_index = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_chain_mesh", mtoon.id),
+        "mesh": 1,
+        "skin": 0
+    }));
+    let hips = &mut nodes[skeleton.root_node];
+    let mut hips_children = hips["children"].as_array().cloned().unwrap_or_default();
+    hips_children.push(json!(chain_mesh_node_index));
+    hips["children"] = Value::Array(hips_children);
+
+    // ── 2. VRM 0.x extension block ───────────────────────────────────────────
+    let empty_expressions = crate::expressions_v0::ExpressionsV0Params { groups: vec![] };
+    let secondary = crate::spring_bone_v0::build_secondary_animation(spring, chain_nodes[0]);
+    let vrm_ext = crate::vrm_ext_v0::emit_vrm_extension_with_secondary(
+        &mtoon.id,
+        &[mtoon.clone()],
+        &empty_expressions,
+        Some(secondary),
+    );
+
+    // ── 3. glTF-level material (v0-compatible: KHR_materials_unlit only) ────
+    //
+    // `base_material` from vrm_ext.rs always embeds `VRMC_materials_mtoon` in
+    // the material's `extensions` block. That extension must then appear in
+    // `extensionsUsed`, which would violate the 0.x asset contract. Instead we
+    // emit a minimal `KHR_materials_unlit` material here — the MToon parameters
+    // are carried by `VRM.materialProperties` (via `emit_vrm_extension_with_secondary`
+    // → `mtoon_v0::emit_material_property`) and the glTF material is only needed
+    // so the mesh primitives have a valid `material` index.
+    let v0_material = json!({
+        "name": mtoon.id,
+        "pbrMetallicRoughness": {
+            "baseColorFactor": mtoon.base_color_factor,
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.9
+        },
+        "alphaMode": "OPAQUE",
+        "doubleSided": mtoon.double_sided,
+        "extensions": {
+            "KHR_materials_unlit": {}
+        }
+    });
+
+    // ── 4. glTF document (0.x: no extensionsRequired; KHR_materials_unlit
+    //       is declared because our v0_material uses it; VRM for the ext) ────
+    let mut doc = json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
+        },
+        "extensionsUsed": ["KHR_materials_unlit", "VRM"],
+        "scene": 0,
+        "scenes": [{ "nodes": [skeleton.root_node] }],
+        "nodes": nodes,
+        "meshes": [
+            {
+                "name": format!("{}_geom", mtoon.id),
+                "primitives": [{
+                    "attributes": {
+                        "POSITION": 0,
+                        "NORMAL": 1,
+                        "TEXCOORD_0": 2
+                    },
+                    "indices": 3,
+                    "material": 0,
+                    "mode": 4
+                }]
+            },
+            {
+                "name": format!("{}_chain_geom", mtoon.id),
+                "primitives": [{
+                    "attributes": {
+                        "POSITION": 4,
+                        "NORMAL": 5,
+                        "TEXCOORD_0": 6,
+                        "JOINTS_0": 8,
+                        "WEIGHTS_0": 9
+                    },
+                    "indices": 7,
+                    "material": 0,
+                    "mode": 4
+                }]
+            }
+        ],
+        "skins": [{
+            "joints": chain_nodes,
+            "inverseBindMatrices": 10,
+            "skeleton": chain_nodes[0]
+        }],
+        "materials": [v0_material],
+        "extensions": {
+            "VRM": vrm_ext
+        }
+    });
+
+    for key in ["buffers", "bufferViews", "accessors"] {
+        doc[key] = packed.json[key].clone();
+    }
+
+    // ── 4. Write GLB ─────────────────────────────────────────────────────────
+    let vrm_path = stem.with_extension("vrm");
+    if let Some(parent) = vrm_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json_bytes = serde_json::to_vec(&doc)?;
+    let glb = write_glb(&GlbDocument {
+        json: json_bytes,
+        binary: packed.binary,
+    })?;
+    std::fs::write(&vrm_path, glb)?;
+
+    // ── 5. Sidecars ──────────────────────────────────────────────────────────
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(mtoon, Some(spring), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan = crate::sidecar::build_spring_bone_test_plan(mtoon, &asset_relpath);
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 /// Same VRM body as `emit_with_sidecars_spring_bone`, but the emitted
 /// `.test.yaml` carries an additional `animation.root_transform` block.
 /// The runner will settle the chain, then translate the root sideways
@@ -2068,6 +2276,69 @@ mod extended_emit_integration_tests {
         assert!(
             !names.contains(&"VRMC_springBone_extended_collider"),
             "base sphere collider must NOT declare VRMC_springBone_extended_collider: {names:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod spring_bone_v0_tests {
+    use super::*;
+
+    #[test]
+    fn emit_spring_bone_v0_writes_secondary_animation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stem = camino::Utf8PathBuf::from_path_buf(tmp.path().join("sb_v0")).unwrap();
+        let mtoon = crate::params::MToonParams::defaults("sb_v0");
+        let spring = crate::spring_bone::SpringBoneParams::defaults("sb_v0");
+        emit_with_sidecars_spring_bone_v0(&mtoon, &spring, &stem).unwrap();
+        let bytes = std::fs::read(stem.with_extension("vrm")).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("secondaryAnimation"));
+        assert!(text.contains("boneGroups"));
+        assert!(text.contains("stiffiness"));
+        // test.yaml is tagged 0.x
+        let yaml = std::fs::read_to_string(stem.with_extension("test.yaml")).unwrap();
+        assert!(yaml.contains("0.x") || yaml.contains("\"0.x\""));
+    }
+
+    #[test]
+    #[ignore = "requires .tools/vrm-validator-cli"]
+    fn emit_spring_bone_v0_passes_validator() {
+        use vrm_validator_wrap::{validate, ValidatorConfig};
+        let cfg = match ValidatorConfig::from_env() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "SKIP: validator shim not reachable ({e}). Set VRM_VALIDATOR_BIN to an absolute path \
+                     or run scripts/install-validator.sh from the workspace root."
+                );
+                return;
+            }
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let stem = camino::Utf8PathBuf::from_path_buf(tmp.path().join("sb_v0_val")).unwrap();
+        let mtoon = crate::params::MToonParams::defaults("sb_v0_val");
+        let spring = crate::spring_bone::SpringBoneParams::defaults("sb_v0_val");
+        emit_with_sidecars_spring_bone_v0(&mtoon, &spring, &stem).unwrap();
+        let vrm = stem.with_extension("vrm");
+        let report = validate(&cfg, &vrm).expect("validator must run");
+        if report.issues.num_errors > 0 {
+            let summary = report
+                .issues
+                .messages
+                .iter()
+                .filter(|m| m.severity == 0)
+                .map(|m| format!("{}: {}", m.code, m.message))
+                .collect::<Vec<_>>()
+                .join("; ");
+            panic!(
+                "VRM 0.x spring-bone asset has {} validator errors: {summary}",
+                report.issues.num_errors
+            );
+        }
+        eprintln!(
+            "emit_spring_bone_v0_passes_validator: 0 errors, {} warnings",
+            report.issues.num_warnings
         );
     }
 }
