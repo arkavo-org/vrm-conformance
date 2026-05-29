@@ -67,6 +67,7 @@ pub struct SpringBoneParams {
     /// local space. Default [0,-1,0] (straight down) reproduces all
     /// pre-existing assets byte-for-byte. Off-vertical axes exercise the
     /// direction-dependent VRM 0.x leaf-tail (7 cm) synthesis.
+    /// Consumed by the emit geometry path; until that is wired, only the default is meaningful.
     #[serde(default = "default_chain_axis")]
     pub chain_axis: [f32; 3],
 
@@ -74,6 +75,7 @@ pub struct SpringBoneParams {
     /// `chain_axis` past the leaf (mirrors how VRoid 1.0 exports the tail).
     /// V0 emit ignores this — 0.x always synthesizes the 7 cm tail. Used to
     /// build 0.x(synthesized) ↔ 1.0(explicit) parity twins. Default false.
+    /// Not yet consumed by the emitter; a no-op until the emit path is wired.
     #[serde(default)]
     pub explicit_tail: bool,
 }
@@ -103,7 +105,7 @@ impl SpringBoneParams {
             drag_force_per_joint: None,
             gravity_power_per_joint: None,
             hit_radius_per_joint: None,
-            chain_axis: [0.0, -1.0, 0.0],
+            chain_axis: default_chain_axis(),
             explicit_tail: false,
         }
     }
