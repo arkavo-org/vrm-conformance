@@ -1,6 +1,7 @@
 //! SSIM + property-assertion diff engine for cross-renderer comparison.
 
 pub mod consensus;
+pub mod cross_variant;
 pub mod pose_diff;
 pub mod positions;
 pub mod property;
