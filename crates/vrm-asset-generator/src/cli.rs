@@ -216,6 +216,9 @@ pub enum Cmd {
     EmitSpringboneSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -238,6 +241,9 @@ pub enum Cmd {
     EmitSpringboneSwingSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         #[arg(long)]
         json: bool,
     },
@@ -973,9 +979,10 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitSpringboneSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
-            use crate::emit::emit_with_sidecars_spring_bone;
+            use crate::emit::{emit_with_sidecars_spring_bone, emit_with_sidecars_spring_bone_v0};
             use crate::spring_bone::spring_bone_basic_sweep;
 
             std::fs::create_dir_all(&output_dir)?;
@@ -1002,7 +1009,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 // axis is what's under test, and a varying material would
                 // confound the comparison.
                 let mtoon = MToonParams::defaults(&spring.id);
-                emit_with_sidecars_spring_bone(&mtoon, spring, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_v0(&mtoon, spring, &stem)?
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone(&mtoon, spring, &stem)?
+                    }
+                }
                 emitted.push(stem);
             }
 
@@ -1063,9 +1077,12 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitSpringboneSwingSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
-            use crate::emit::emit_with_sidecars_spring_bone_swing;
+            use crate::emit::{
+                emit_with_sidecars_spring_bone_swing, emit_with_sidecars_spring_bone_v0_swing,
+            };
             use crate::spring_bone::spring_bone_basic_sweep;
 
             std::fs::create_dir_all(&output_dir)?;
@@ -1107,7 +1124,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 prefixed.spring_name = format!("{swing_id}_chain");
                 let stem = output_dir.join(&swing_id);
                 let mtoon = MToonParams::defaults(&swing_id);
-                emit_with_sidecars_spring_bone_swing(&mtoon, &prefixed, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_v0_swing(&mtoon, &prefixed, &stem)?
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone_swing(&mtoon, &prefixed, &stem)?
+                    }
+                }
                 emitted.push(stem);
             }
 

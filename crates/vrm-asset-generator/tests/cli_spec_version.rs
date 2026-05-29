@@ -320,3 +320,69 @@ fn notapplicable_sweeps_reject_v0() {
         );
     }
 }
+
+#[test]
+fn springbone_sweep_v0_emits_secondary_animation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("sb0x");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+        .args([
+            "emit-springbone-sweep",
+            "--spec-version",
+            "0.x",
+            "--output-dir",
+            out.to_str().unwrap(),
+        ])
+        .status()
+        .expect("run");
+    assert!(status.success());
+    let any_sa = std::fs::read_dir(&out)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "vrm"))
+        .any(|e| {
+            String::from_utf8_lossy(&std::fs::read(e.path()).unwrap())
+                .contains("secondaryAnimation")
+        });
+    assert!(
+        any_sa,
+        "0.x spring-bone sweep assets must carry secondaryAnimation"
+    );
+}
+
+#[test]
+fn springbone_swing_sweep_v0_emits_secondary_animation_and_animation_block() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("sbswing0x");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+        .args([
+            "emit-springbone-swing-sweep",
+            "--spec-version",
+            "0.x",
+            "--output-dir",
+            out.to_str().unwrap(),
+        ])
+        .status()
+        .expect("run");
+    assert!(status.success());
+    let entries: Vec<_> = std::fs::read_dir(&out)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .collect();
+    let any_sa = entries
+        .iter()
+        .filter(|p| p.extension().is_some_and(|x| x == "vrm"))
+        .any(|p| {
+            String::from_utf8_lossy(&std::fs::read(p).unwrap()).contains("secondaryAnimation")
+        });
+    assert!(any_sa, "0.x swing sweep .vrm must carry secondaryAnimation");
+    let any_anim = entries
+        .iter()
+        .filter(|p| p.to_string_lossy().ends_with(".test.yaml"))
+        .any(|p| std::fs::read_to_string(p).unwrap().contains("animation"));
+    assert!(
+        any_anim,
+        "0.x swing sweep .test.yaml must carry animation block"
+    );
+}
