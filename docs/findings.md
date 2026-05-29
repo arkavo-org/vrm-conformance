@@ -19,7 +19,17 @@ Both adapters report `overall_passed: true` for the render op itself — the div
 
 **Slice-1 criterion #2 status.** This empirically satisfies slice-1 success criterion #2 ("VMK 180° flip flagged as a conformance failure with a clear visual signal"): the suite caught a genuine cross-renderer orientation divergence on 0.x and flagged it as a consensus failure with committed visual evidence. The criterion had been marked deferred on the (now-falsified) Task 9 assumption that the flip would not surface.
 
-**Open / next.** (1) Which renderer is spec-correct is not settled by consensus alone (no oracle), but the plan encodes the 0.x convention "camera at `-Z` sees the front" and three-vrm is the suite's designated 0.x baseline — so three-vrm is very likely correct and VMK the diverging one. (2) File/confirm an upstream VMK issue with avatarU as the reproducer. (3) Break the 1-vs-1 tie with a third real 0.x-capable adapter (UniVRM / godot-vrm) once available. (4) Repro is fully local: `scripts/install-humanoid-fixtures.sh`, then render `test-plans/manual/humanoid/avatarU_0_0.test.yaml` (and `avatarA_0_0`) through the three-vrm (`adapters/three-vrm/dist/main.js`) and VMK (`adapters/vrm-metal-kit/.build/release/vrm-metal-kit-adapter`) binaries and `consensus-diff` the pair.
+**Golden-reference verdict — VMK is the outlier (added 2026-05-28).** Brought in UniVRM (Unity 6000.4.6f1 / UniVRM v0.131.0), the VRM-consortium reference implementation, as a third renderer. UniVRM renders the **front** of the avatar on both assets, clustering with three-vrm; VMK is alone in rendering the back. The 3-way SSIM matrix:
+
+| pair | avatarU_0_0 | avatarA_0_0 |
+|---|---|---|
+| three-vrm × **univrm (golden)** | **0.824** | **0.895** |
+| vrm-metal-kit × univrm (golden) | 0.675 | 0.696 |
+| three-vrm × vrm-metal-kit | 0.675 | 0.716 |
+
+On both assets three-vrm clusters with the UniVRM golden reference (0.82–0.89) while VMK sits ~0.68–0.70 against *both* of the others. This resolves the "no oracle" caveat: **VMK's 180° flip is the non-conformant behavior; three-vrm and UniVRM are correct.** (All pairs are below the 0.92 toon-shading threshold so `consensus_passed=false` for all three — but the front-cluster ~0.82–0.89 vs flip ~0.68 gap is the unambiguous orientation signal; the residual three-vrm/univrm gap is ordinary cross-renderer shading variance, not orientation.) Getting UniVRM to render also required fixing a slice-1 regression: `SpecVersionDetector` was `internal` and broke the UniVRM PlayMode compile across asmdef boundaries (CS0122) — fixed to `public` (commit `a1c4f9e`); CI only build-validates UniVRM so it shipped broken in the merge.
+
+**Open / next.** (1) ~~Which renderer is spec-correct~~ — **settled**: VMK is the outlier per the UniVRM golden reference above. (2) Comment on the existing upstream issue **VMK#299** ("VRM 0.x avatar orientation: 180° rotation applied on load contradicts spec (-Z facing)") with this reproducer + 3-way data rather than filing a duplicate. (3) Repro is fully local: `scripts/install-humanoid-fixtures.sh`, then render `test-plans/manual/humanoid/avatarU_0_0.test.yaml` (and `avatarA_0_0`) through three-vrm (`adapters/three-vrm/dist/main.js`), VMK (`adapters/vrm-metal-kit/.build/release/vrm-metal-kit-adapter`), and UniVRM (`adapters/univrm/launcher.sh` via `execute-test-batch`), then `consensus-diff` the three.
 
 ## 2026-05-27 — Slice 1 of VRM 0.x conformance: end-of-slice closeout (Task 39)
 
