@@ -38,6 +38,9 @@ pub enum NotApplicableReason {
     ExtendedCollidersV1Only,
     OutlineLightingMixV1Only,
     VrmaIsVrm1Era,
+    ShadingShiftTextureV1Only,
+    RimMultiplyTextureV1Only,
+    KhrTextureTransformV1Only,
     // Extend with new variants as discovered; never use free text.
 }
 
@@ -66,5 +69,18 @@ mod applicability_tests {
         );
         let back: SweepApplicability = serde_json::from_str(&s).unwrap();
         assert_eq!(back, n);
+    }
+
+    #[test]
+    fn new_v1_only_reasons_serialize() {
+        for r in [
+            NotApplicableReason::ShadingShiftTextureV1Only,
+            NotApplicableReason::RimMultiplyTextureV1Only,
+            NotApplicableReason::KhrTextureTransformV1Only,
+        ] {
+            let s = serde_json::to_string(&r).unwrap();
+            let back: NotApplicableReason = serde_json::from_str(&s).unwrap();
+            assert_eq!(r, back);
+        }
     }
 }
