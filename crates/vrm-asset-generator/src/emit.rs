@@ -1227,6 +1227,284 @@ pub fn emit_with_sidecars_spring_bone_v0_swing(
     Ok(())
 }
 
+/// Emit a VRM **0.x** `.vrm` GLB carrying a `secondaryAnimation` spring-bone
+/// chain with **sphere colliders** (no sidecars).
+///
+/// Geometry is identical to [`emit_vrm_with_spring_bone_colliders`] (the v1
+/// collider emit) — sphere mesh + humanoid skeleton + spring chain nodes +
+/// skinned chain cylinder + inverse-bind matrices. Only the material/extension
+/// layer differs:
+///
+/// - `extensionsUsed`: `["KHR_materials_unlit", "VRM"]`.
+/// - Material: `v0_material` (unlit-only, no `VRMC_materials_mtoon`).
+/// - `secondaryAnimation` built by
+///   [`crate::spring_bone_v0::build_secondary_animation_with_colliders`] with
+///   sphere-only resolved colliders (non-sphere colliders in `scene.colliders`
+///   are silently skipped — they have no 0.x form).
+/// - No `VRMC_vrm`, no `VRMC_springBone`, no `extensionsRequired`.
+///
+/// Collider attach resolution mirrors the v1 path exactly:
+/// - `ColliderAttach::Head` → `head_node`.
+/// - `ColliderAttach::NewIntermediateNode{y_offset, z_offset}` → a new glTF
+///   node inserted as a child of head at `[0, y_offset, z_offset]`.
+pub fn emit_vrm_with_spring_bone_colliders_v0(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    output: &Utf8Path,
+) -> Result<()> {
+    let spring = &scene.springs[0];
+    let mesh = sphere(0.3, 24, 48);
+
+    let mut skeleton = crate::humanoid::minimal_skeleton();
+    let head_node = skeleton.bone_to_node["head"];
+    let chain_nodes = crate::humanoid::append_spring_chain(
+        &mut skeleton,
+        head_node,
+        spring.joint_count,
+        spring.segment_length_m,
+    );
+
+    let head_world = crate::humanoid::rest_pose_world_position("head");
+    let head_world_y = head_world[1];
+    let chain_top_y = head_world_y - spring.segment_length_m;
+
+    let chain_mesh = crate::chain_mesh::build_chain_cylinder(
+        spring.joint_count,
+        spring.segment_length_m,
+        /* radius */ 0.025,
+        chain_top_y,
+        /* ring_segments */ 12,
+    );
+
+    let inv_bind: Vec<[f32; 16]> = (0..spring.joint_count)
+        .map(|i| {
+            let jy = head_world_y - ((i + 1) as f32) * spring.segment_length_m;
+            #[rustfmt::skip]
+            let m = [
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, -jy, 0.0, 1.0,
+            ];
+            m
+        })
+        .collect();
+
+    let packed = crate::buffer::pack_sphere_and_chain(&mesh, &chain_mesh, &inv_bind);
+
+    let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
+
+    // Sphere mesh node — child of head (identical to v1 wiring).
+    let mesh_node_index = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_mesh", mtoon.id),
+        "mesh": 0
+    }));
+    let head = &mut nodes[head_node];
+    let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
+    head_children.push(json!(mesh_node_index));
+    head["children"] = Value::Array(head_children);
+
+    // Chain-skinned node — child of hips so the scene stays single-rooted.
+    let chain_mesh_node_index = nodes.len();
+    nodes.push(json!({
+        "name": format!("{}_chain_mesh", mtoon.id),
+        "mesh": 1,
+        "skin": 0
+    }));
+    let hips = &mut nodes[skeleton.root_node];
+    let mut hips_children = hips["children"].as_array().cloned().unwrap_or_default();
+    hips_children.push(json!(chain_mesh_node_index));
+    hips["children"] = Value::Array(hips_children);
+
+    // Resolve collider attach nodes (mirrors v1 path exactly) and build the
+    // V0SphereCollider list for sphere-shape colliders only.
+    let mut resolved_sphere_colliders: Vec<crate::spring_bone_v0::V0SphereCollider> =
+        Vec::with_capacity(scene.colliders.len());
+
+    for collider in &scene.colliders {
+        // Filter to Sphere only — other shapes have no 0.x form.
+        let radius = match &collider.shape {
+            ColliderShape::Sphere { radius } => *radius,
+            _ => continue, // skip Capsule, InsideSphere, InsideCapsule, Plane
+        };
+
+        let attach_node = match &collider.attach {
+            ColliderAttach::Head => head_node,
+            ColliderAttach::NewIntermediateNode { y_offset, z_offset } => {
+                let new_node_idx = nodes.len();
+                nodes.push(json!({
+                    "name": format!("{}_collider_node_{}", mtoon.id, new_node_idx),
+                    "translation": [0.0, y_offset, z_offset],
+                }));
+                // Parent under head.
+                let head_ref = &mut nodes[head_node];
+                let mut hc = head_ref["children"].as_array().cloned().unwrap_or_default();
+                hc.push(json!(new_node_idx));
+                head_ref["children"] = Value::Array(hc);
+                new_node_idx
+            }
+        };
+
+        resolved_sphere_colliders.push(crate::spring_bone_v0::V0SphereCollider {
+            node: attach_node,
+            offset: collider.offset,
+            radius,
+        });
+    }
+
+    // Build the VRM 0.x extension block with sphere colliders.
+    let empty_expressions = crate::expressions_v0::ExpressionsV0Params { groups: vec![] };
+    let secondary = crate::spring_bone_v0::build_secondary_animation_with_colliders(
+        spring,
+        chain_nodes[0],
+        &resolved_sphere_colliders,
+    );
+    let vrm_ext = crate::vrm_ext_v0::emit_vrm_extension_with_secondary(
+        &mtoon.id,
+        &[mtoon.clone()],
+        &empty_expressions,
+        Some(secondary),
+    );
+
+    // v0-compatible glTF material: KHR_materials_unlit only, no VRMC_materials_mtoon.
+    let v0_material = json!({
+        "name": mtoon.id,
+        "pbrMetallicRoughness": {
+            "baseColorFactor": mtoon.base_color_factor,
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.9
+        },
+        "alphaMode": "OPAQUE",
+        "doubleSided": mtoon.double_sided,
+        "extensions": {
+            "KHR_materials_unlit": {}
+        }
+    });
+
+    let mut doc = json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
+        },
+        "extensionsUsed": ["KHR_materials_unlit", "VRM"],
+        "scene": 0,
+        "scenes": [{ "nodes": [skeleton.root_node] }],
+        "nodes": nodes,
+        "meshes": [
+            {
+                "name": format!("{}_geom", mtoon.id),
+                "primitives": [{
+                    "attributes": {
+                        "POSITION": 0,
+                        "NORMAL": 1,
+                        "TEXCOORD_0": 2
+                    },
+                    "indices": 3,
+                    "material": 0,
+                    "mode": 4
+                }]
+            },
+            {
+                "name": format!("{}_chain_geom", mtoon.id),
+                "primitives": [{
+                    "attributes": {
+                        "POSITION": 4,
+                        "NORMAL": 5,
+                        "TEXCOORD_0": 6,
+                        "JOINTS_0": 8,
+                        "WEIGHTS_0": 9
+                    },
+                    "indices": 7,
+                    "material": 0,
+                    "mode": 4
+                }]
+            }
+        ],
+        "skins": [{
+            "joints": chain_nodes,
+            "inverseBindMatrices": 10,
+            "skeleton": chain_nodes[0]
+        }],
+        "materials": [v0_material],
+        "extensions": {
+            "VRM": vrm_ext
+        }
+    });
+
+    for key in ["buffers", "bufferViews", "accessors"] {
+        doc[key] = packed.json[key].clone();
+    }
+
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json_bytes = serde_json::to_vec(&doc)?;
+    let glb = write_glb(&GlbDocument {
+        json: json_bytes,
+        binary: packed.binary,
+    })?;
+    std::fs::write(output, glb)?;
+
+    Ok(())
+}
+
+/// Emits `<stem>.vrm` (MToon + spring-bone with sphere colliders, VRM 0.x),
+/// `<stem>.meta.json`, and `<stem>.test.yaml` (settle variant, 60-step settle,
+/// `spec_version: "0.x"`).
+pub fn emit_with_sidecars_spring_bone_colliders_v0(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_colliders_v0(mtoon, scene, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    let spring = &scene.springs[0];
+    write_meta_json(mtoon, Some(spring), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan =
+        crate::sidecar::build_spring_bone_collider_test_plan(mtoon, scene, &asset_relpath);
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// Same as [`emit_with_sidecars_spring_bone_colliders_v0`] but the test plan
+/// carries an `animation.root_transform` block (swing variant, `spec_version:
+/// "0.x"`).
+pub fn emit_with_sidecars_spring_bone_colliders_v0_swing(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_colliders_v0(mtoon, scene, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    let spring = &scene.springs[0];
+    write_meta_json(mtoon, Some(spring), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan =
+        crate::sidecar::build_spring_bone_collider_swing_test_plan(mtoon, scene, &asset_relpath);
+    plan.spec_version = vrm_test_plan::SpecVersion::V0;
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 /// Same VRM body as `emit_with_sidecars_spring_bone`, but the emitted
 /// `.test.yaml` carries an additional `animation.root_transform` block.
 /// The runner will settle the chain, then translate the root sideways
@@ -2402,6 +2680,123 @@ mod spring_bone_v0_tests {
         }
         eprintln!(
             "emit_spring_bone_v0_passes_validator: 0 errors, {} warnings",
+            report.issues.num_warnings
+        );
+    }
+
+    /// Emit test: sphere-collider v0 asset contains the expected JSON keys.
+    #[test]
+    fn emit_spring_bone_colliders_v0_writes_collider_groups_and_secondary_animation() {
+        use crate::spring_bone::{
+            ColliderAttach, ColliderGroupParams, ColliderParams, ColliderShape, SpringBoneParams,
+            SpringBoneSceneParams,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let stem = camino::Utf8PathBuf::from_path_buf(tmp.path().join("sb_coll_v0")).unwrap();
+        let mtoon = crate::params::MToonParams::defaults("sb_coll_v0");
+        let mut spring = SpringBoneParams::defaults("sb_coll_v0");
+        spring.joint_count = 4;
+        let scene = SpringBoneSceneParams {
+            springs: vec![spring],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Sphere { radius: 0.06 },
+                offset: [0.0, -0.04, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "head_g".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        emit_with_sidecars_spring_bone_colliders_v0(&mtoon, &scene, &stem)
+            .expect("emission must succeed");
+
+        let vrm_bytes = std::fs::read(stem.with_extension("vrm")).unwrap();
+        let text = String::from_utf8_lossy(&vrm_bytes);
+        assert!(
+            text.contains("colliderGroups"),
+            "VRM 0.x asset must contain colliderGroups"
+        );
+        assert!(
+            text.contains("radius"),
+            "VRM 0.x collider must contain radius"
+        );
+        assert!(
+            text.contains("secondaryAnimation"),
+            "VRM 0.x asset must contain secondaryAnimation"
+        );
+
+        // Verify the test.yaml carries spec_version 0.x.
+        let yaml = std::fs::read_to_string(stem.with_extension("test.yaml")).unwrap();
+        assert!(
+            yaml.contains("0.x") || yaml.contains("\"0.x\""),
+            "test.yaml must be tagged spec_version 0.x"
+        );
+    }
+
+    /// Validator-gated integration test: sphere-collider v0 asset passes the
+    /// VRM validator with zero errors.
+    #[test]
+    #[ignore = "requires .tools/vrm-validator-cli"]
+    fn emit_spring_bone_colliders_v0_passes_validator() {
+        use crate::spring_bone::{
+            ColliderAttach, ColliderGroupParams, ColliderParams, ColliderShape, SpringBoneParams,
+            SpringBoneSceneParams,
+        };
+        use vrm_validator_wrap::{validate, ValidatorConfig};
+
+        let cfg = match ValidatorConfig::from_env() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "SKIP: validator shim not reachable ({e}). Set VRM_VALIDATOR_BIN to an absolute path \
+                     (e.g. VRM_VALIDATOR_BIN=$(git rev-parse --show-toplevel)/.tools/vrm-validator-cli) \
+                     or run scripts/install-validator.sh from the workspace root."
+                );
+                return;
+            }
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let stem = camino::Utf8PathBuf::from_path_buf(tmp.path().join("sb_coll_v0_val")).unwrap();
+        let mtoon = crate::params::MToonParams::defaults("sb_coll_v0_val");
+        let mut spring = SpringBoneParams::defaults("sb_coll_v0_val");
+        spring.joint_count = 4;
+        let scene = SpringBoneSceneParams {
+            springs: vec![spring],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Sphere { radius: 0.06 },
+                offset: [0.0, -0.04, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "head_g".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        emit_with_sidecars_spring_bone_colliders_v0(&mtoon, &scene, &stem)
+            .expect("emission must succeed");
+
+        let vrm = stem.with_extension("vrm");
+        let report = validate(&cfg, &vrm).expect("validator must run");
+        if report.issues.num_errors > 0 {
+            let summary = report
+                .issues
+                .messages
+                .iter()
+                .filter(|m| m.severity == 0)
+                .map(|m| format!("{}: {}", m.code, m.message))
+                .collect::<Vec<_>>()
+                .join("; ");
+            panic!(
+                "VRM 0.x sphere-collider asset has {} validator errors: {summary}",
+                report.issues.num_errors
+            );
+        }
+        eprintln!(
+            "emit_spring_bone_colliders_v0_passes_validator: 0 errors, {} warnings",
             report.issues.num_warnings
         );
     }
