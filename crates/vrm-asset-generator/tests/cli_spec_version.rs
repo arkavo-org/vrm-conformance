@@ -606,3 +606,131 @@ fn sequence_sweep_v0_emits_render_sequence_block() {
         "0.x sequence sweep .test.yaml must carry render_sequence block"
     );
 }
+
+/// Drift guard: every sweep subcommand has a DECIDED VRM 0.x behavior.
+///
+/// Applicable sweeps must exit 0 and emit at least one `.vrm`.
+/// NotApplicable sweeps must exit non-zero and name the reason in stderr.
+///
+/// This test is the authoritative D1 consolidation for Slice 2. It intentionally
+/// overlaps with the per-sweep tests above so that any future sweep added without
+/// a 0.x decision is caught here even if the per-sweep test is skipped or absent.
+///
+/// Runtime note: all sweeps run against `--spec-version 0.x` end-to-end. On a
+/// warm build this completes in roughly 10-30 seconds total. Kept non-ignored so
+/// it runs in CI on every push.
+#[test]
+fn every_sweep_has_a_decided_0x_behavior() {
+    const APPLICABLE: &[&str] = &[
+        "emit-sweep",
+        "emit-emissive-sweep",
+        "emit-shade-multiply-texture-sweep",
+        "emit-matcap-texture-sweep",
+        "emit-outline-width-multiply-texture-sweep",
+        "emit-pbr-textures-sweep",
+        "emit-first-person-sweep",
+        "emit-springbone-sweep",
+        "emit-springbone-swing-sweep",
+        "emit-springbone-collider-sweep",
+        "emit-springbone-gravity-dir-sweep",
+        "emit-springbone-coupling-sweep",
+        "emit-springbone-multichain-sweep",
+        "emit-sequence-sweep",
+    ];
+
+    const NOT_APPLICABLE: &[(&str, &str)] = &[
+        (
+            "emit-shading-shift-texture-sweep",
+            "ShadingShiftTextureV1Only",
+        ),
+        (
+            "emit-rim-multiply-texture-sweep",
+            "RimMultiplyTextureV1Only",
+        ),
+        ("emit-texture-transform-sweep", "KhrTextureTransformV1Only"),
+        ("emit-springbone-extended-sweep", "ExtendedCollidersV1Only"),
+        ("emit-springbone-taper-sweep", "PerJointStiffnessV1Only"),
+    ];
+
+    let mut failures: Vec<String> = Vec::new();
+
+    for &sub in APPLICABLE {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let out = tmp.path().join(sub);
+        let result = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+            .args([
+                sub,
+                "--spec-version",
+                "0.x",
+                "--output-dir",
+                out.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap_or_else(|e| panic!("failed to spawn {sub}: {e}"));
+
+        if !result.status.success() {
+            failures.push(format!(
+                "APPLICABLE {sub}: expected exit 0, got non-zero; stderr: {}",
+                String::from_utf8_lossy(&result.stderr).trim()
+            ));
+            continue;
+        }
+
+        let has_vrm = if out.exists() {
+            std::fs::read_dir(&out)
+                .ok()
+                .map(|rd| {
+                    rd.filter_map(|e| e.ok())
+                        .any(|e| e.path().extension().is_some_and(|x| x == "vrm"))
+                })
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
+        if !has_vrm {
+            failures.push(format!(
+                "APPLICABLE {sub}: exited 0 but emitted no .vrm files in {}",
+                out.display()
+            ));
+        }
+    }
+
+    for &(sub, reason) in NOT_APPLICABLE {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let out = tmp.path().join(sub);
+        let result = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+            .args([
+                sub,
+                "--spec-version",
+                "0.x",
+                "--output-dir",
+                out.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap_or_else(|e| panic!("failed to spawn {sub}: {e}"));
+
+        if result.status.success() {
+            failures.push(format!(
+                "NOT_APPLICABLE {sub}: expected non-zero exit, but exited 0"
+            ));
+            continue;
+        }
+
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        if !stderr.contains(reason) {
+            failures.push(format!(
+                "NOT_APPLICABLE {sub}: exited non-zero but stderr did not contain '{reason}'; stderr: {}",
+                stderr.trim()
+            ));
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "every_sweep_has_a_decided_0x_behavior: {} failure(s):\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+}
