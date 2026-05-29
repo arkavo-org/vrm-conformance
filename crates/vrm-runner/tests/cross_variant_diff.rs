@@ -86,3 +86,38 @@ fn cross_variant_diff_fails_when_renders_identical() {
         .unwrap();
     assert!(!status.success(), "identical renders should exit non-zero");
 }
+
+#[test]
+fn cross_variant_diff_errors_when_plan_lacks_cross_variant() {
+    use vrm_asset_generator::params::MToonParams;
+    use vrm_asset_generator::sidecar::build_default_test_plan;
+
+    let tmp = tempfile::tempdir().unwrap();
+    // A plain default plan carries NO cross_variant block.
+    let params = MToonParams::defaults("plain_no_cv");
+    let plan = build_default_test_plan(&params, "plain_no_cv.vrm");
+    let plan_path = tmp.path().join("plain.test.yaml");
+    std::fs::write(&plan_path, serde_yml::to_string(&plan).unwrap()).unwrap();
+
+    let f = tmp.path().join("false.png");
+    let t = tmp.path().join("true.png");
+    write_png(&f, false);
+    write_png(&t, true);
+
+    let status = Command::new(env!("CARGO_BIN_EXE_vrm-runner"))
+        .args([
+            "cross-variant-diff",
+            "--plan",
+            plan_path.to_str().unwrap(),
+            "--render-false",
+            f.to_str().unwrap(),
+            "--render-true",
+            t.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(
+        !status.success(),
+        "a plan without a cross_variant block must exit non-zero"
+    );
+}

@@ -1,6 +1,6 @@
 # Design — `doubleSided` cross-variant spec test (open-mesh back-face culling)
 
-**Status:** Approved (2026-05-28). Implementation pending.
+**Status:** Implemented (2026-05-29) on branch `feat/doublesided-cross-variant-spec-test`.
 
 **Builds on:** [`2026-05-28-doubleSided-spec-test-reevaluation.md`](2026-05-28-doubleSided-spec-test-reevaluation.md),
 which established (a) the existing `mtoon_doubleSided_{false,true}` coverage is inadequate because a
