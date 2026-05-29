@@ -100,3 +100,80 @@ mod tests {
         }
     }
 }
+
+/// Open single-quad fixture in the XY plane at z=0, front face toward +Z.
+///
+/// Unlike `sphere()` (closed + convex, where back-faces are never visible),
+/// this open quad lets a renderer's back-face culling be *observed*: viewed
+/// from behind (−Z side), a spec-conformant renderer culls it when the
+/// material's `doubleSided == false` and renders it when `true`
+/// (glTF 2.0 §Materials). Used by the doubleSided culling conformance test.
+///
+/// Winding matches the +Z front-face convention: the geometric normal of
+/// every triangle (CCW front) points +Z. `half_extent` is the half-side
+/// length, so the quad spans `[-half_extent, +half_extent]` in X and Y.
+pub fn quad(half_extent: f32) -> MeshData {
+    let s = half_extent;
+    let positions = vec![
+        [-s, -s, 0.0], // 0 bottom-left
+        [s, -s, 0.0],  // 1 bottom-right
+        [s, s, 0.0],   // 2 top-right
+        [-s, s, 0.0],  // 3 top-left
+    ];
+    let normals = vec![[0.0, 0.0, 1.0]; 4];
+    let uvs = vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+    // CCW when viewed from +Z → geometric normal +Z (front-facing toward +Z).
+    let indices = vec![0, 1, 2, 0, 2, 3];
+    MeshData {
+        positions,
+        normals,
+        uvs,
+        indices,
+    }
+}
+
+#[cfg(test)]
+mod quad_tests {
+    use super::*;
+
+    #[test]
+    fn quad_has_4_verts_2_triangles() {
+        let q = quad(0.5);
+        assert_eq!(q.positions.len(), 4);
+        assert_eq!(q.normals.len(), 4);
+        assert_eq!(q.uvs.len(), 4);
+        assert_eq!(q.indices.len(), 6, "two triangles = 6 indices");
+    }
+
+    #[test]
+    fn quad_front_face_normal_points_plus_z() {
+        // Self-verifying winding: the geometric normal of every triangle
+        // (cross product of its edges, in index order) MUST point +Z, so a
+        // renderer treating CCW-from-+Z as front-facing sees this quad's
+        // front from a +Z camera and its BACK from a −Z camera. If a future
+        // edit flips the winding, this test fails rather than silently
+        // inverting the doubleSided spec test.
+        let q = quad(0.5);
+        for tri in q.indices.chunks(3) {
+            let p0 = q.positions[tri[0] as usize];
+            let p1 = q.positions[tri[1] as usize];
+            let p2 = q.positions[tri[2] as usize];
+            let e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+            let e2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+            // cross(e1, e2).z
+            let nz = e1[0] * e2[1] - e1[1] * e2[0];
+            assert!(
+                nz > 0.0,
+                "triangle {tri:?} geometric normal must point +Z, got nz={nz}"
+            );
+        }
+    }
+
+    #[test]
+    fn quad_stored_normals_match_geometry() {
+        let q = quad(1.0);
+        for n in &q.normals {
+            assert_eq!(*n, [0.0, 0.0, 1.0]);
+        }
+    }
+}
