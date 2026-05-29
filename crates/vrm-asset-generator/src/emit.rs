@@ -758,6 +758,51 @@ pub fn emit_not_applicable_marker(
     Ok(())
 }
 
+/// World position of chain joint `i` (0-based) given the chain root world,
+/// the unit `chain_axis`, and `segment_length_m`. Joint 0 sits one segment
+/// from the root (head).
+fn chain_joint_world(root: [f32; 3], axis: [f32; 3], seg: f32, i: u32) -> [f32; 3] {
+    let step = (i + 1) as f32 * seg;
+    [
+        root[0] + axis[0] * step,
+        root[1] + axis[1] * step,
+        root[2] + axis[2] * step,
+    ]
+}
+
+/// Column-major glTF Mat4 that is a pure inverse translation of `p`.
+fn inv_translation_mat4(p: [f32; 3]) -> [f32; 16] {
+    #[rustfmt::skip]
+    let m = [
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        -p[0], -p[1], -p[2], 1.0,
+    ];
+    m
+}
+
+#[cfg(test)]
+mod chain_helper_tests {
+    use super::*;
+
+    #[test]
+    fn ibm_default_axis_matches_legacy_y_only() {
+        let head = crate::humanoid::rest_pose_world_position("head");
+        let seg = 0.05;
+        for i in 0..4u32 {
+            let p = chain_joint_world(head, [0.0, -1.0, 0.0], seg, i);
+            let m = inv_translation_mat4(p);
+            let jy = head[1] - ((i + 1) as f32) * seg;
+            assert!((m[13] - (-jy)).abs() < 1e-6, "element 13");
+            assert!(
+                m[12].abs() < 1e-6 && m[14].abs() < 1e-6,
+                "X/Z translation zero"
+            );
+        }
+    }
+}
+
 /// Emit a `.vrm` GLB containing MToon material data, a VRMC_springBone
 /// chain attached to the head bone, **and a cylinder mesh skinned to
 /// the chain joints** so spring-bone physics is visible in pixel space.
@@ -785,43 +830,42 @@ pub fn emit_vrm_with_spring_bone(
 
     let mut skeleton = minimal_skeleton();
     let head_node = skeleton.bone_to_node["head"];
-    let chain_nodes = crate::humanoid::append_spring_chain(
+    let chain_nodes = crate::humanoid::append_spring_chain_axis(
         &mut skeleton,
         head_node,
         spring_bone.joint_count,
         spring_bone.segment_length_m,
+        spring_bone.chain_axis,
     );
 
-    // Each chain joint's rest-pose world Y is head_world_y - (i+1)*segment_length.
-    // The cylinder runs from joint 0's Y (top) downward and is skinned to
-    // the chain joints by ring (see chain_mesh.rs).
     let head_world = crate::humanoid::rest_pose_world_position("head");
-    let head_world_y = head_world[1];
-    let chain_top_y = head_world_y - spring_bone.segment_length_m;
+    // Joint 0 (chain top) = head + axis * segment_length.
+    let chain_top = chain_joint_world(
+        head_world,
+        spring_bone.chain_axis,
+        spring_bone.segment_length_m,
+        0,
+    );
 
     let chain_mesh = crate::chain_mesh::build_chain_cylinder(
         spring_bone.joint_count,
         spring_bone.segment_length_m,
-        /* radius */ 0.025,
-        [0.0, chain_top_y, 0.0],
-        [0.0, -1.0, 0.0],
-        /* ring_segments */ 12,
+        0.025,
+        chain_top,
+        spring_bone.chain_axis,
+        12,
     );
 
-    // Inverse-bind matrices: each joint's bind-pose world transform is a
-    // pure translation to its rest-pose Y. Inverse = translation by
-    // negated Y. Stored column-major per the glTF Mat4 convention.
+    // Inverse-bind matrices: joint i bind-pose world = head + axis*(i+1)*seg.
     let inv_bind: Vec<[f32; 16]> = (0..spring_bone.joint_count)
         .map(|i| {
-            let jy = head_world_y - ((i + 1) as f32) * spring_bone.segment_length_m;
-            #[rustfmt::skip]
-            let m = [
-                1.0, 0.0, 0.0, 0.0,
-                0.0, 1.0, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-                0.0, -jy, 0.0, 1.0,
-            ];
-            m
+            let p = chain_joint_world(
+                head_world,
+                spring_bone.chain_axis,
+                spring_bone.segment_length_m,
+                i,
+            );
+            inv_translation_mat4(p)
         })
         .collect();
 
@@ -1005,37 +1049,32 @@ pub fn emit_vrm_with_spring_bone_v0(
 
     let mut skeleton = crate::humanoid::minimal_skeleton();
     let head_node = skeleton.bone_to_node["head"];
-    let chain_nodes = crate::humanoid::append_spring_chain(
+    let chain_nodes = crate::humanoid::append_spring_chain_axis(
         &mut skeleton,
         head_node,
         spring.joint_count,
         spring.segment_length_m,
+        spring.chain_axis,
     );
 
     let head_world = crate::humanoid::rest_pose_world_position("head");
-    let head_world_y = head_world[1];
-    let chain_top_y = head_world_y - spring.segment_length_m;
+    // Joint 0 (chain top) = head + axis * segment_length.
+    let chain_top = chain_joint_world(head_world, spring.chain_axis, spring.segment_length_m, 0);
 
     let chain_mesh = crate::chain_mesh::build_chain_cylinder(
         spring.joint_count,
         spring.segment_length_m,
-        /* radius */ 0.025,
-        [0.0, chain_top_y, 0.0],
-        [0.0, -1.0, 0.0],
-        /* ring_segments */ 12,
+        0.025,
+        chain_top,
+        spring.chain_axis,
+        12,
     );
 
+    // Inverse-bind matrices: joint i bind-pose world = head + axis*(i+1)*seg.
     let inv_bind: Vec<[f32; 16]> = (0..spring.joint_count)
         .map(|i| {
-            let jy = head_world_y - ((i + 1) as f32) * spring.segment_length_m;
-            #[rustfmt::skip]
-            let m = [
-                1.0, 0.0, 0.0, 0.0,
-                0.0, 1.0, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-                0.0, -jy, 0.0, 1.0,
-            ];
-            m
+            let p = chain_joint_world(head_world, spring.chain_axis, spring.segment_length_m, i);
+            inv_translation_mat4(p)
         })
         .collect();
 
