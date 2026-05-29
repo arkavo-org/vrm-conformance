@@ -62,6 +62,24 @@ pub struct SpringBoneParams {
     /// Per-joint hit_radius taper (optional). Same semantics as `stiffness_per_joint`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hit_radius_per_joint: Option<Vec<f32>>,
+
+    /// Unit direction the chain extends from its root, in the root bone's
+    /// local space. Default [0,-1,0] (straight down) reproduces all
+    /// pre-existing assets byte-for-byte. Off-vertical axes exercise the
+    /// direction-dependent VRM 0.x leaf-tail (7 cm) synthesis.
+    #[serde(default = "default_chain_axis")]
+    pub chain_axis: [f32; 3],
+
+    /// VRM 1.0 only: when true, append an explicit `_end` joint 7 cm along
+    /// `chain_axis` past the leaf (mirrors how VRoid 1.0 exports the tail).
+    /// V0 emit ignores this — 0.x always synthesizes the 7 cm tail. Used to
+    /// build 0.x(synthesized) ↔ 1.0(explicit) parity twins. Default false.
+    #[serde(default)]
+    pub explicit_tail: bool,
+}
+
+fn default_chain_axis() -> [f32; 3] {
+    [0.0, -1.0, 0.0]
 }
 
 impl SpringBoneParams {
@@ -85,6 +103,8 @@ impl SpringBoneParams {
             drag_force_per_joint: None,
             gravity_power_per_joint: None,
             hit_radius_per_joint: None,
+            chain_axis: [0.0, -1.0, 0.0],
+            explicit_tail: false,
         }
     }
 }
@@ -222,6 +242,39 @@ impl SpringBoneSceneParams {
             collider_groups: Vec::new(),
             spring_collider_groups: vec![Vec::new()],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_axis_defaults_to_down_and_explicit_tail_false() {
+        let p = SpringBoneParams::defaults("ct");
+        assert_eq!(p.chain_axis, [0.0, -1.0, 0.0]);
+        assert!(!p.explicit_tail);
+    }
+
+    #[test]
+    fn chain_axis_and_explicit_tail_roundtrip() {
+        let mut p = SpringBoneParams::defaults("rt");
+        p.chain_axis = [0.0, 0.0, 1.0];
+        p.explicit_tail = true;
+        let s = serde_json::to_string(&p).unwrap();
+        let back: SpringBoneParams = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.chain_axis, [0.0, 0.0, 1.0]);
+        assert!(back.explicit_tail);
+    }
+
+    #[test]
+    fn legacy_json_without_new_fields_deserializes_to_defaults() {
+        let legacy = r#"{"id":"x","spring_name":"x_chain","joint_count":4,
+            "segment_length_m":0.05,"stiffness":0.5,"drag_force":0.5,
+            "gravity_power":0.5,"gravity_dir":[0.0,-1.0,0.0],"hit_radius":0.02}"#;
+        let p: SpringBoneParams = serde_json::from_str(legacy).unwrap();
+        assert_eq!(p.chain_axis, [0.0, -1.0, 0.0]);
+        assert!(!p.explicit_tail);
     }
 }
 
