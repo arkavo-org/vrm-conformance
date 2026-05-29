@@ -95,6 +95,22 @@ pub enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Cross-variant SSIM: assert the false-variant and true-variant renders of
+    /// the SAME renderer DIFFER. Reads `max_ssim` from the plan's `cross_variant`
+    /// block. Exits non-zero when the renders do NOT diverge (ssim > max_ssim).
+    /// Used by the doubleSided back-face-culling spec test.
+    CrossVariantDiff {
+        #[arg(long)]
+        plan: Utf8PathBuf,
+        #[arg(long)]
+        render_false: Utf8PathBuf,
+        #[arg(long)]
+        render_true: Utf8PathBuf,
+        #[arg(long, default_value = "univrm")]
+        renderer_name: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Run N-way consensus diff over renders from multiple renderers.
     /// Each `--render <name>=<png>` pair contributes one renderer to the
     /// consensus pool. The test plan's `diff.threshold` is used unless
@@ -444,6 +460,54 @@ pub fn run(cli: Cli) -> Result<()> {
                      or --render-frames+--reference-frames (sequence)"
                 )
             }
+        }
+        Cmd::CrossVariantDiff {
+            plan,
+            render_false,
+            render_true,
+            renderer_name,
+            json: emit_json,
+        } => {
+            use vrm_diff_engine::cross_variant::cross_variant_diff;
+            let plan_value = load_plan(&plan)?;
+            let cv = plan_value.cross_variant.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "plan '{}' has no cross_variant block; not a cross-variant spec test",
+                    plan_value.id
+                )
+            })?;
+            let result = cross_variant_diff(&render_false, &render_true, cv.max_ssim as f64)?;
+
+            if emit_json {
+                #[derive(serde::Serialize)]
+                struct CrossVariantEnvelope<'a> {
+                    test_id: &'a str,
+                    renderer: &'a str,
+                    sibling_id: &'a str,
+                    cross_variant: vrm_diff_engine::cross_variant::CrossVariantResult,
+                }
+                let envelope = CrossVariantEnvelope {
+                    test_id: &plan_value.id,
+                    renderer: &renderer_name,
+                    sibling_id: &cv.sibling_id,
+                    cross_variant: result.clone(),
+                };
+                println!("{}", serde_json::to_string(&envelope)?);
+            } else {
+                println!(
+                    "{}: cross-variant SSIM={:.4} (max {:.4}, {}) vs {}",
+                    plan_value.id,
+                    result.ssim,
+                    result.max_ssim,
+                    if result.passed { "PASS" } else { "FAIL" },
+                    cv.sibling_id,
+                );
+            }
+
+            if !result.passed {
+                std::process::exit(1);
+            }
+            Ok(())
         }
         Cmd::ConsensusDiff {
             plan,
@@ -934,6 +998,9 @@ pub fn run(cli: Cli) -> Result<()> {
                                 }
                             ]
                         }
+                    },
+                    "cross-variant-diff": {
+                        "summary": "Assert two renders of the SAME renderer DIFFER (inverted SSIM). Reads max_ssim from the plan's cross_variant block; passes iff ssim(--render-false, --render-true) <= max_ssim. Exits non-zero when the renders do not diverge. Used by the doubleSided back-face-culling spec test."
                     },
                     "execute-test-batch": {
                         "summary": "Execute a batched corpus through a batch-mode adapter (UniVRM). Builds a JSON manifest, invokes the adapter once for the whole batch, ingests an NDJSON results file.",

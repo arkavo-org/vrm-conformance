@@ -8,9 +8,9 @@
 
 use crate::ssim::{ssim_pngs, SsimError};
 use camino::Utf8Path;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrossVariantResult {
     pub ssim: f64,
     pub max_ssim: f64,
