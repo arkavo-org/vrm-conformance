@@ -1000,7 +1000,33 @@ pub fn run(cli: Cli) -> Result<()> {
                         }
                     },
                     "cross-variant-diff": {
-                        "summary": "Assert two renders of the SAME renderer DIFFER (inverted SSIM). Reads max_ssim from the plan's cross_variant block; passes iff ssim(--render-false, --render-true) <= max_ssim. Exits non-zero when the renders do not diverge. Used by the doubleSided back-face-culling spec test."
+                        "summary": "Assert two renders of the SAME renderer DIFFER (inverted SSIM). Reads max_ssim from the plan's cross_variant block; passes iff ssim(--render-false, --render-true) <= max_ssim. Exits non-zero when the renders do not diverge. Used by the doubleSided back-face-culling spec test.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["plan", "render_false", "render_true"],
+                            "properties": {
+                                "plan": { "type": "string", "description": "Test plan (.test.yaml) carrying the cross_variant block; max_ssim is read from it." },
+                                "render_false": { "type": "string", "description": "PNG render of the doubleSided=false variant." },
+                                "render_true": { "type": "string", "description": "PNG render of the doubleSided=true variant." },
+                                "renderer_name": { "type": "string", "default": "univrm" }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "test_id": { "type": "string" },
+                                "renderer": { "type": "string" },
+                                "sibling_id": { "type": "string" },
+                                "cross_variant": {
+                                    "type": "object",
+                                    "properties": {
+                                        "ssim": { "type": "number" },
+                                        "max_ssim": { "type": "number" },
+                                        "passed": { "type": "boolean" }
+                                    }
+                                }
+                            }
+                        }
                     },
                     "execute-test-batch": {
                         "summary": "Execute a batched corpus through a batch-mode adapter (UniVRM). Builds a JSON manifest, invokes the adapter once for the whole batch, ingests an NDJSON results file.",
