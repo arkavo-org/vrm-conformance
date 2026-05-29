@@ -5,16 +5,25 @@ use crate::expressions_v0::ExpressionsV0Params;
 use crate::params::MToonParams;
 use serde_json::{json, Value};
 
-/// Build the full `VRM` extension block for a 0.x asset.
-pub fn emit_vrm_extension(
+/// Build the full `VRM` extension block for a 0.x asset, with a caller-provided
+/// `secondaryAnimation` payload. Pass `None` for the empty default (material-only assets).
+pub fn emit_vrm_extension_with_secondary(
     title: &str,
     materials: &[MToonParams],
     expressions: &ExpressionsV0Params,
+    secondary_animation: Option<Value>,
 ) -> Value {
     let material_props: Vec<Value> = materials
         .iter()
         .map(crate::mtoon_v0::emit_material_property)
         .collect();
+
+    let secondary = secondary_animation.unwrap_or_else(|| {
+        json!({
+            "boneGroups": [],
+            "colliderGroups": []
+        })
+    });
 
     json!({
         "exporterVersion": "vrm-asset-generator/0.x",
@@ -56,12 +65,18 @@ pub fn emit_vrm_extension(
             "lookAtVerticalUp": { "curve": [0, 0, 0, 1, 1, 1, 1, 0], "xRange": 90.0, "yRange": 10.0 }
         },
         "blendShapeMaster": crate::expressions_v0::emit_blend_shape_master(expressions),
-        "secondaryAnimation": {
-            "boneGroups": [],
-            "colliderGroups": []
-        },
+        "secondaryAnimation": secondary,
         "materialProperties": material_props
     })
+}
+
+/// Build the full `VRM` extension block for a 0.x asset (empty secondaryAnimation).
+pub fn emit_vrm_extension(
+    title: &str,
+    materials: &[MToonParams],
+    expressions: &ExpressionsV0Params,
+) -> Value {
+    emit_vrm_extension_with_secondary(title, materials, expressions, None)
 }
 
 #[cfg(test)]
@@ -144,5 +159,31 @@ mod tests {
         let v = emit_vrm_extension("humanoid_test", &[params], &expressions);
         assert!(v["humanoid"].is_object());
         assert!(v["humanoid"]["humanBones"].is_array());
+    }
+
+    #[test]
+    fn vrm_ext_carries_provided_secondary_animation() {
+        let params = MToonParams::defaults("sa_test");
+        let expressions = ExpressionsV0Params { groups: vec![] };
+        let sa = serde_json::json!({
+            "boneGroups": [{"comment": "x", "stiffiness": 0.5}],
+            "colliderGroups": []
+        });
+        let ext = emit_vrm_extension_with_secondary("sa_test", &[params], &expressions, Some(sa));
+        assert_eq!(ext["secondaryAnimation"]["boneGroups"][0]["comment"], "x");
+    }
+
+    #[test]
+    fn vrm_ext_default_secondary_animation_is_empty() {
+        let params = MToonParams::defaults("sa_default");
+        let expressions = ExpressionsV0Params { groups: vec![] };
+        let ext = emit_vrm_extension("sa_default", &[params], &expressions);
+        assert_eq!(
+            ext["secondaryAnimation"]["boneGroups"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 }
