@@ -43,6 +43,9 @@ pub enum Cmd {
     EmitSweep {
         #[arg(long)]
         output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
         /// Emit JSON progress on stderr (NDJSON) and a final JSON summary on stdout.
         #[arg(long)]
         json: bool,
@@ -448,6 +451,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::EmitSweep {
             output_dir,
+            spec_version,
             json: emit_json,
         } => {
             use crate::sweep::mtoon_basic_sweep;
@@ -472,7 +476,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
 
                 let stem = output_dir.join(&p.id);
-                emit_with_sidecars(p, &stem)?;
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => emit_with_sidecars_v0(p, &stem)?,
+                    vrm_ops::SpecVersion::V1 => emit_with_sidecars(p, &stem)?,
+                }
                 emitted.push(stem);
             }
 

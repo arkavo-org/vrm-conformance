@@ -91,3 +91,35 @@ fn emit_default_rejects_invalid_spec_version() {
         "expected failure for spec_version=2.0"
     );
 }
+
+#[test]
+fn emit_sweep_v0_produces_vrm0_assets() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let out = tmp.path().join("sweep0x");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_vrm-asset-generator"))
+        .args([
+            "emit-sweep",
+            "--spec-version",
+            "0.x",
+            "--output-dir",
+            out.to_str().unwrap(),
+        ])
+        .status()
+        .expect("run emit-sweep");
+    assert!(
+        status.success(),
+        "emit-sweep --spec-version 0.x must exit 0"
+    );
+    let vrm = std::fs::read_dir(&out)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "vrm"))
+        .expect("at least one .vrm emitted");
+    let bytes = std::fs::read(&vrm).unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.contains("\"VRM\""),
+        "0.x asset must carry the bare `VRM` extension, not VRMC_*"
+    );
+}
