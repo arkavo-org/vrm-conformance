@@ -248,6 +248,19 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the VRM 0.x leaf-tail rest-stability sweep (orientation, length,
+    /// and parity — 12 cells). All cells are zero-gravity static (settle 30,
+    /// no animation). Run under --spec-version 0.x for synthesized-tail assets
+    /// and under 1.0 for the explicit-tail parity twins.
+    EmitSpringboneLeaftailSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long, default_value = "0.x", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the VMK#162 coupling-detection sweep (8 assets = 4 variants
     /// × settle + swing). Variants: vmk162_baseline + vmk162_gravity_{0,1,2}.
     /// Designed to surface the parser substitution `gravityPower=0 → 1.0`
@@ -1057,6 +1070,59 @@ pub fn run(cli: Cli) -> Result<()> {
             } else {
                 println!(
                     "emitted {} spring-bone assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
+        Cmd::EmitSpringboneLeaftailSweep {
+            output_dir,
+            spec_version,
+            json: emit_json,
+        } => {
+            use crate::emit::{emit_with_sidecars_spring_bone, emit_with_sidecars_spring_bone_v0};
+            use crate::spring_bone::spring_bone_v0_leaftail_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = spring_bone_v0_leaftail_sweep();
+            let total = variants.len();
+            let mut emitted = Vec::new();
+            for (i, spring) in variants.iter().enumerate() {
+                if emit_json {
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "event": "progress", "op": "emit-springbone-leaftail-sweep",
+                            "index": i, "total": total, "id": spring.id
+                        }))?
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, spring.id);
+                }
+                let stem = output_dir.join(&spring.id);
+                let mtoon = MToonParams::defaults(&spring.id);
+                match spec_version {
+                    vrm_ops::SpecVersion::V0 => {
+                        emit_with_sidecars_spring_bone_v0(&mtoon, spring, &stem)?
+                    }
+                    vrm_ops::SpecVersion::V1 => {
+                        emit_with_sidecars_spring_bone(&mtoon, spring, &stem)?
+                    }
+                }
+                emitted.push(stem);
+            }
+            if emit_json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&json!({
+                        "ok": true, "count": emitted.len(),
+                        "output_dir": output_dir, "assets": emitted
+                    }))?
+                );
+            } else {
+                println!(
+                    "emitted {} leaftail assets to {}",
                     emitted.len(),
                     output_dir
                 );
@@ -2508,6 +2574,34 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "ok": { "type": "boolean" },
                                 "count": { "type": "integer" },
                                 "output_dir": { "type": "string" }
+                            }
+                        }
+                    },
+                    "emit-springbone-leaftail-sweep": {
+                        "summary": "VRM 0.x leaf-tail rest-stability sweep (12 cells = 8 orientation cardinals/diagonals + 2 length variants + 2 parity twins). All cells are zero-gravity static (settle 30, no animation). Run under --spec-version 0.x for synthesized-tail assets; run again under 1.0 for explicit-tail parity twins.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "spec_version": {
+                                    "type": "string",
+                                    "enum": ["0.x", "1.0"],
+                                    "default": "0.x"
+                                },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
                             }
                         }
                     },
