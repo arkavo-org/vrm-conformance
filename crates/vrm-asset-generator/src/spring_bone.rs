@@ -190,6 +190,71 @@ pub fn spring_bone_coupling_sweep() -> Vec<SpringBoneParams> {
     out
 }
 
+/// VRM 0.x leaf-tail (7 cm) rest-stability sweep — VMK #306 gap area.
+///
+/// The spec (`VRMC_springBone-1.0/README.md:137-153`) synthesizes a 7 cm tail
+/// along the leaf bone's local axis for childless 0.x chains. The error class
+/// is direction-dependent: vertical chains tolerate a wrong synthesis (leaf
+/// axis ~= gravity axis); off-vertical chains collapse. This sweep spans the
+/// orientation x length interaction at zero gravity (so rest = pure synthesis,
+/// no gravity confound), plus parity cells whose V1 twins carry an explicit
+/// 7 cm `_end` (set `explicit_tail`). `sb0_leaftail_axis_posZ` is the #306
+/// bust-analog anchor.
+pub fn spring_bone_v0_leaftail_sweep() -> Vec<SpringBoneParams> {
+    let mut out = Vec::new();
+
+    // helper: a zero-gravity short (2-joint) cell along a given axis.
+    let cell = |id: &str, axis: [f32; 3]| {
+        let mut p = SpringBoneParams::defaults(id);
+        p.joint_count = 2;
+        p.gravity_power = 0.0;
+        p.chain_axis = axis;
+        p
+    };
+
+    // Axis A — orientation (short chain): 6 cardinals + 2 diagonals.
+    out.push(cell("sb0_leaftail_axis_negY", [0.0, -1.0, 0.0])); // control
+    out.push(cell("sb0_leaftail_axis_posY", [0.0, 1.0, 0.0]));
+    out.push(cell("sb0_leaftail_axis_posZ", [0.0, 0.0, 1.0])); // #306 anchor
+    out.push(cell("sb0_leaftail_axis_negZ", [0.0, 0.0, -1.0]));
+    out.push(cell("sb0_leaftail_axis_posX", [1.0, 0.0, 0.0]));
+    out.push(cell("sb0_leaftail_axis_negX", [-1.0, 0.0, 0.0]));
+    let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
+    out.push(cell(
+        "sb0_leaftail_axis_diagYZ",
+        [0.0, inv_sqrt2, inv_sqrt2],
+    ));
+    out.push(cell(
+        "sb0_leaftail_axis_diagXZ",
+        [inv_sqrt2, 0.0, inv_sqrt2],
+    ));
+
+    // Axis B — length interaction on +Z (the 2-joint +Z cell is the anchor
+    // above; add 4 and 8).
+    for jc in [4u32, 8] {
+        let mut p = SpringBoneParams::defaults(format!("sb0_leaftail_len_{jc}"));
+        p.joint_count = jc;
+        p.gravity_power = 0.0;
+        p.chain_axis = [0.0, 0.0, 1.0];
+        out.push(p);
+    }
+
+    // Axis C — 0.x<->1.0 parity. Same geometry; V0 synthesizes, V1 emits the
+    // explicit 7 cm _end (explicit_tail). Emit this sweep under BOTH
+    // --spec-version 0.x and 1.0 to get the twins.
+    let mut short = cell("sb0_leaftail_parity_short", [0.0, 0.0, 1.0]);
+    short.explicit_tail = true;
+    out.push(short);
+    let mut long = SpringBoneParams::defaults("sb0_leaftail_parity_long");
+    long.joint_count = 8;
+    long.gravity_power = 0.0;
+    long.chain_axis = [0.0, 0.0, 1.0];
+    long.explicit_tail = true;
+    out.push(long);
+
+    out
+}
+
 pub fn fmt_num(v: f32) -> String {
     let s = format!("{v:.3}").replace('.', "p").replace('-', "neg");
     s.trim_end_matches('0').trim_end_matches('p').to_string()
@@ -250,6 +315,38 @@ impl SpringBoneSceneParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leaftail_sweep_cells_are_zero_gravity_and_cover_orientation_and_length() {
+        let v = spring_bone_v0_leaftail_sweep();
+        assert!(v.iter().all(|p| p.gravity_power == 0.0), "all gravity=0");
+        let axes: Vec<[f32; 3]> = v.iter().map(|p| p.chain_axis).collect();
+        for a in [
+            [0.0, -1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+        ] {
+            assert!(axes.contains(&a), "missing axis {a:?}");
+        }
+        for jc in [2u32, 4, 8] {
+            assert!(
+                v.iter()
+                    .any(|p| p.chain_axis == [0.0, 0.0, 1.0] && p.joint_count == jc),
+                "missing +Z len {jc}"
+            );
+        }
+        assert!(v.iter().any(|p| p.id == "sb0_leaftail_axis_posZ"));
+        assert!(v.iter().any(|p| p.id.contains("parity") && p.explicit_tail));
+        // ids unique
+        let mut ids: Vec<&str> = v.iter().map(|p| p.id.as_str()).collect();
+        ids.sort_unstable();
+        let n = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "duplicate ids in sweep");
+    }
 
     #[test]
     fn chain_axis_defaults_to_down_and_explicit_tail_false() {
