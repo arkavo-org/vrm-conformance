@@ -53,6 +53,7 @@ fn base_params(session_id: &str, output_dir: &str) -> ops::RenderSequenceParams 
         output_format: ops::SequenceFormat::PngSequence,
         animate_root_transform: None,
         apply_vrma: None,
+        capture_positions: false,
     }
 }
 

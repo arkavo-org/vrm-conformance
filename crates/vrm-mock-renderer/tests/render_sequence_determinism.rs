@@ -61,6 +61,7 @@ fn params(session_id: &str, output_dir: &str) -> ops::RenderSequenceParams {
             translation_end: [0.25, 0.0, 0.0],
         }),
         apply_vrma: None,
+        capture_positions: false,
     }
 }
 

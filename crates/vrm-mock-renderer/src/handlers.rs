@@ -292,6 +292,7 @@ pub fn render_sequence(
             timestamp_seconds: (i as f32) / params.frame_hz,
             path: frame_path.to_string(),
             blake3: blake3_hex,
+            spring_positions: None,
         });
     }
 

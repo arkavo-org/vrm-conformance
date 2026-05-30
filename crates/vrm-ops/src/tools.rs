@@ -396,6 +396,11 @@ pub struct SequenceFrame {
     /// BLAKE3 hex of the PNG contents, prefixed `blake3:` per the content-
     /// addressing convention in `docs/operation-contract.md`.
     pub blake3: String,
+    /// Per-spring joint world positions at this frame (metres), present only
+    /// when `RenderSequenceParams.capture_positions` was set and the adapter
+    /// supports it. Same shape as `dump_bone_positions`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spring_positions: Option<Vec<SpringPositions>>,
 }
 
 /// Capture N frames at a fixed display Hz while advancing physics (and
@@ -435,6 +440,12 @@ pub struct RenderSequenceParams {
     pub animate_root_transform: Option<RootTransformAnimation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_vrma: Option<VrmaPlaybackSpec>,
+    /// When true, the adapter additionally reports per-frame spring-bone joint
+    /// world positions on each `SequenceFrame.spring_positions`. Default false
+    /// so existing sequence tests are byte-unaffected. Used by CCD penetration
+    /// tests. Adapters that cannot report positions MAY leave it null per frame.
+    #[serde(default)]
+    pub capture_positions: bool,
 }
 
 /// Result of `render_sequence`. `frames` lists every captured frame in
@@ -451,6 +462,44 @@ pub struct RenderSequenceResult {
     pub frame_hz_achieved: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub muxed_path: Option<String>,
+}
+
+#[cfg(test)]
+mod ccd_capture_positions_tests {
+    use super::*;
+
+    #[test]
+    fn render_sequence_params_capture_positions_defaults_false_and_roundtrips() {
+        let legacy = r#"{"session_id":"s","width":4,"height":4,"output_dir":"/tmp",
+            "frame_count":2,"frame_hz":30.0,"physics_dt_seconds":0.016666668,
+            "color_space":"Linear","msaa":1,"output_type":"Color","output_format":"png_sequence"}"#;
+        let p: RenderSequenceParams = serde_json::from_str(legacy).unwrap();
+        assert!(!p.capture_positions);
+    }
+
+    #[test]
+    fn sequence_frame_positions_optional_roundtrip() {
+        let f = SequenceFrame {
+            index: 0,
+            timestamp_seconds: 0.0,
+            path: "0000.png".into(),
+            blake3: "blake3:00".into(),
+            spring_positions: Some(vec![SpringPositions {
+                name: "chain".into(),
+                joint_positions: vec![[0.0, 1.0, 0.0], [0.0, 0.95, 0.0]],
+            }]),
+        };
+        let s = serde_json::to_string(&f).unwrap();
+        let back: SequenceFrame = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.spring_positions, f.spring_positions);
+        let f2 = SequenceFrame {
+            spring_positions: None,
+            ..f.clone()
+        };
+        assert!(!serde_json::to_string(&f2)
+            .unwrap()
+            .contains("spring_positions"));
+    }
 }
 
 #[cfg(test)]

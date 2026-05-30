@@ -250,6 +250,7 @@ fn sequence_frame_roundtrip() {
         timestamp_seconds: 0.4,
         path: "/tmp/seq/0012.png".into(),
         blake3: "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+        spring_positions: None,
     };
     let s = serde_json::to_string(&f).unwrap();
     let back: SequenceFrame = serde_json::from_str(&s).unwrap();
@@ -272,6 +273,7 @@ fn render_sequence_params_minimal_roundtrip() {
         output_format: SequenceFormat::PngSequence,
         animate_root_transform: None,
         apply_vrma: None,
+        capture_positions: false,
     };
     let s = serde_json::to_string(&p).unwrap();
     let back: RenderSequenceParams = serde_json::from_str(&s).unwrap();
@@ -303,6 +305,7 @@ fn render_sequence_params_with_root_animation_roundtrip() {
             translation_end: [1.0, 0.0, 0.0],
         }),
         apply_vrma: None,
+        capture_positions: false,
     };
     let s = serde_json::to_string(&p).unwrap();
     let back: RenderSequenceParams = serde_json::from_str(&s).unwrap();
@@ -330,6 +333,7 @@ fn render_sequence_params_with_vrma_roundtrip() {
             vrma_handle: 3,
             start_seconds: 0.5,
         }),
+        capture_positions: false,
     };
     let s = serde_json::to_string(&p).unwrap();
     let back: RenderSequenceParams = serde_json::from_str(&s).unwrap();
@@ -348,6 +352,7 @@ fn render_sequence_result_png_only_roundtrip() {
                 path: "/tmp/seq/0000.png".into(),
                 blake3: "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                     .into(),
+                spring_positions: None,
             },
             SequenceFrame {
                 index: 1,
@@ -355,6 +360,7 @@ fn render_sequence_result_png_only_roundtrip() {
                 path: "/tmp/seq/0001.png".into(),
                 blake3: "blake3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                     .into(),
+                spring_positions: None,
             },
         ],
         duration_seconds: 2.0,
