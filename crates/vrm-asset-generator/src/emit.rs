@@ -903,6 +903,36 @@ pub fn emit_vrm_with_spring_bone(
     hips_children.push(json!(chain_mesh_node_index));
     hips["children"] = Value::Array(hips_children);
 
+    // Optional explicit 7 cm tail (VRM 1.0 parity twin with 0.x synthesized-tail).
+    // This is a sim-only joint — NOT mesh-weighted (skin.joints stays chain_nodes only).
+    // The 7 cm constant is from the VRM spec (VRMC_springBone-1.0/README.md:137-153),
+    // independent of segment_length_m. Fully gated behind explicit_tail so the default
+    // (false) path remains byte-identical.
+    let spring_joint_nodes: Vec<usize> = if spring_bone.explicit_tail {
+        let end_idx = nodes.len();
+        nodes.push(json!({
+            "name": "spring_joint_end",
+            "translation": [
+                spring_bone.chain_axis[0] * 0.07_f32,
+                spring_bone.chain_axis[1] * 0.07_f32,
+                spring_bone.chain_axis[2] * 0.07_f32,
+            ],
+        }));
+        let leaf = *chain_nodes.last().unwrap();
+        let mut leaf_children = nodes[leaf]
+            .get("children")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+        leaf_children.push(json!(end_idx));
+        nodes[leaf]["children"] = Value::Array(leaf_children);
+        let mut v = chain_nodes.clone();
+        v.push(end_idx);
+        v
+    } else {
+        chain_nodes.clone()
+    };
+
     let mut doc = json!({
         "asset": {
             "version": "2.0",
@@ -960,7 +990,7 @@ pub fn emit_vrm_with_spring_bone(
             "VRMC_vrm": vrmc_vrm_with_chain_mesh(
                 &mtoon.id, &skeleton.bone_to_node, mesh_node_index, chain_mesh_node_index
             ),
-            "VRMC_springBone": vrmc_spring_bone(&chain_nodes, spring_bone),
+            "VRMC_springBone": vrmc_spring_bone(&spring_joint_nodes, spring_bone),
         }
     });
 
@@ -3313,6 +3343,94 @@ mod multichain_v0_emit_tests {
         // Sphere + N chain meshes.
         let meshes = doc["meshes"].as_array().expect("meshes array");
         assert_eq!(meshes.len(), 3, "sphere + 2 chain meshes");
+    }
+}
+
+#[cfg(test)]
+mod explicit_tail_tests {
+    use super::*;
+    use crate::glb::extract_json_chunk;
+    use tempfile::tempdir;
+
+    fn parse_glb_json(path: &camino::Utf8Path) -> serde_json::Value {
+        let bytes = std::fs::read(path).unwrap();
+        let json_bytes = extract_json_chunk(&bytes).expect("GLB must have a JSON chunk");
+        serde_json::from_slice(&json_bytes).unwrap()
+    }
+
+    #[test]
+    fn explicit_tail_v1_adds_end_joint_7cm_along_axis() {
+        let dir = tempdir().unwrap();
+        let out = camino::Utf8PathBuf::from_path_buf(dir.path().join("et.vrm")).unwrap();
+        let mtoon = crate::params::MToonParams::defaults("et");
+        let mut spring = crate::spring_bone::SpringBoneParams::defaults("et");
+        spring.joint_count = 2;
+        spring.chain_axis = [0.0, 0.0, 1.0];
+        spring.explicit_tail = true;
+        emit_vrm_with_spring_bone(&mtoon, &spring, &out).unwrap();
+
+        let json = parse_glb_json(&out);
+        let joints = json["extensions"]["VRMC_springBone"]["springs"][0]["joints"]
+            .as_array()
+            .unwrap();
+        assert_eq!(joints.len(), 3, "2 chain joints + 1 explicit _end");
+        let end_node_idx = joints[2]["node"].as_u64().unwrap() as usize;
+        let t = json["nodes"][end_node_idx]["translation"]
+            .as_array()
+            .unwrap();
+        assert!(
+            (t[2].as_f64().unwrap() - 0.07).abs() < 1e-6,
+            "7cm along +Z, got {}",
+            t[2].as_f64().unwrap()
+        );
+        assert!(t[0].as_f64().unwrap().abs() < 1e-6);
+        assert!(t[1].as_f64().unwrap().abs() < 1e-6);
+        // The _end node must NOT appear in the skin's joints (not mesh-weighted).
+        let skin_joints = json["skins"][0]["joints"].as_array().unwrap();
+        assert!(
+            !skin_joints
+                .iter()
+                .any(|j| j.as_u64().unwrap() as usize == end_node_idx),
+            "spring_joint_end must not be in skin.joints"
+        );
+    }
+
+    #[test]
+    fn no_explicit_tail_v1_keeps_joint_count() {
+        let dir = tempdir().unwrap();
+        let out = camino::Utf8PathBuf::from_path_buf(dir.path().join("net.vrm")).unwrap();
+        let mtoon = crate::params::MToonParams::defaults("net");
+        let mut spring = crate::spring_bone::SpringBoneParams::defaults("net");
+        spring.joint_count = 2;
+        // explicit_tail defaults to false
+        emit_vrm_with_spring_bone(&mtoon, &spring, &out).unwrap();
+
+        let json = parse_glb_json(&out);
+        let joints = json["extensions"]["VRMC_springBone"]["springs"][0]["joints"]
+            .as_array()
+            .unwrap();
+        assert_eq!(joints.len(), 2, "no _end without explicit_tail");
+    }
+
+    #[test]
+    fn explicit_tail_ignored_in_v0() {
+        let dir = tempdir().unwrap();
+        let out = camino::Utf8PathBuf::from_path_buf(dir.path().join("v0.vrm")).unwrap();
+        let mtoon = crate::params::MToonParams::defaults("v0et");
+        let mut spring = crate::spring_bone::SpringBoneParams::defaults("v0et");
+        spring.joint_count = 2;
+        spring.explicit_tail = true; // must be ignored by 0.x
+        emit_vrm_with_spring_bone_v0(&mtoon, &spring, &out).unwrap();
+
+        let json = parse_glb_json(&out);
+        let bones = json["extensions"]["VRM"]["secondaryAnimation"]["boneGroups"][0]["bones"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            bones.len(),
+            1,
+            "0.x lists only the root regardless of explicit_tail"
+        );
     }
 }
 
