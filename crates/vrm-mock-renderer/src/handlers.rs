@@ -115,8 +115,29 @@ pub fn animate_root_transform(
     Ok(ops::UnitResult {})
 }
 
-/// Mock has no spring-bone system. Returns an empty springs array for any
-/// loaded session; unknown `session_id` returns -32602 InvalidParams.
+/// Deterministic synthetic spring chain used by `dump_bone_positions` and
+/// `render_sequence` (when `capture_positions` is set).  The mock has no
+/// real physics engine, so the chain is static — identical world positions on
+/// every call.  Four joints are placed along the Y-axis starting at the
+/// avatar's hip height, spaced 0.05 m apart: a minimal but non-trivial chain
+/// for protocol-coverage and E2E CCD pipeline testing.
+///
+/// Per-frame positions are therefore identical across frames; this is correct
+/// and expected for the mock — callers that need motion must use a real adapter.
+fn synthetic_spring_chain() -> Vec<ops::SpringPositions> {
+    vec![ops::SpringPositions {
+        name: "mock_hair".into(),
+        joint_positions: vec![
+            [0.0, 1.50, 0.0],
+            [0.0, 1.45, 0.0],
+            [0.0, 1.40, 0.0],
+            [0.0, 1.35, 0.0],
+        ],
+    }]
+}
+
+/// Mock uses a single deterministic synthetic spring chain (see
+/// `synthetic_spring_chain`).  Unknown `session_id` returns -32602.
 pub fn dump_bone_positions(
     registry: &mut SessionRegistry,
     params: ops::DumpBonePositionsParams,
@@ -125,7 +146,7 @@ pub fn dump_bone_positions(
         .get(&params.session_id)
         .ok_or_else(|| invalid_session(&params.session_id))?;
     Ok(ops::DumpBonePositionsResult {
-        springs: Vec::new(),
+        springs: synthetic_spring_chain(),
     })
 }
 
@@ -287,12 +308,22 @@ pub fn render_sequence(
         let hash = blake3::hash(&bytes);
         let blake3_hex = format!("blake3:{}", hash.to_hex());
 
+        // When capture_positions is requested, populate each frame with the
+        // mock's deterministic synthetic spring chain.  The mock has no
+        // physics engine so positions are static (identical across all frames)
+        // — this is correct for the mock; real adapters emit per-frame motion.
+        let spring_positions = if params.capture_positions {
+            Some(synthetic_spring_chain())
+        } else {
+            None
+        };
+
         frames.push(ops::SequenceFrame {
             index: i,
             timestamp_seconds: (i as f32) / params.frame_hz,
             path: frame_path.to_string(),
             blake3: blake3_hex,
-            spring_positions: None,
+            spring_positions,
         });
     }
 
@@ -429,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn dump_positions_returns_empty_springs_for_loaded_session() {
+    fn dump_positions_returns_synthetic_chain_for_loaded_session() {
         let (mut registry, session_id) = make_test_session();
         let params = DumpBonePositionsParams {
             session_id,
@@ -438,8 +469,17 @@ mod tests {
         let result: DumpBonePositionsResult = dump_bone_positions(&mut registry, params).unwrap();
         assert_eq!(
             result.springs.len(),
-            0,
-            "mock has no springs; expected empty result"
+            1,
+            "mock returns 1 synthetic spring chain"
+        );
+        assert_eq!(
+            result.springs[0].name, "mock_hair",
+            "expected synthetic chain name"
+        );
+        assert_eq!(
+            result.springs[0].joint_positions.len(),
+            4,
+            "synthetic chain has 4 joints"
         );
     }
 
