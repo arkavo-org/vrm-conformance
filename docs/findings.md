@@ -2,6 +2,34 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-05-29 (VRM 1.0 full corpus, golden UniVRM) — VMK misapplies the MToon `occlusionTexture`: AO pattern dominates the shaded result instead of subtly modulating ambient (stable, dose-responsive, isolated)
+
+**What.** Full VRM 1.0 corpus (`scripts/bootstrap-goldens.sh`, `SPEC_VERSION=1.0`, 336 test_ids) rendered through all four real adapters — **UniVRM v0.131.0 / Unity 6000.4.6f1 (golden)**, VMK (VRMMetalKit, Swift release / macOS 26 SDK), godot-vrm 4.6.3, three-vrm — then `consensus-report.sh` pairwise SSIM. VMK is **never a lone consensus outlier** corpus-wide; the top consensus divergences are the outline/matcap families where *all four* diverge (known non-PBR methodology hazard, not a defect). Triaging instead by "where does VMK trail the golden more than the other renderers do" surfaced one clean VMK-specific defect: **the glTF-core `material.occlusionTexture` on an MToon material.**
+
+**Data — occlusion presence degrades only VMK, proportional to strength.** SSIM vs the UniVRM golden across the `pbrtex` sub-family (occlusion map = the R-channel of the shared quadrant-checkerboard, applied per glTF `occlusionTextureInfo`: `finalOcclusion = 1 + strength·(sampled−1)`):
+
+| test | vmk↔uni | three↔uni | godot↔uni |
+|---|---|---|---|
+| `mtoon_pbrtex_baseline` (no AO) | **0.964** | 0.958 | 0.885 |
+| `mtoon_pbrtex_occlusion_default` (strength 1.0) | **0.851** | 0.958 | 0.885 |
+| `mtoon_pbrtex_occlusion_strength_half` (0.5) | **0.896** | 0.958 | 0.885 |
+| `mtoon_pbrtex_combined` (occ+normal+emissive) | **0.807** | 0.881 | 0.887 |
+
+Delta-from-baseline isolates occlusion as the cause:
+
+| adding occlusion | VMK Δ vs uni | three-vrm Δ | godot Δ |
+|---|---|---|---|
+| strength 1.0 | **−0.114** | +0.000 | +0.000 |
+| strength 0.5 | **−0.069** | +0.000 | +0.000 |
+
+Baseline VMK is the *best* match to the golden (0.964); adding the occlusion texture is the *only* change, and it drops **only** VMK — by an amount that scales with `occlusion_texture_strength` (full −0.114, half −0.069). three-vrm and godot are unmoved (Δ=0.000), i.e. they apply occlusion the same way the golden does. This is a textbook controlled isolation: clean baseline control + dose–response + an unaffected cluster.
+
+**Visual.** Golden (UniVRM) and three-vrm render occlusion as a *subtle ambient* modulation — the directional toon lighting is preserved (lit white cap top-right + gray shade, near-indistinguishable from baseline). VMK instead renders a hard **top-dark / bottom-light horizontal band with no lit cap**: the quadrant-checkerboard's R-channel shows through as a dominant term, and the scene's directional lighting is lost. (PNGs: `goldens-cache/{univrm,three-vrm,vrm-metal-kit}/mtoon_pbrtex_occlusion_default.png`.)
+
+**Read (VMK defect, candidate upstream issue).** VMK applies the `occlusionTexture` to the **full shaded/lit result (or far too strongly), instead of restricting it to the indirect/ambient term** as MToon and the glTF spec intend. Under a strong directional light an AO map should be nearly invisible on directly-lit surfaces (which is exactly what UniVRM/three-vrm show); VMK lets the AO texture's spatial pattern override the lighting. Likely sites for VMK to check: the occlusion sample is multiplied into the final color rather than only `ambient/GI`; and/or `occlusionTextureInfo.strength` is not applied via `1 + strength·(s−1)` (the `strength_half` case still over-darkens). This is **stable and version-isolated** (1.0 native path; no migration/integrator ambiguity like the 0.x swing case below), so unlike that case it *is* a clean per-renderer attribution. Recommend filing a VMK issue: "MToon `occlusionTexture` applied to direct lighting / strength mishandled — AO pattern dominates render."
+
+**Boundary.** Normal-map (`normal_scale_2x`) divergence is messier (three-vrm also trails the golden there, 0.856) — not cleanly VMK-specific, not claimed here. The corpus-wide consensus pass rate was 294/336 (the 42 "failed" are dominated by the outline/matcap methodology-hazard families, expected). UniVRM rendered 267 of the shared cells (EditMode/PlayMode coverage subset); all four adapters rendered the `pbrtex` family, so the occlusion comparison is on full 4-way overlap.
+
 ## 2026-05-29 — VRM 0.x rendered through VMK + golden UniVRM: VMK adheres (static settle ~0.94 vs golden); dynamic-swing signal version-unstable (integrator variance, no defect); three emit-side gaps fixed; VMK#299 reclassified
 
 **What.** First attempt to render the Slice-2 VRM 0.x corpus through a real adapter (VMK / VRMMetalKit 0.16.0, rev `392d949`, Xcode 26.5 / M4 Max) — the deferred D4 task, scoped to VMK. Running it surfaced that the Slice-1/Slice-2 v0 emit was **never render-ready** (it had only ever been gltf-validator-gated, and mrxz/vrm-validator does no VRM-extension semantic checks). Three gaps, all on the suite side, fixed in order:
