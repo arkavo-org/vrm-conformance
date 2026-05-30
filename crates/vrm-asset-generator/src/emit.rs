@@ -2000,6 +2000,36 @@ pub fn emit_with_sidecars_spring_bone_extended_swing(
     Ok(())
 }
 
+/// Emits `<stem>.vrm` (MToon + spring-bone chain with a world-fixed collider),
+/// `<stem>.meta.json`, and `<stem>.test.yaml` using the CCD test plan
+/// (`build_spring_bone_ccd_test_plan`). The CCD plan has `render_sequence` with
+/// `capture_positions: true` and `ccd_colliders`, suitable for `penetration-diff`.
+///
+/// The `.vrm` geometry is identical to `emit_with_sidecars_spring_bone_colliders`;
+/// only the plan differs.
+pub fn emit_with_sidecars_spring_bone_ccd(
+    mtoon: &MToonParams,
+    scene: &SpringBoneSceneParams,
+    stem: &Utf8Path,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_with_spring_bone_colliders(mtoon, scene, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    let spring_bone = &scene.springs[0];
+    write_meta_json(mtoon, Some(spring_bone), &vrm_path, &meta_path)?;
+
+    let yaml_path = stem.with_extension("test.yaml");
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan = crate::sidecar::build_spring_bone_ccd_test_plan(mtoon, &asset_relpath, scene);
+    write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
 /// Emit a `.vrm` GLB with N parallel spring-bone chains.
 ///
 /// Each chain gets its own intermediate node radially spaced around the head bone

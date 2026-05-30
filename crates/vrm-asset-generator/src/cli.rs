@@ -475,6 +475,21 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the CCD / tunneling spring-bone sweep (12 assets = 2 shapes ×
+    /// 3 radii × 2 speeds). All assets are VRM 1.0-only (world-fixed collider
+    /// requires the `VRMC_springBone` 1.0 extension). Each plan has
+    /// `render_sequence` with `capture_positions: true` and `ccd_colliders`
+    /// so `vrm-runner penetration-diff` can measure tunneling.
+    ///
+    /// Speed tag (`fast`/`slow`) encodes the per-frame root displacement.
+    /// Radii `{0.005, 0.02, 0.05}` straddle the practical CCD threshold.
+    EmitSpringboneCcdSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -2247,6 +2262,54 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitSpringboneCcdSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_with_sidecars_spring_bone_ccd;
+            use crate::sweep::spring_bone_ccd_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = spring_bone_ccd_sweep();
+            let total = variants.len();
+            let mut emitted = Vec::new();
+
+            for (idx, (mtoon, scene)) in variants.iter().enumerate() {
+                let id = &mtoon.id;
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-springbone-ccd-sweep",
+                        "index": idx,
+                        "total": total,
+                        "id": id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", idx + 1, total, id);
+                }
+                let stem = output_dir.join(id);
+                emit_with_sidecars_spring_bone_ccd(mtoon, scene, &stem)?;
+                emitted.push(stem);
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} CCD spring-bone assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -2613,6 +2676,29 @@ pub fn run(cli: Cli) -> Result<()> {
                             "properties": {
                                 "output_dir": { "type": "string" },
                                 "json": { "type": "boolean" }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-springbone-ccd-sweep": {
+                        "summary": "CCD / tunneling spring-bone sweep (12 assets = 2 shapes × 3 radii × 2 speeds). VRM 1.0 only — world-fixed collider requires VRMC_springBone 1.0. Each plan uses render_sequence with capture_positions: true and ccd_colliders for penetration-diff. Speed tag (fast/slow) encodes per-frame root displacement; radii {0.005, 0.02, 0.05} straddle the CCD tunneling threshold.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
                             }
                         },
                         "output_schema": {
