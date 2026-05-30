@@ -831,7 +831,7 @@ pub fn emit_vrm_with_spring_bone(
     spring_bone: &SpringBoneParams,
     output: &Utf8Path,
 ) -> Result<()> {
-    debug_assert!(
+    assert!(
         !(spring_bone.explicit_tail
             && (spring_bone.stiffness_per_joint.is_some()
                 || spring_bone.drag_force_per_joint.is_some()
