@@ -1,12 +1,12 @@
 //! End-to-end smoke for phase 1 dump_bone_positions infrastructure:
 //!   - spawn mock renderer
-//!   - execute a minimal plan with --reference-positions pointed at an
-//!     empty-springs reference JSON
+//!   - execute a minimal plan with --reference-positions pointed at a
+//!     1-chain reference JSON matching the mock's synthetic output
 //!   - assert overall_passed = true, position_diff = Some(passed: true)
 //!
-//! Mock has no spring-bone system, so this verifies the empty-both-sides
-//! structural-pass branch in diff_positions_one. Not a math test;
-//! a wiring test.
+//! The mock renderer returns a deterministic synthetic chain ("mock_hair",
+//! 4 joints). The reference fixture mirrors that chain exactly, so drift
+//! is 0.0 on every metric. This is a wiring test, not a math test.
 
 use camino::Utf8PathBuf;
 use std::fs;
@@ -56,8 +56,13 @@ fn execute_plan_with_reference_positions_against_mock_passes() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let ref_path =
         Utf8PathBuf::from_path_buf(tmp.path().join("ref_positions.json")).expect("utf8 path");
-    // Reference is empty-springs — matches what the mock renderer returns.
-    fs::write(&ref_path, r#"{"springs":[]}"#).expect("write reference positions");
+    // Reference mirrors the mock's deterministic synthetic chain exactly,
+    // so mock-vs-reference drift is 0.0 on all metrics.
+    fs::write(
+        &ref_path,
+        r#"{"springs":[{"name":"mock_hair","joint_positions":[[0.0,1.50,0.0],[0.0,1.45,0.0],[0.0,1.40,0.0],[0.0,1.35,0.0]]}]}"#,
+    )
+    .expect("write reference positions");
 
     let output_dir = Utf8PathBuf::from_path_buf(tmp.path().join("out")).expect("utf8 path");
     fs::create_dir_all(&output_dir).expect("create output dir");
@@ -83,11 +88,14 @@ fn execute_plan_with_reference_positions_against_mock_passes() {
         .expect("position_diff should be present when reference_positions is set");
     assert!(
         pd.passed,
-        "empty-both-sides should structurally pass; got {pd:?}"
+        "mock-vs-identical-reference should structurally pass; got {pd:?}"
     );
-    assert_eq!(pd.per_joint_max_drift_m, 0.0, "no joints means zero drift");
+    assert_eq!(
+        pd.per_joint_max_drift_m, 0.0,
+        "identical reference means zero per-joint drift"
+    );
     assert_eq!(
         pd.chain_summed_drift_m, 0.0,
-        "no joints means zero summed drift"
+        "identical reference means zero summed drift"
     );
 }
