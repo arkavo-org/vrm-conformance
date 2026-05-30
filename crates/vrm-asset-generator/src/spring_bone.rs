@@ -273,7 +273,20 @@ pub enum ColliderShape {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ColliderAttach {
     Head,
-    NewIntermediateNode { y_offset: f32, z_offset: f32 },
+    NewIntermediateNode {
+        y_offset: f32,
+        z_offset: f32,
+    },
+    /// World-fixed collider: a new glTF node is placed at the scene root
+    /// (no parent, or parented to the scene root node) with an absolute
+    /// `translation` equal to `center`. The collider's `offset` is `[0,0,0]`
+    /// so the collider position IS the node's world translation.
+    ///
+    /// Used for CCD / tunneling tests where the collider must remain
+    /// stationary in world space while the avatar root translates.
+    WorldCoordinates {
+        center: [f32; 3],
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

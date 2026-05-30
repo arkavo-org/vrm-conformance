@@ -1403,6 +1403,7 @@ pub fn emit_vrm_with_spring_bone_colliders_v0(
     // V0SphereCollider list for sphere-shape colliders only.
     let mut resolved_sphere_colliders: Vec<crate::spring_bone_v0::V0SphereCollider> =
         Vec::with_capacity(scene.colliders.len());
+    let mut v0_world_collider_scene_nodes: Vec<usize> = Vec::new();
 
     for collider in &scene.colliders {
         // Filter to Sphere only — other shapes have no 0.x form.
@@ -1424,6 +1425,16 @@ pub fn emit_vrm_with_spring_bone_colliders_v0(
                 let mut hc = head_ref["children"].as_array().cloned().unwrap_or_default();
                 hc.push(json!(new_node_idx));
                 head_ref["children"] = Value::Array(hc);
+                new_node_idx
+            }
+            ColliderAttach::WorldCoordinates { center } => {
+                let new_node_idx = nodes.len();
+                nodes.push(json!({
+                    "name": format!("{}_world_collider_{}", mtoon.id, new_node_idx),
+                    "translation": center,
+                }));
+                // No parent — added as a scene root below.
+                v0_world_collider_scene_nodes.push(new_node_idx);
                 new_node_idx
             }
         };
@@ -1465,6 +1476,12 @@ pub fn emit_vrm_with_spring_bone_colliders_v0(
         }
     });
 
+    // Build scene root list: avatar skeleton root + any world-fixed collider nodes.
+    let mut v0_coll_scene_root_nodes = vec![skeleton.root_node as u64];
+    for &wn in &v0_world_collider_scene_nodes {
+        v0_coll_scene_root_nodes.push(wn as u64);
+    }
+
     let mut doc = json!({
         "asset": {
             "version": "2.0",
@@ -1472,7 +1489,7 @@ pub fn emit_vrm_with_spring_bone_colliders_v0(
         },
         "extensionsUsed": ["KHR_materials_unlit", "VRM"],
         "scene": 0,
-        "scenes": [{ "nodes": [skeleton.root_node] }],
+        "scenes": [{ "nodes": v0_coll_scene_root_nodes }],
         "nodes": nodes,
         "meshes": [
             {
@@ -1754,7 +1771,9 @@ pub fn emit_vrm_with_spring_bone_colliders(
 
     // Resolve collider attach nodes. For Head attach, use head_node.
     // For NewIntermediateNode, add a new glTF node parented under head.
+    // For WorldCoordinates, add a new scene-root node (no parent bone).
     let mut collider_attach_nodes: Vec<usize> = Vec::with_capacity(scene.colliders.len());
+    let mut world_collider_scene_nodes: Vec<usize> = Vec::new();
     for collider in &scene.colliders {
         match &collider.attach {
             ColliderAttach::Head => {
@@ -1776,7 +1795,23 @@ pub fn emit_vrm_with_spring_bone_colliders(
                 head_node_ref["children"] = Value::Array(hc);
                 collider_attach_nodes.push(new_node_idx);
             }
+            ColliderAttach::WorldCoordinates { center } => {
+                let new_node_idx = nodes.len();
+                nodes.push(json!({
+                    "name": format!("{}_world_collider_{}", mtoon.id, new_node_idx),
+                    "translation": center,
+                }));
+                // No parent — added as a scene root below.
+                world_collider_scene_nodes.push(new_node_idx);
+                collider_attach_nodes.push(new_node_idx);
+            }
         }
+    }
+
+    // Build scene root list: avatar skeleton root + any world-fixed collider nodes.
+    let mut scene_root_nodes = vec![skeleton.root_node as u64];
+    for &wn in &world_collider_scene_nodes {
+        scene_root_nodes.push(wn as u64);
     }
 
     // Build extensionsUsed: always declare springBone; add extended collider
@@ -1799,7 +1834,7 @@ pub fn emit_vrm_with_spring_bone_colliders(
         "extensionsUsed": extensions_used,
         "extensionsRequired": ["VRMC_vrm"],
         "scene": 0,
-        "scenes": [{ "nodes": [skeleton.root_node] }],
+        "scenes": [{ "nodes": scene_root_nodes }],
         "nodes": nodes,
         "meshes": [
             {
@@ -2107,6 +2142,7 @@ pub fn emit_vrm_with_spring_bone_multichain(
 
     // Resolve collider attach nodes.
     let mut collider_attach_nodes: Vec<usize> = Vec::with_capacity(scene.colliders.len());
+    let mut mc_world_collider_scene_nodes: Vec<usize> = Vec::new();
     for collider in &scene.colliders {
         match &collider.attach {
             ColliderAttach::Head => {
@@ -2122,6 +2158,16 @@ pub fn emit_vrm_with_spring_bone_multichain(
                 let mut hc = head_ref["children"].as_array().cloned().unwrap_or_default();
                 hc.push(json!(new_node_idx));
                 head_ref["children"] = Value::Array(hc);
+                collider_attach_nodes.push(new_node_idx);
+            }
+            ColliderAttach::WorldCoordinates { center } => {
+                let new_node_idx = nodes.len();
+                nodes.push(json!({
+                    "name": format!("{}_world_collider_{}", mtoon.id, new_node_idx),
+                    "translation": center,
+                }));
+                // No parent — added as a scene root below.
+                mc_world_collider_scene_nodes.push(new_node_idx);
                 collider_attach_nodes.push(new_node_idx);
             }
         }
@@ -2188,6 +2234,12 @@ pub fn emit_vrm_with_spring_bone_multichain(
     let mut vrm_ext = vrmc_vrm(&mtoon.id, &skeleton.bone_to_node, sphere_mesh_node);
     vrm_ext["firstPerson"]["meshAnnotations"] = Value::Array(all_mesh_nodes);
 
+    // Build scene root list: avatar skeleton root + any world-fixed collider nodes.
+    let mut mc_scene_root_nodes = vec![skeleton.root_node as u64];
+    for &wn in &mc_world_collider_scene_nodes {
+        mc_scene_root_nodes.push(wn as u64);
+    }
+
     let mut doc = json!({
         "asset": {
             "version": "2.0",
@@ -2196,7 +2248,7 @@ pub fn emit_vrm_with_spring_bone_multichain(
         "extensionsUsed": extensions_used,
         "extensionsRequired": ["VRMC_vrm"],
         "scene": 0,
-        "scenes": [{ "nodes": [skeleton.root_node] }],
+        "scenes": [{ "nodes": mc_scene_root_nodes }],
         "nodes": nodes,
         "meshes": meshes,
         "skins": skins,

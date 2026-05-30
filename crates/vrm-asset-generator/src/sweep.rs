@@ -1109,6 +1109,144 @@ fn build_multichain_scene(id: &str, chain_count: u32, sharing_mode: &str) -> Spr
     }
 }
 
+// ── CCD / tunneling collider sweep ──────────────────────────────────────────
+
+/// World-fixed collider specification returned by [`ccd_collider_world_spec`].
+///
+/// Contains enough information for Task 7's sidecar to emit a matching
+/// `ccd_colliders` entry on the test plan, and for Task 8's mock E2E to
+/// validate placement. The center is the absolute world position of the
+/// collider node (`ColliderAttach::WorldCoordinates { center }`).
+#[derive(Debug, Clone)]
+pub struct CcdColliderWorldSpec {
+    /// `"sphere"` or `"capsule"`.
+    pub kind: &'static str,
+    /// World center of the sphere, or the capsule's axis midpoint (A = center
+    /// offset −0.05 along Y, B = center offset +0.05 along Y).
+    pub center: [f32; 3],
+    pub radius: f32,
+}
+
+/// Return the world-space collider geometry for a CCD sweep cell. Task 7 calls
+/// this to emit the matching `ccd_colliders` entry on the test plan; Task 8
+/// uses it to validate placement.
+///
+/// The center is the same value used for `ColliderAttach::WorldCoordinates` —
+/// it is a pure function of the scene params (no mutable state), so both the
+/// asset generator and the sidecar generator agree without a separate lookup.
+pub fn ccd_collider_world_spec(scene: &SpringBoneSceneParams) -> CcdColliderWorldSpec {
+    assert_eq!(
+        scene.colliders.len(),
+        1,
+        "ccd sweep cells have exactly one collider"
+    );
+    let c = &scene.colliders[0];
+    let center = match &c.attach {
+        ColliderAttach::WorldCoordinates { center } => *center,
+        _ => panic!("ccd sweep collider must use WorldCoordinates attach"),
+    };
+    match &c.shape {
+        ColliderShape::Sphere { radius } => CcdColliderWorldSpec {
+            kind: "sphere",
+            center,
+            radius: *radius,
+        },
+        ColliderShape::Capsule { radius, .. } => CcdColliderWorldSpec {
+            kind: "capsule",
+            center,
+            radius: *radius,
+        },
+        _ => panic!("ccd sweep collider must be sphere or capsule"),
+    }
+}
+
+/// 12-variant CCD / tunneling sweep.
+///
+/// ## Geometry rationale
+///
+/// The default spring-bone chain (`SpringBoneParams::defaults`) hangs from the
+/// head bone at world position (0, 1.36, 0) straight down along −Y:
+/// - Joint 0: (0, 1.31, 0)  …  Joint 3: (0, 1.16, 0)
+/// - Chain midpoint: (0, 1.26, 0)
+///
+/// The world-fixed collider is placed at **(0.10, 1.26, 0.0)** — 10 cm lateral
+/// of the chain's rest column at mid-chain height. When Task 7's sidecar sweeps
+/// the avatar root +X by ≥ 0.10 m in one frame (fast) or incrementally in
+/// sub-frame steps (slow), the chain crosses the collider. Sphere / capsule ×
+/// radius × speed tag = 12 cells.
+///
+/// ## Speed tag
+///
+/// Speed is encoded in the ID (`…_fast` / `…_slow`) so Task 7 can key off
+/// the asset ID and set matching root velocity. There is no speed field in
+/// `SpringBoneSceneParams` (avoids schema churn); Task 7 parses the suffix.
+///
+/// - `fast`: large step per frame (~0.15 m), above the CCD tunneling threshold
+///   for small radii — a non-CCD integrator will tunnel through thin colliders.
+/// - `slow`: small step per frame (~0.02 m), well below the threshold — all
+///   compliant integrators should detect the collision regardless of CCD.
+///
+/// ## Threshold straddle
+///
+/// Radii `{0.005, 0.02, 0.05}` straddle the practical CCD threshold:
+/// - 0.005 m (5 mm): smaller than the hit_radius (0.02 m) on "fast" cells →
+///   a non-CCD integrator may tunnel through.
+/// - 0.02 m: marginal — matches the joint hit_radius exactly.
+/// - 0.05 m: large enough that even fast displacement is caught without CCD.
+///
+/// ## Cell count: 2 shapes × 3 radii × 2 speeds = 12 cells
+pub fn spring_bone_ccd_sweep() -> Vec<(MToonParams, SpringBoneSceneParams)> {
+    let mut out = Vec::with_capacity(12);
+
+    // World-fixed collider center: 10 cm lateral of the chain's rest column,
+    // at chain mid-height. See geometry rationale in the doc comment above.
+    let world_center: [f32; 3] = [0.10, 1.26, 0.0];
+
+    let radii = [0.005_f32, 0.02, 0.05];
+    let speeds = ["fast", "slow"];
+    let shape_kinds = ["sphere", "capsule"];
+
+    for &shape_kind in shape_kinds.iter() {
+        for &radius in radii.iter() {
+            for &speed in speeds.iter() {
+                let radius_tag = fmt_num(radius as f64);
+                let id = format!("ccd_{shape_kind}_r{radius_tag}_{speed}");
+                let shape = match shape_kind {
+                    "sphere" => ColliderShape::Sphere { radius },
+                    "capsule" => ColliderShape::Capsule {
+                        radius,
+                        // Capsule axis along Y, half-length 0.05 m each side.
+                        tail_offset: [0.0, -0.10, 0.0],
+                    },
+                    _ => unreachable!(),
+                };
+                let collider = ColliderParams {
+                    shape,
+                    // With WorldCoordinates, offset is [0,0,0]: the node
+                    // translation IS the world position.
+                    offset: [0.0, 0.0, 0.0],
+                    attach: ColliderAttach::WorldCoordinates {
+                        center: world_center,
+                    },
+                };
+                let scene = SpringBoneSceneParams {
+                    springs: vec![SpringBoneParams::defaults(&id)],
+                    colliders: vec![collider],
+                    collider_groups: vec![ColliderGroupParams {
+                        name: "ccd_g".into(),
+                        collider_indices: vec![0],
+                    }],
+                    spring_collider_groups: vec![vec![0]],
+                };
+                let mtoon = MToonParams::defaults(&id);
+                out.push((mtoon, scene));
+            }
+        }
+    }
+
+    out
+}
+
 pub fn vrma_lookat_sweep() -> Vec<crate::vrma_params::VrmaLookAtParams> {
     use crate::vrma_params::{AvatarLookAtType, RotationAxis, VrmaLookAtParams};
 
@@ -2313,6 +2451,88 @@ mod material_name_classification_tests {
                 baseline,
                 "variant {} differs from baseline in a field other than id/double_sided",
                 p.id
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod ccd_sweep_tests {
+    use super::*;
+
+    fn collider_radius(shape: &ColliderShape) -> f32 {
+        match shape {
+            ColliderShape::Sphere { radius } => *radius,
+            ColliderShape::Capsule { radius, .. } => *radius,
+            ColliderShape::InsideSphere { radius } => *radius,
+            ColliderShape::InsideCapsule { radius, .. } => *radius,
+            ColliderShape::Plane { .. } => 0.0,
+        }
+    }
+
+    #[test]
+    fn ccd_sweep_uses_world_collider_and_straddles_threshold() {
+        let v = spring_bone_ccd_sweep();
+        assert!(!v.is_empty());
+        // every cell carries exactly one world-fixed collider
+        for (mtoon, scene) in &v {
+            assert_eq!(scene.colliders.len(), 1, "{}: one collider", mtoon.id);
+            assert!(
+                matches!(
+                    scene.colliders[0].attach,
+                    ColliderAttach::WorldCoordinates { .. }
+                ),
+                "{}: world-fixed collider",
+                mtoon.id
+            );
+        }
+        // threshold straddle: at least one thin-radius cell and one thick-radius cell
+        let radii: Vec<f32> = v
+            .iter()
+            .map(|(_, s)| collider_radius(&s.colliders[0].shape))
+            .collect();
+        assert!(radii.iter().any(|&r| r <= 0.01), "a thin collider exists");
+        assert!(radii.iter().any(|&r| r >= 0.04), "a thick collider exists");
+        // unique ids, all ccd_ prefixed
+        let ids: std::collections::HashSet<_> = v.iter().map(|(m, _)| m.id.clone()).collect();
+        assert_eq!(ids.len(), v.len(), "unique ids");
+        assert!(v.iter().all(|(m, _)| m.id.starts_with("ccd_")));
+    }
+
+    #[test]
+    fn ccd_sweep_has_12_cells() {
+        assert_eq!(spring_bone_ccd_sweep().len(), 12);
+    }
+
+    #[test]
+    fn ccd_sweep_both_speed_tags_present() {
+        let v = spring_bone_ccd_sweep();
+        assert!(v.iter().any(|(m, _)| m.id.ends_with("_fast")));
+        assert!(v.iter().any(|(m, _)| m.id.ends_with("_slow")));
+    }
+
+    #[test]
+    fn ccd_sweep_both_shape_kinds_present() {
+        let v = spring_bone_ccd_sweep();
+        assert!(v.iter().any(|(m, _)| m.id.contains("_sphere_")));
+        assert!(v.iter().any(|(m, _)| m.id.contains("_capsule_")));
+    }
+
+    #[test]
+    fn ccd_collider_world_spec_matches_scene() {
+        let v = spring_bone_ccd_sweep();
+        for (mtoon, scene) in &v {
+            let spec = ccd_collider_world_spec(scene);
+            assert!(
+                spec.radius > 0.0,
+                "{}: collider world spec radius must be positive",
+                mtoon.id
+            );
+            // World center must be deterministic and nonzero (not the chain's rest column)
+            assert!(
+                spec.center[0].abs() > 0.05,
+                "{}: world center must be laterally offset from chain rest column (x=0)",
+                mtoon.id
             );
         }
     }
