@@ -119,6 +119,30 @@ Settle thresholds reflect that two correctly-converged renderers should agree to
 
 These thresholds are operational, not spec-defined. Future tightening follows the same trajectory as the cross-renderer SSIM thresholds.
 
+### Exception: VRM 0.x leaf-tail sweep is a 2-factor grid
+
+The basic sweeps are one-axis-at-a-time to keep regressions un-confounded. The
+`sb0_leaftail_*` family (`spring_bone_v0_leaftail_sweep`) is a deliberate
+**orientation × length** grid: the VRM 0.x leaf-tail (7 cm) synthesis error this
+family targets is *defined* by that interaction (off-vertical short chains
+collapse; vertical or long chains tolerate the same error). The confound is the
+object of study. All cells are zero-gravity static (settle 30, no animation,
+`tone_mapping: none`) so the measured signal is pure synthesis rest, not gravity.
+Spec: `docs/upstream-specs/vrm-specification/specification/VRMC_springBone-1.0/README.md:137-153`.
+Surfacing symptom: [VRMMetalKit#306](https://github.com/arkavo-org/VRMMetalKit/issues/306).
+
+Generate with `emit-springbone-leaftail-sweep --spec-version 0.x` (synthesized
+tail) and again `--spec-version 1.0` (explicit 7 cm `_end` on the two
+`*_parity_*` cells) for the 0.x↔1.0 parity twins.
+
+**Known limitation:** the `chain_axis` orientation knob is exact for single-chain
+assets (the chain hangs from `head`, which sits at X=Z=0). For the *multichain*
+emit path, chains hang from an intermediate node offset radially around `head`;
+the inverse-bind root ignores that XZ offset, so a non-default `chain_axis` on a
+multichain asset has an approximate (offset) rest. This is pre-existing behavior
+generalized, not used by the leaftail sweep (which is single-chain), and is noted
+only so a future multichain+off-axis test is not built on it unaware.
+
 ## Render queue / transparency ordering
 
 Z-write behavior under `transparentWithZWrite=true` plus `renderQueueOffsetNumber` is the most common source of real-world MToon visual bugs.
