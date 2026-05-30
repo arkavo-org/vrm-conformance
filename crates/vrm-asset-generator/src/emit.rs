@@ -771,13 +771,18 @@ fn chain_joint_world(root: [f32; 3], axis: [f32; 3], seg: f32, i: u32) -> [f32; 
 }
 
 /// Column-major glTF Mat4 that is a pure inverse translation of `p`.
+///
+/// Uses `0.0 - p[i]` rather than the unary negation `-p[i]` so that zero
+/// inputs produce `+0.0` instead of `-0.0` (IEEE 754: `0.0 - 0.0 = +0.0`).
+/// This preserves byte-identity with the pre-axis-feature code path, which
+/// hardcoded `0.0` literals for the X/Z translation entries.
 fn inv_translation_mat4(p: [f32; 3]) -> [f32; 16] {
     #[rustfmt::skip]
     let m = [
         1.0, 0.0, 0.0, 0.0,
         0.0, 1.0, 0.0, 0.0,
         0.0, 0.0, 1.0, 0.0,
-        -p[0], -p[1], -p[2], 1.0,
+        0.0 - p[0], 0.0 - p[1], 0.0 - p[2], 1.0,
     ];
     m
 }
@@ -3308,5 +3313,52 @@ mod multichain_v0_emit_tests {
         // Sphere + N chain meshes.
         let meshes = doc["meshes"].as_array().expect("meshes array");
         assert_eq!(meshes.len(), 3, "sphere + 2 chain meshes");
+    }
+}
+
+#[cfg(test)]
+mod byte_identity_guard {
+    use super::*;
+    use tempfile::tempdir;
+
+    // BLAKE3 of the DEFAULT spring-bone GLBs. Captured after Part A proved the
+    // chain_axis/explicit_tail feature preserved byte-identity vs pre-feature
+    // commit 4639d35. If either fails, the default (-Y) geometry path drifted —
+    // investigate the geometry change; do NOT update these hashes casually.
+    const DEFAULT_V1_BLAKE3: &str =
+        "007ae2a770766a107fd94e900da396b71b8ab92af086b56b4b63fba9ba86572a";
+    const DEFAULT_V0_BLAKE3: &str =
+        "769e9084089987369bc3899a727ee2dbced7ad7ebaa89b3f36e9a776605a80f2";
+
+    fn emit_default_and_hash(v0: bool) -> String {
+        let dir = tempdir().unwrap();
+        let out = camino::Utf8PathBuf::from_path_buf(dir.path().join("d.vrm")).unwrap();
+        let mtoon = crate::params::MToonParams::defaults("springbone_default");
+        let spring = crate::spring_bone::SpringBoneParams::defaults("springbone_default");
+        if v0 {
+            emit_vrm_with_spring_bone_v0(&mtoon, &spring, &out).unwrap();
+        } else {
+            emit_vrm_with_spring_bone(&mtoon, &spring, &out).unwrap();
+        }
+        let bytes = std::fs::read(&out).unwrap();
+        blake3::hash(&bytes).to_hex().to_string()
+    }
+
+    #[test]
+    fn default_v1_spring_bone_asset_is_byte_identical() {
+        assert_eq!(
+            emit_default_and_hash(false),
+            DEFAULT_V1_BLAKE3,
+            "V1 default -Y output drifted"
+        );
+    }
+
+    #[test]
+    fn default_v0_spring_bone_asset_is_byte_identical() {
+        assert_eq!(
+            emit_default_and_hash(true),
+            DEFAULT_V0_BLAKE3,
+            "V0 default -Y output drifted"
+        );
     }
 }

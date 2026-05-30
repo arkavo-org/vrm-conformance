@@ -74,7 +74,10 @@ pub fn build_chain_cylinder(
 
         for seg in 0..n_segs {
             let phi = (seg as f32) * 2.0 * std::f32::consts::PI / (n_segs as f32);
-            let radial = u * phi.cos() + v * phi.sin();
+            let raw_radial = u * phi.cos() + v * phi.sin();
+            // Flush any -0.0 produced by IEEE 754 (e.g. 0.0 * negative_cos when u=X).
+            // Adding +0.0 converts -0.0 to +0.0 per IEEE 754, preserving all other values.
+            let radial = Vec3::new(raw_radial.x + 0.0, raw_radial.y + 0.0, raw_radial.z + 0.0);
             let p = center + radial * radius;
             let uv = Vec2::new(
                 (seg as f32) / (n_segs as f32),
