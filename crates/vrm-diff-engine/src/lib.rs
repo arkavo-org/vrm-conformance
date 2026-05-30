@@ -2,6 +2,7 @@
 
 pub mod consensus;
 pub mod cross_variant;
+pub mod penetration;
 pub mod pose_diff;
 pub mod positions;
 pub mod property;
