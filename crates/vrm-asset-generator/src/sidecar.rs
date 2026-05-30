@@ -608,6 +608,120 @@ mod tag_plan_vrm0_tests {
     }
 }
 
+/// Build a test plan for a CCD sweep cell.
+///
+/// # Design: fast vs slow root sweep
+///
+/// The goal is to straddle the tunneling threshold in a single corpus.
+/// The chain's rest column sits at x=0; the world-fixed collider center is at
+/// x=0.10. When the avatar root is swept +X, the chain crosses the collider.
+/// Whether a non-CCD integrator tunnels depends on the per-substep displacement
+/// relative to the collider radius:
+///
+/// ```text
+/// tunneling if: Δx_per_substep > 2 * collider_radius
+/// ```
+///
+/// With `physics_dt = 1/60 s` (the methodology floor):
+///
+/// | Speed | translation_end | frame_count | frame_hz | total_duration | Δx_per_substep |
+/// |-------|----------------|-------------|----------|----------------|----------------|
+/// | fast  | [1.0, 0, 0]    |  12         |  60.0    |  0.20 s        |  ≈ 0.083 m     |
+/// | slow  | [1.0, 0, 0]    | 120         |  60.0    |  2.0  s        |  ≈ 0.0083 m    |
+///
+/// Fast: Δx ≈ 1.0 / (12 × 1) = 0.083 m per frame × 1 substep = 0.083 m.
+/// This is > 2 × 0.02 m (marginal radius) and >> 2 × 0.005 m (small radius),
+/// so a non-CCD integrator WILL tunnel through the small-radius colliders.
+///
+/// Slow: Δx ≈ 1.0 / (120 × 1) = 0.0083 m per frame × 1 substep = 0.0083 m.
+/// This is well below 2 × 0.005 m = 0.010 m, so even the smallest collider
+/// is detected without CCD. Every compliant integrator — CCD or not — must
+/// resolve the collision.
+///
+/// # Collider mapping
+///
+/// `CcdColliderWorldSpec.kind` → `ColliderWorldSpec` variant:
+/// - `"sphere"` → `ColliderWorldSpec::Sphere { center, radius }` directly.
+/// - `"capsule"` → `ColliderWorldSpec::Capsule { a, b, radius }` where
+///   the capsule axis endpoints are derived from the center: A = center + [0, -0.05, 0],
+///   B = center + [0, +0.05, 0]. This matches the tail_offset=[0,-0.10,0] used in the
+///   sweep (half-length = 0.05 m each side) and `ccd_collider_world_spec`'s doc comment.
+pub fn build_spring_bone_ccd_test_plan(
+    params: &MToonParams,
+    asset_relpath: &str,
+    scene: &crate::spring_bone::SpringBoneSceneParams,
+) -> TestPlan {
+    use crate::sweep::ccd_collider_world_spec;
+
+    // Parse speed from the asset id suffix.
+    let is_fast = params.id.ends_with("_fast");
+
+    // Fast: 12 frames at 60 Hz → 0.20 s total, Δx_per_frame ≈ 0.083 m.
+    // Slow: 120 frames at 60 Hz → 2.0 s total, Δx_per_frame ≈ 0.0083 m.
+    let (frame_count, frame_hz) = if is_fast {
+        (12u32, 60.0_f32)
+    } else {
+        (120u32, 60.0_f32)
+    };
+
+    // Both variants sweep the same total displacement so position data is
+    // comparable across speed tiers. Start at x=−0.50 so the chain
+    // approaches the collider from the side opposite its rest column.
+    let translation_start = [-0.50_f32, 0.0, 0.0];
+    let translation_end = [0.50_f32, 0.0, 0.0];
+
+    // Map CcdColliderWorldSpec → ColliderWorldSpec.
+    let world_spec = ccd_collider_world_spec(scene);
+    let ccd_collider = match world_spec.kind {
+        "sphere" => vrm_test_plan::ColliderWorldSpec::Sphere {
+            center: world_spec.center,
+            radius: world_spec.radius,
+        },
+        "capsule" => {
+            // Capsule endpoints: A below center, B above center.
+            // Half-length 0.05 m matches the tail_offset=[0,-0.10,0] stored in the sweep
+            // (tail_offset length = 0.10 m → distance from center to each endpoint = 0.05 m).
+            let [cx, cy, cz] = world_spec.center;
+            vrm_test_plan::ColliderWorldSpec::Capsule {
+                a: [cx, cy - 0.05, cz],
+                b: [cx, cy + 0.05, cz],
+                radius: world_spec.radius,
+            }
+        }
+        other => panic!("unexpected CCD collider kind: {other}"),
+    };
+
+    // Build a base plan (inherit camera, lighting, output, diff settings).
+    let mut plan = build_default_test_plan(params, asset_relpath);
+    plan.spec_section = "VRMC_springBone CCD / tunneling".into();
+    // Physics: 60-step settle before the sequence starts (collider contact may
+    // need more time to converge than the default 30-step settle).
+    plan.physics = Some(PhysicsConfig { settle_steps: 60 });
+    // Ensure tone_mapping is None (CCD metric depends on position data, not
+    // pixel colour, but we keep it consistent with the methodology convention).
+    plan.post_processing = PostProcessing {
+        tone_mapping: ToneMapping::None,
+        exposure: 1.0,
+    };
+    // No single-frame animation block (mutually exclusive with render_sequence).
+    plan.animation = None;
+    plan.render_sequence = Some(RenderSequenceBlock {
+        frame_count,
+        frame_hz,
+        physics_dt_seconds: 1.0 / 60.0,
+        output_format: SequenceFormat::PngSequence,
+        animate_root_transform: Some(SequenceRootTransformAnimation {
+            translation_start,
+            translation_end,
+        }),
+        apply_vrma: None,
+        temporal_ssim_threshold: None,
+        capture_positions: true,
+    });
+    plan.ccd_colliders = Some(vec![ccd_collider]);
+    plan
+}
+
 #[cfg(test)]
 mod collider_plan_tests {
     use super::*;
@@ -649,5 +763,150 @@ mod collider_plan_tests {
         let root = anim.root_transform.unwrap();
         assert!((root.duration_seconds - 0.25).abs() < 1e-6);
         assert_eq!(root.fps, 60);
+    }
+}
+
+#[cfg(test)]
+mod ccd_plan_tests {
+    use super::*;
+    use crate::sweep::spring_bone_ccd_sweep;
+
+    /// Compute the per-substep lateral displacement for a render_sequence block.
+    /// With physics_dt = 1/60 s and frame_hz = 60, each frame = 1 physics substep.
+    /// velocity = total_dx / (frame_count * physics_dt_per_frame)
+    /// where physics_dt_per_frame = physics_dt_seconds (one substep per frame at 60 Hz).
+    fn ccd_substep_velocity(rs: &RenderSequenceBlock) -> f32 {
+        let anim = rs
+            .animate_root_transform
+            .as_ref()
+            .expect("animate_root_transform required");
+        let dx = (anim.translation_end[0] - anim.translation_start[0]).abs();
+        // duration_seconds = frame_count / frame_hz
+        let duration = rs.frame_count as f32 / rs.frame_hz;
+        // Δx per substep = Δx per frame (1 substep per frame at matching rates)
+        dx / (duration / rs.physics_dt_seconds)
+    }
+
+    #[test]
+    fn ccd_test_plan_has_fast_sweep_capture_and_world_collider() {
+        let cells = spring_bone_ccd_sweep();
+        // pick a fast sphere cell
+        let (mtoon, scene) = cells
+            .iter()
+            .find(|(m, _)| m.id.contains("sphere") && m.id.ends_with("_fast"))
+            .expect("a fast sphere cell");
+        let plan = build_spring_bone_ccd_test_plan(mtoon, &format!("{}.vrm", mtoon.id), scene);
+
+        // render_sequence present, capture_positions true, no single-frame animation block
+        let rs = plan
+            .render_sequence
+            .as_ref()
+            .expect("render_sequence block");
+        assert!(rs.capture_positions, "capture_positions must be true");
+        assert!(
+            plan.animation.is_none(),
+            "render_sequence is mutually exclusive with animation"
+        );
+
+        // fast root motion: a long lateral translation
+        let anim = rs.animate_root_transform.as_ref().expect("root anim");
+        let dx = anim.translation_end[0] - anim.translation_start[0];
+        assert!(
+            dx.abs() >= 0.5,
+            "fast sweep travels far laterally, got {dx}"
+        );
+
+        // tone mapping none
+        assert!(matches!(
+            plan.post_processing.tone_mapping,
+            vrm_test_plan::ToneMapping::None
+        ));
+
+        // ccd_colliders populated and matches the cell's world collider exactly
+        let colliders = plan.ccd_colliders.as_ref().expect("ccd_colliders");
+        assert_eq!(colliders.len(), 1);
+        match &colliders[0] {
+            vrm_test_plan::ColliderWorldSpec::Sphere { center, radius } => {
+                assert_eq!(*center, [0.10, 1.26, 0.0], "collider center pinned");
+                assert!(*radius > 0.0);
+            }
+            _ => panic!("expected sphere for a sphere cell"),
+        }
+        // plan validates (render_sequence + ccd_colliders allowed together)
+        plan.validate().expect("plan validates");
+    }
+
+    #[test]
+    fn ccd_test_plan_slow_sweep_is_slower_than_fast() {
+        let cells = spring_bone_ccd_sweep();
+        let fast = cells.iter().find(|(m, _)| m.id.ends_with("_fast")).unwrap();
+        let slow = cells.iter().find(|(m, _)| m.id.ends_with("_slow")).unwrap();
+        let pf = build_spring_bone_ccd_test_plan(&fast.0, "f.vrm", &fast.1);
+        let ps = build_spring_bone_ccd_test_plan(&slow.0, "s.vrm", &slow.1);
+        let df = pf.render_sequence.unwrap();
+        let ds = ps.render_sequence.unwrap();
+        // slow cell has lower per-substep displacement than fast
+        assert!(
+            ccd_substep_velocity(&ds) < ccd_substep_velocity(&df),
+            "slow substep velocity ({}) must be less than fast ({})",
+            ccd_substep_velocity(&ds),
+            ccd_substep_velocity(&df),
+        );
+    }
+
+    #[test]
+    fn ccd_plan_capsule_cell_has_a_and_b_endpoints() {
+        let cells = spring_bone_ccd_sweep();
+        let (mtoon, scene) = cells
+            .iter()
+            .find(|(m, _)| m.id.contains("capsule") && m.id.ends_with("_fast"))
+            .expect("a fast capsule cell");
+        let plan = build_spring_bone_ccd_test_plan(mtoon, &format!("{}.vrm", mtoon.id), scene);
+        let colliders = plan.ccd_colliders.expect("ccd_colliders");
+        match &colliders[0] {
+            vrm_test_plan::ColliderWorldSpec::Capsule { a, b, radius } => {
+                // center is [0.10, 1.26, 0.0]; a is below center by 0.05 m
+                assert!((a[1] - 1.21_f32).abs() < 1e-5, "a.y pinned, got {}", a[1]);
+                assert!((b[1] - 1.31_f32).abs() < 1e-5, "b.y pinned, got {}", b[1]);
+                assert_eq!(a[0], b[0], "a.x == b.x (same lateral position)");
+                assert!(*radius > 0.0);
+            }
+            other => panic!("expected Capsule, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ccd_fast_substep_displacement_exceeds_marginal_collider_radius() {
+        // Validates that the fast sweep is in the tunneling regime for the
+        // marginal collider radius (0.02 m). A non-CCD integrator should tunnel.
+        // tunneling condition: Δx_per_substep > 2 * r_marginal
+        let cells = spring_bone_ccd_sweep();
+        let (mtoon, scene) = cells.iter().find(|(m, _)| m.id.ends_with("_fast")).unwrap();
+        let plan = build_spring_bone_ccd_test_plan(mtoon, "x.vrm", scene);
+        let rs = plan.render_sequence.unwrap();
+        let v = ccd_substep_velocity(&rs);
+        let r_marginal = 0.02_f32; // marginal radius from the sweep
+        assert!(
+            v > 2.0 * r_marginal,
+            "fast substep velocity {v} m should exceed 2 × marginal radius {} m",
+            2.0 * r_marginal
+        );
+    }
+
+    #[test]
+    fn ccd_slow_substep_displacement_is_below_small_collider_radius() {
+        // Validates that the slow sweep is below the tunneling threshold even
+        // for the smallest collider radius (0.005 m): Δx < 2 * r_small.
+        let cells = spring_bone_ccd_sweep();
+        let (mtoon, scene) = cells.iter().find(|(m, _)| m.id.ends_with("_slow")).unwrap();
+        let plan = build_spring_bone_ccd_test_plan(mtoon, "x.vrm", scene);
+        let rs = plan.render_sequence.unwrap();
+        let v = ccd_substep_velocity(&rs);
+        let r_small = 0.005_f32; // smallest radius from the sweep
+        assert!(
+            v <= 2.0 * r_small,
+            "slow substep velocity {v} m should be ≤ 2 × small radius {} m",
+            2.0 * r_small
+        );
     }
 }
