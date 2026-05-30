@@ -831,6 +831,15 @@ pub fn emit_vrm_with_spring_bone(
     spring_bone: &SpringBoneParams,
     output: &Utf8Path,
 ) -> Result<()> {
+    debug_assert!(
+        !(spring_bone.explicit_tail
+            && (spring_bone.stiffness_per_joint.is_some()
+                || spring_bone.drag_force_per_joint.is_some()
+                || spring_bone.gravity_power_per_joint.is_some()
+                || spring_bone.hit_radius_per_joint.is_some())),
+        "explicit_tail with per-joint taper arrays is unsupported (joint-count mismatch)"
+    );
+
     let mesh = sphere(0.3, 24, 48);
 
     let mut skeleton = minimal_skeleton();
@@ -1334,37 +1343,32 @@ pub fn emit_vrm_with_spring_bone_colliders_v0(
 
     let mut skeleton = crate::humanoid::minimal_skeleton();
     let head_node = skeleton.bone_to_node["head"];
-    let chain_nodes = crate::humanoid::append_spring_chain(
+    let chain_nodes = crate::humanoid::append_spring_chain_axis(
         &mut skeleton,
         head_node,
         spring.joint_count,
         spring.segment_length_m,
+        spring.chain_axis,
     );
 
     let head_world = crate::humanoid::rest_pose_world_position("head");
-    let head_world_y = head_world[1];
-    let chain_top_y = head_world_y - spring.segment_length_m;
+    // Joint 0 (chain top) = head + axis * segment_length.
+    let chain_top = chain_joint_world(head_world, spring.chain_axis, spring.segment_length_m, 0);
 
     let chain_mesh = crate::chain_mesh::build_chain_cylinder(
         spring.joint_count,
         spring.segment_length_m,
         /* radius */ 0.025,
-        [0.0, chain_top_y, 0.0],
-        [0.0, -1.0, 0.0],
+        chain_top,
+        spring.chain_axis,
         /* ring_segments */ 12,
     );
 
+    // Inverse-bind matrices: joint i bind-pose world = head + axis*(i+1)*seg.
     let inv_bind: Vec<[f32; 16]> = (0..spring.joint_count)
         .map(|i| {
-            let jy = head_world_y - ((i + 1) as f32) * spring.segment_length_m;
-            #[rustfmt::skip]
-            let m = [
-                1.0, 0.0, 0.0, 0.0,
-                0.0, 1.0, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-                0.0, -jy, 0.0, 1.0,
-            ];
-            m
+            let p = chain_joint_world(head_world, spring.chain_axis, spring.segment_length_m, i);
+            inv_translation_mat4(p)
         })
         .collect();
 
@@ -1682,37 +1686,42 @@ pub fn emit_vrm_with_spring_bone_colliders(
 
     let mut skeleton = crate::humanoid::minimal_skeleton();
     let head_node = skeleton.bone_to_node["head"];
-    let chain_nodes = crate::humanoid::append_spring_chain(
+    let chain_nodes = crate::humanoid::append_spring_chain_axis(
         &mut skeleton,
         head_node,
         spring_bone.joint_count,
         spring_bone.segment_length_m,
+        spring_bone.chain_axis,
     );
 
     let head_world = crate::humanoid::rest_pose_world_position("head");
-    let head_world_y = head_world[1];
-    let chain_top_y = head_world_y - spring_bone.segment_length_m;
+    // Joint 0 (chain top) = head + axis * segment_length.
+    let chain_top = chain_joint_world(
+        head_world,
+        spring_bone.chain_axis,
+        spring_bone.segment_length_m,
+        0,
+    );
 
     let chain_mesh = crate::chain_mesh::build_chain_cylinder(
         spring_bone.joint_count,
         spring_bone.segment_length_m,
         /* radius */ 0.025,
-        [0.0, chain_top_y, 0.0],
-        [0.0, -1.0, 0.0],
+        chain_top,
+        spring_bone.chain_axis,
         /* ring_segments */ 12,
     );
 
+    // Inverse-bind matrices: joint i bind-pose world = head + axis*(i+1)*seg.
     let inv_bind: Vec<[f32; 16]> = (0..spring_bone.joint_count)
         .map(|i| {
-            let jy = head_world_y - ((i + 1) as f32) * spring_bone.segment_length_m;
-            #[rustfmt::skip]
-            let m = [
-                1.0, 0.0, 0.0, 0.0,
-                0.0, 1.0, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-                0.0, -jy, 0.0, 1.0,
-            ];
-            m
+            let p = chain_joint_world(
+                head_world,
+                spring_bone.chain_axis,
+                spring_bone.segment_length_m,
+                i,
+            );
+            inv_translation_mat4(p)
         })
         .collect();
 
@@ -1981,7 +1990,6 @@ pub fn emit_vrm_with_spring_bone_multichain(
     let mut skeleton = crate::humanoid::minimal_skeleton();
     let head_node = skeleton.bone_to_node["head"];
     let head_world = crate::humanoid::rest_pose_world_position("head");
-    let head_world_y = head_world[1];
 
     // Radial spacing: chains are placed at radius CHAIN_RADIAL_M from the head axis.
     // For n_chains=1 this puts the single chain at angle 0 (same as the single-chain emit).
@@ -2013,37 +2021,44 @@ pub fn emit_vrm_with_spring_bone_multichain(
         head_ref["children"] = Value::Array(hc);
 
         // Append chain joints as children of the intermediate node.
-        let chain_nodes = crate::humanoid::append_spring_chain(
+        let chain_nodes = crate::humanoid::append_spring_chain_axis(
             &mut skeleton,
             inter_idx,
             spring_params.joint_count,
             spring_params.segment_length_m,
+            spring_params.chain_axis,
         );
 
-        // Chain cylinder: top_world_y is the intermediate node's world Y (same as head)
-        // since the intermediate node has translation (rx, 0, rz) relative to head.
-        let chain_top_y = head_world_y - spring_params.segment_length_m;
+        // Chain cylinder: top_world is head_world + axis * segment_length.
+        // Uses head_world (not the intermediate node world) so the default -Y
+        // path produces byte-identical output: the head bone has x=z=0, and
+        // the existing IBM zeroed those entries for the same reason.
+        let chain_top = chain_joint_world(
+            head_world,
+            spring_params.chain_axis,
+            spring_params.segment_length_m,
+            0,
+        );
         let chain_mesh = crate::chain_mesh::build_chain_cylinder(
             spring_params.joint_count,
             spring_params.segment_length_m,
             0.025,
-            [0.0, chain_top_y, 0.0],
-            [0.0, -1.0, 0.0],
+            chain_top,
+            spring_params.chain_axis,
             12,
         );
 
-        // Inverse-bind matrices for this chain's joints.
+        // Inverse-bind matrices: joint i bind-pose world = head + axis*(i+1)*seg.
+        // See note on chain_top above for why head_world is the root.
         let ibm: Vec<[f32; 16]> = (0..spring_params.joint_count)
             .map(|i| {
-                let jy = head_world_y - ((i + 1) as f32) * spring_params.segment_length_m;
-                #[rustfmt::skip]
-                let m = [
-                    1.0, 0.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0, 0.0,
-                    0.0, 0.0, 1.0, 0.0,
-                    0.0, -jy, 0.0, 1.0,
-                ];
-                m
+                let p = chain_joint_world(
+                    head_world,
+                    spring_params.chain_axis,
+                    spring_params.segment_length_m,
+                    i,
+                );
+                inv_translation_mat4(p)
             })
             .collect();
 
@@ -2241,7 +2256,6 @@ pub fn emit_vrm_with_spring_bone_multichain_v0(
     let mut skeleton = crate::humanoid::minimal_skeleton();
     let head_node = skeleton.bone_to_node["head"];
     let head_world = crate::humanoid::rest_pose_world_position("head");
-    let head_world_y = head_world[1];
 
     const CHAIN_RADIAL_M: f32 = 0.05;
 
@@ -2266,34 +2280,44 @@ pub fn emit_vrm_with_spring_bone_multichain_v0(
         hc.push(json!(inter_idx));
         head_ref["children"] = Value::Array(hc);
 
-        let chain_nodes = crate::humanoid::append_spring_chain(
+        let chain_nodes = crate::humanoid::append_spring_chain_axis(
             &mut skeleton,
             inter_idx,
             spring_params.joint_count,
             spring_params.segment_length_m,
+            spring_params.chain_axis,
         );
 
-        let chain_top_y = head_world_y - spring_params.segment_length_m;
+        // Chain cylinder: top_world is head_world + axis * segment_length.
+        // Uses head_world (not the intermediate node world) so the default -Y
+        // path produces byte-identical output: the head bone has x=z=0, and
+        // the existing IBM zeroed those entries for the same reason.
+        let chain_top = chain_joint_world(
+            head_world,
+            spring_params.chain_axis,
+            spring_params.segment_length_m,
+            0,
+        );
         let chain_mesh = crate::chain_mesh::build_chain_cylinder(
             spring_params.joint_count,
             spring_params.segment_length_m,
             0.025,
-            [0.0, chain_top_y, 0.0],
-            [0.0, -1.0, 0.0],
+            chain_top,
+            spring_params.chain_axis,
             12,
         );
 
+        // Inverse-bind matrices: joint i bind-pose world = head + axis*(i+1)*seg.
+        // See note on chain_top above for why head_world is the root.
         let ibm: Vec<[f32; 16]> = (0..spring_params.joint_count)
             .map(|i| {
-                let jy = head_world_y - ((i + 1) as f32) * spring_params.segment_length_m;
-                #[rustfmt::skip]
-                let m = [
-                    1.0, 0.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0, 0.0,
-                    0.0, 0.0, 1.0, 0.0,
-                    0.0, -jy, 0.0, 1.0,
-                ];
-                m
+                let p = chain_joint_world(
+                    head_world,
+                    spring_params.chain_axis,
+                    spring_params.segment_length_m,
+                    i,
+                );
+                inv_translation_mat4(p)
             })
             .collect();
 
@@ -3477,6 +3501,94 @@ mod byte_identity_guard {
             emit_default_and_hash(true),
             DEFAULT_V0_BLAKE3,
             "V0 default -Y output drifted"
+        );
+    }
+
+    // BLAKE3 of the DEFAULT collider + multichain GLBs (first variant of each
+    // sweep: collider = sphere, off_x=-0.05, r=0.03, SpringBoneParams::defaults;
+    // multichain = n2_sp0p02_share_all, SpringBoneParams::defaults per chain).
+    // Captured after Task 4b conversion proved byte-identity vs 4639d35.
+    // Do NOT update these hashes casually.
+    const DEFAULT_COLLIDER_V1_BLAKE3: &str =
+        "f85a7a55b80f170c7ad01d9832fa2f970ff4d9a5288b128320fcc4607b1ebdd1";
+    const DEFAULT_MULTICHAIN_V1_BLAKE3: &str =
+        "a413cffa2aa6d3b0ac24f4d7e26cb7e593b84bf4b0b793a1d53924bfda70f190";
+
+    fn emit_default_collider_v1_hash() -> String {
+        use crate::spring_bone::{
+            ColliderAttach, ColliderGroupParams, ColliderParams, ColliderShape,
+            SpringBoneSceneParams,
+        };
+        let dir = tempdir().unwrap();
+        let out = camino::Utf8PathBuf::from_path_buf(dir.path().join("d.vrm")).unwrap();
+        // First variant of spring_bone_collider_sweep(): sphere, off_x=-0.05, r=0.03.
+        let id = "springbone_collider_sphere_xneg0p05_r0p03";
+        let mtoon = crate::params::MToonParams::defaults(id);
+        let spring = crate::spring_bone::SpringBoneParams::defaults(id);
+        let scene = SpringBoneSceneParams {
+            springs: vec![spring],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Sphere { radius: 0.03 },
+                offset: [-0.05, -0.10, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "head_g".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        emit_vrm_with_spring_bone_colliders(&mtoon, &scene, &out).unwrap();
+        let bytes = std::fs::read(&out).unwrap();
+        blake3::hash(&bytes).to_hex().to_string()
+    }
+
+    fn emit_default_multichain_v1_hash() -> String {
+        use crate::spring_bone::{
+            ColliderAttach, ColliderGroupParams, ColliderParams, ColliderShape,
+            SpringBoneSceneParams,
+        };
+        let dir = tempdir().unwrap();
+        let out = camino::Utf8PathBuf::from_path_buf(dir.path().join("d.vrm")).unwrap();
+        // First variant of spring_bone_multichain_sweep(): n=2, sp=0.02, share_all.
+        let id = "springbone_multichain_n2_sp0p02_share_all";
+        let mtoon = crate::params::MToonParams::defaults(id);
+        let springs: Vec<_> = (0..2)
+            .map(|i| crate::spring_bone::SpringBoneParams::defaults(format!("{id}_chain_{i}")))
+            .collect();
+        let scene = SpringBoneSceneParams {
+            springs,
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Sphere { radius: 0.04 },
+                offset: [0.03, -0.10, 0.0],
+                attach: ColliderAttach::Head,
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "shared".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0], vec![0]],
+        };
+        emit_vrm_with_spring_bone_multichain(&mtoon, &scene, &out).unwrap();
+        let bytes = std::fs::read(&out).unwrap();
+        blake3::hash(&bytes).to_hex().to_string()
+    }
+
+    #[test]
+    fn default_collider_v1_asset_is_byte_identical() {
+        assert_eq!(
+            emit_default_collider_v1_hash(),
+            DEFAULT_COLLIDER_V1_BLAKE3,
+            "collider V1 default -Y output drifted"
+        );
+    }
+
+    #[test]
+    fn default_multichain_v1_asset_is_byte_identical() {
+        assert_eq!(
+            emit_default_multichain_v1_hash(),
+            DEFAULT_MULTICHAIN_V1_BLAKE3,
+            "multichain V1 default -Y output drifted"
         );
     }
 }
