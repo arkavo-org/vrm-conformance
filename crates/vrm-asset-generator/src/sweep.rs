@@ -1115,16 +1115,33 @@ fn build_multichain_scene(id: &str, chain_count: u32, sharing_mode: &str) -> Spr
 ///
 /// Contains enough information for Task 7's sidecar to emit a matching
 /// `ccd_colliders` entry on the test plan, and for Task 8's mock E2E to
-/// validate placement. The center is the absolute world position of the
-/// collider node (`ColliderAttach::WorldCoordinates { center }`).
+/// validate placement.
+///
+/// For spheres, `center` is the world position of the sphere center and
+/// `capsule_head`/`capsule_tail` are `None`.
+///
+/// For capsules, `center` is the node world position (the
+/// `ColliderAttach::WorldCoordinates` value), `capsule_head` is the world
+/// position of the capsule's head endpoint (`node + offset`), and
+/// `capsule_tail` is the world position of the tail endpoint
+/// (`node + tail_offset`). These match the values a renderer computes from
+/// the `.vrm`'s `VRMC_springBone` collider entry:
+/// `transformedOffset = offset * nodeWorldMatrix` and
+/// `transformedTail = tail * nodeWorldMatrix` (VRM spec pseudocode).
 #[derive(Debug, Clone)]
 pub struct CcdColliderWorldSpec {
     /// `"sphere"` or `"capsule"`.
     pub kind: &'static str,
-    /// World center of the sphere, or the capsule's axis midpoint (A = center
-    /// offset −0.05 along Y, B = center offset +0.05 along Y).
+    /// World center: sphere center for spheres; the collider node's world
+    /// translation for capsules.
     pub center: [f32; 3],
     pub radius: f32,
+    /// Capsule head endpoint in world space (`node_translation + offset`).
+    /// `None` for spheres.
+    pub capsule_head: Option<[f32; 3]>,
+    /// Capsule tail endpoint in world space (`node_translation + tail_offset`).
+    /// `None` for spheres.
+    pub capsule_tail: Option<[f32; 3]>,
 }
 
 /// Return the world-space collider geometry for a CCD sweep cell. Task 7 calls
@@ -1134,6 +1151,14 @@ pub struct CcdColliderWorldSpec {
 /// The center is the same value used for `ColliderAttach::WorldCoordinates` —
 /// it is a pure function of the scene params (no mutable state), so both the
 /// asset generator and the sidecar generator agree without a separate lookup.
+///
+/// For capsules, `capsule_head` and `capsule_tail` are the true world
+/// endpoints derived from the VRM file's node position and shape offsets:
+/// - head = node_translation + collider.offset
+/// - tail = node_translation + tail_offset   (both in node-local → world space)
+///
+/// With `offset = [0,0,0]` (always in CCD sweep), head = node_translation
+/// and tail = node_translation + tail_offset.
 pub fn ccd_collider_world_spec(scene: &SpringBoneSceneParams) -> CcdColliderWorldSpec {
     assert_eq!(
         scene.colliders.len(),
@@ -1150,12 +1175,33 @@ pub fn ccd_collider_world_spec(scene: &SpringBoneSceneParams) -> CcdColliderWorl
             kind: "sphere",
             center,
             radius: *radius,
+            capsule_head: None,
+            capsule_tail: None,
         },
-        ColliderShape::Capsule { radius, .. } => CcdColliderWorldSpec {
-            kind: "capsule",
-            center,
-            radius: *radius,
-        },
+        ColliderShape::Capsule {
+            radius,
+            tail_offset,
+        } => {
+            // head = node_translation + offset (offset is [0,0,0] in CCD sweep)
+            let head = [
+                center[0] + c.offset[0],
+                center[1] + c.offset[1],
+                center[2] + c.offset[2],
+            ];
+            // tail = node_translation + tail_offset
+            let tail = [
+                center[0] + tail_offset[0],
+                center[1] + tail_offset[1],
+                center[2] + tail_offset[2],
+            ];
+            CcdColliderWorldSpec {
+                kind: "capsule",
+                center,
+                radius: *radius,
+                capsule_head: Some(head),
+                capsule_tail: Some(tail),
+            }
+        }
         _ => panic!("ccd sweep collider must be sphere or capsule"),
     }
 }
@@ -1181,10 +1227,12 @@ pub fn ccd_collider_world_spec(scene: &SpringBoneSceneParams) -> CcdColliderWorl
 /// the asset ID and set matching root velocity. There is no speed field in
 /// `SpringBoneSceneParams` (avoids schema churn); Task 7 parses the suffix.
 ///
-/// - `fast`: large step per frame (~0.15 m), above the CCD tunneling threshold
-///   for small radii — a non-CCD integrator will tunnel through thin colliders.
-/// - `slow`: small step per frame (~0.02 m), well below the threshold — all
-///   compliant integrators should detect the collision regardless of CCD.
+/// - `fast`: large step per frame (~0.083 m = 1.0 m / 12 frames), above the
+///   CCD tunneling threshold for small radii — a non-CCD integrator will
+///   tunnel through thin colliders.
+/// - `slow`: small step per frame (~0.0083 m = 1.0 m / 120 frames), well
+///   below the threshold — all compliant integrators should detect the
+///   collision regardless of CCD.
 ///
 /// ## Threshold straddle
 ///
@@ -2535,5 +2583,100 @@ mod ccd_sweep_tests {
                 mtoon.id
             );
         }
+    }
+
+    /// Fix 1: capsule CCD cells must report head/tail endpoints that match the
+    /// VRM file's actual world geometry.
+    ///
+    /// VRM capsule geometry (node_translation = [0.10, 1.26, 0.0], offset = [0,0,0],
+    /// tail_offset = [0.0, -0.10, 0.0]):
+    ///   head = node_translation + offset = [0.10, 1.26, 0.0]
+    ///   tail = node_translation + tail_offset = [0.10, 1.16, 0.0]
+    #[test]
+    fn ccd_collider_world_spec_capsule_head_tail_match_vrm_endpoints() {
+        let v = spring_bone_ccd_sweep();
+        // Use the first capsule cell (any radius, any speed).
+        let (mtoon, scene) = v
+            .iter()
+            .find(|(m, _)| m.id.contains("capsule"))
+            .expect("at least one capsule cell");
+
+        // Verify the scene has the expected geometry.
+        let c = &scene.colliders[0];
+        let center = match &c.attach {
+            ColliderAttach::WorldCoordinates { center } => *center,
+            _ => panic!("expected WorldCoordinates"),
+        };
+        let tail_offset = match &c.shape {
+            ColliderShape::Capsule { tail_offset, .. } => *tail_offset,
+            _ => panic!("expected Capsule"),
+        };
+
+        // Expected world endpoints from the VRM spec convention:
+        //   head = node_translation + offset (offset=[0,0,0])
+        //   tail = node_translation + tail_offset
+        let expected_head = [
+            center[0] + c.offset[0],
+            center[1] + c.offset[1],
+            center[2] + c.offset[2],
+        ];
+        let expected_tail = [
+            center[0] + tail_offset[0],
+            center[1] + tail_offset[1],
+            center[2] + tail_offset[2],
+        ];
+
+        // Pinned values for the CCD sweep geometry:
+        //   node_center = [0.10, 1.26, 0.0], offset=[0,0,0], tail=[0,-0.10,0]
+        //   → head = [0.10, 1.26, 0.0],  tail = [0.10, 1.16, 0.0]
+        assert!(
+            (expected_head[0] - 0.10_f32).abs() < 1e-5,
+            "{}: head.x should be 0.10, got {}",
+            mtoon.id,
+            expected_head[0]
+        );
+        assert!(
+            (expected_head[1] - 1.26_f32).abs() < 1e-5,
+            "{}: head.y should be 1.26, got {}",
+            mtoon.id,
+            expected_head[1]
+        );
+        assert!(
+            (expected_tail[1] - 1.16_f32).abs() < 1e-5,
+            "{}: tail.y should be 1.16, got {}",
+            mtoon.id,
+            expected_tail[1]
+        );
+
+        let spec = ccd_collider_world_spec(scene);
+        assert_eq!(spec.kind, "capsule");
+
+        let head = spec
+            .capsule_head
+            .expect("capsule spec must have capsule_head");
+        let tail = spec
+            .capsule_tail
+            .expect("capsule spec must have capsule_tail");
+
+        // spec.capsule_head must equal expected_head (VRM file's head endpoint)
+        assert!(
+            (head[0] - expected_head[0]).abs() < 1e-5
+                && (head[1] - expected_head[1]).abs() < 1e-5
+                && (head[2] - expected_head[2]).abs() < 1e-5,
+            "{}: capsule_head {:?} must match VRM head endpoint {:?}",
+            mtoon.id,
+            head,
+            expected_head,
+        );
+        // spec.capsule_tail must equal expected_tail (VRM file's tail endpoint)
+        assert!(
+            (tail[0] - expected_tail[0]).abs() < 1e-5
+                && (tail[1] - expected_tail[1]).abs() < 1e-5
+                && (tail[2] - expected_tail[2]).abs() < 1e-5,
+            "{}: capsule_tail {:?} must match VRM tail endpoint {:?}",
+            mtoon.id,
+            tail,
+            expected_tail,
+        );
     }
 }

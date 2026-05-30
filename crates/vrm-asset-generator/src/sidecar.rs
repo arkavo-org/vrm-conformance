@@ -624,10 +624,10 @@ mod tag_plan_vrm0_tests {
 ///
 /// With `physics_dt = 1/60 s` (the methodology floor):
 ///
-/// | Speed | translation_end | frame_count | frame_hz | total_duration | Δx_per_substep |
-/// |-------|----------------|-------------|----------|----------------|----------------|
-/// | fast  | [1.0, 0, 0]    |  12         |  60.0    |  0.20 s        |  ≈ 0.083 m     |
-/// | slow  | [1.0, 0, 0]    | 120         |  60.0    |  2.0  s        |  ≈ 0.0083 m    |
+/// | Speed | translation_start | translation_end | total_dx | frame_count | frame_hz | total_duration | Δx_per_substep |
+/// |-------|-------------------|-----------------|----------|-------------|----------|----------------|----------------|
+/// | fast  | [-0.50, 0, 0]     | [0.50, 0, 0]    | 1.0 m    |  12         |  60.0    |  0.20 s        |  ≈ 0.083 m     |
+/// | slow  | [-0.50, 0, 0]     | [0.50, 0, 0]    | 1.0 m    | 120         |  60.0    |  2.0  s        |  ≈ 0.0083 m    |
 ///
 /// Fast: Δx ≈ 1.0 / (12 × 1) = 0.083 m per frame × 1 substep = 0.083 m.
 /// This is > 2 × 0.02 m (marginal radius) and >> 2 × 0.005 m (small radius),
@@ -643,9 +643,10 @@ mod tag_plan_vrm0_tests {
 /// `CcdColliderWorldSpec.kind` → `ColliderWorldSpec` variant:
 /// - `"sphere"` → `ColliderWorldSpec::Sphere { center, radius }` directly.
 /// - `"capsule"` → `ColliderWorldSpec::Capsule { a, b, radius }` where
-///   the capsule axis endpoints are derived from the center: A = center + [0, -0.05, 0],
-///   B = center + [0, +0.05, 0]. This matches the tail_offset=[0,-0.10,0] used in the
-///   sweep (half-length = 0.05 m each side) and `ccd_collider_world_spec`'s doc comment.
+///   `a = capsule_head` (VRM head endpoint = node_translation + offset) and
+///   `b = capsule_tail` (VRM tail endpoint = node_translation + tail_offset).
+///   For the CCD sweep with node_center=[0.10,1.26,0.0], offset=[0,0,0],
+///   tail_offset=[0.0,-0.10,0.0]:  a=[0.10,1.26,0.0],  b=[0.10,1.16,0.0].
 pub fn build_spring_bone_ccd_test_plan(
     params: &MToonParams,
     asset_relpath: &str,
@@ -678,13 +679,20 @@ pub fn build_spring_bone_ccd_test_plan(
             radius: world_spec.radius,
         },
         "capsule" => {
-            // Capsule endpoints: A below center, B above center.
-            // Half-length 0.05 m matches the tail_offset=[0,-0.10,0] stored in the sweep
-            // (tail_offset length = 0.10 m → distance from center to each endpoint = 0.05 m).
-            let [cx, cy, cz] = world_spec.center;
+            // Use the true VRM world endpoints from ccd_collider_world_spec:
+            //   a = capsule_head = node_translation + offset  (head semicircle)
+            //   b = capsule_tail = node_translation + tail_offset  (tail semicircle)
+            // These are the values the renderer will compute from the .vrm file
+            // per the VRM spec capsule pseudocode (transformedOffset / transformedTail).
+            let a = world_spec
+                .capsule_head
+                .expect("capsule kind must have capsule_head");
+            let b = world_spec
+                .capsule_tail
+                .expect("capsule kind must have capsule_tail");
             vrm_test_plan::ColliderWorldSpec::Capsule {
-                a: [cx, cy - 0.05, cz],
-                b: [cx, cy + 0.05, cz],
+                a,
+                b,
                 radius: world_spec.radius,
             }
         }
@@ -865,9 +873,32 @@ mod ccd_plan_tests {
         let colliders = plan.ccd_colliders.expect("ccd_colliders");
         match &colliders[0] {
             vrm_test_plan::ColliderWorldSpec::Capsule { a, b, radius } => {
-                // center is [0.10, 1.26, 0.0]; a is below center by 0.05 m
-                assert!((a[1] - 1.21_f32).abs() < 1e-5, "a.y pinned, got {}", a[1]);
-                assert!((b[1] - 1.31_f32).abs() < 1e-5, "b.y pinned, got {}", b[1]);
+                // VRM capsule geometry: node_center=[0.10,1.26,0.0], offset=[0,0,0],
+                // tail_offset=[0.0,-0.10,0.0].
+                //   a = head = node_center + offset = [0.10, 1.26, 0.0]
+                //   b = tail = node_center + tail_offset = [0.10, 1.16, 0.0]
+                assert!(
+                    (a[0] - 0.10_f32).abs() < 1e-5,
+                    "a.x pinned to 0.10, got {}",
+                    a[0]
+                );
+                assert!(
+                    (a[1] - 1.26_f32).abs() < 1e-5,
+                    "a.y pinned to 1.26 (head = node_translation), got {}",
+                    a[1]
+                );
+                assert!((a[2]).abs() < 1e-5, "a.z pinned to 0.0, got {}", a[2]);
+                assert!(
+                    (b[0] - 0.10_f32).abs() < 1e-5,
+                    "b.x pinned to 0.10, got {}",
+                    b[0]
+                );
+                assert!(
+                    (b[1] - 1.16_f32).abs() < 1e-5,
+                    "b.y pinned to 1.16 (tail = node_translation + tail_offset), got {}",
+                    b[1]
+                );
+                assert!((b[2]).abs() < 1e-5, "b.z pinned to 0.0, got {}", b[2]);
                 assert_eq!(a[0], b[0], "a.x == b.x (same lateral position)");
                 assert!(*radius > 0.0);
             }

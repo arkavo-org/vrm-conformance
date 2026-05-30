@@ -262,8 +262,16 @@ fn run_penetration_diff_fails_when_penetrating_sphere() {
         "expected ~0.030 m, got {}",
         report.max_penetration_depth_m
     );
-    // Worst frame should be frame index 1 (0-indexed ordering after sort).
-    assert_eq!(report.worst_frame, 1, "worst frame should be index 1");
+    // Penetration is in the entry with frame_index=1 (both slice index and
+    // real frame_index agree for contiguous [0, 1] data).
+    assert_eq!(
+        report.worst_frame_index, 1,
+        "worst_frame_index should be the real frame_index=1"
+    );
+    assert_eq!(
+        report.worst_frame_slice, 1,
+        "worst_frame_slice should be slice position 1"
+    );
 }
 
 #[test]
@@ -352,7 +360,7 @@ diff:
 #[test]
 fn run_penetration_diff_sorts_by_frame_index() {
     // Positions JSON with frames in reversed order — result must sort and report
-    // the correct worst_frame index (0-based into the sorted array).
+    // the correct worst_frame_index (the real frame_index from the JSON).
     let reversed_positions = r#"
 [
   {
@@ -372,7 +380,7 @@ fn run_penetration_diff_sorts_by_frame_index() {
 ]
 "#;
     // sphere at origin r=0.05; joint at [0.02, 0, 0] penetrates 0.03 m → in frame_index 0
-    // After sorting, frame_index 0 lands at position 0 in the vec.
+    // After sorting, frame_index 0 lands at slice position 0.
     let plan_yaml = plan_yaml_with_sphere([0.0, 0.0, 0.0], 0.05);
     let plan_file = write_tempfile(&plan_yaml);
     let pos_file = write_tempfile(reversed_positions);
@@ -385,9 +393,76 @@ fn run_penetration_diff_sorts_by_frame_index() {
     .unwrap();
 
     assert!(!report.passed);
-    // worst_frame should be 0 (the sorted position of frame_index=0).
+    // worst_frame_index must be the real frame_index=0 (not the slice index).
     assert_eq!(
-        report.worst_frame, 0,
-        "after sort, frame_index=0 is at slot 0"
+        report.worst_frame_index, 0,
+        "worst_frame_index must be the real frame_index=0"
+    );
+    assert_eq!(
+        report.worst_frame_slice, 0,
+        "slice index 0 after sort (frame_index=0 was first)"
+    );
+}
+
+#[test]
+fn run_penetration_diff_reports_real_frame_index_for_non_contiguous_frames() {
+    // Fix 2: when an adapter captures only a subset of frames (e.g. 0, 5, 10),
+    // worst_frame_index must be the real frame_index from the JSON, NOT the
+    // 0-based slice index.
+    //
+    // Here: penetration is in frame_index=10 (slice index 2 after sort).
+    // worst_frame_index must report 10, not 2.
+    let sparse_positions = r#"
+[
+  {
+    "frame_index": 0,
+    "timestamp_seconds": 0.0,
+    "springs": [
+      { "name": "chain0", "joint_positions": [[0.10, 0.0, 0.0]] }
+    ]
+  },
+  {
+    "frame_index": 5,
+    "timestamp_seconds": 0.0833,
+    "springs": [
+      { "name": "chain0", "joint_positions": [[0.10, 0.0, 0.0]] }
+    ]
+  },
+  {
+    "frame_index": 10,
+    "timestamp_seconds": 0.1666,
+    "springs": [
+      { "name": "chain0", "joint_positions": [[0.02, 0.0, 0.0]] }
+    ]
+  }
+]
+"#;
+    // sphere at origin r=0.05; joint penetrates at frame_index=10 (slice index 2)
+    let plan_yaml = plan_yaml_with_sphere([0.0, 0.0, 0.0], 0.05);
+    let plan_file = write_tempfile(&plan_yaml);
+    let pos_file = write_tempfile(sparse_positions);
+
+    let report = run_penetration_diff(
+        pos_file.path().try_into().unwrap(),
+        plan_file.path().try_into().unwrap(),
+        0.002,
+    )
+    .unwrap();
+
+    assert!(!report.passed, "penetration must be detected");
+    assert!(
+        (report.max_penetration_depth_m - 0.03).abs() < 1e-4,
+        "depth ~0.03 m, got {}",
+        report.max_penetration_depth_m
+    );
+    // worst_frame_slice is the engine's 0-based index = 2 (third entry after sort)
+    assert_eq!(
+        report.worst_frame_slice, 2,
+        "engine slice index must be 2 (third entry after sort)"
+    );
+    // worst_frame_index must be the real frame_index=10 from the JSON
+    assert_eq!(
+        report.worst_frame_index, 10,
+        "worst_frame_index must report the real frame_index=10, not the slice index 2"
     );
 }

@@ -1333,11 +1333,30 @@ pub fn emit_with_sidecars_spring_bone_v0_swing(
 /// - `ColliderAttach::Head` → `head_node`.
 /// - `ColliderAttach::NewIntermediateNode{y_offset, z_offset}` → a new glTF
 ///   node inserted as a child of head at `[0, y_offset, z_offset]`.
+///
+/// # Errors
+///
+/// Returns an error if any collider uses `ColliderAttach::WorldCoordinates`.
+/// VRM 0.x `secondaryAnimation` has no world-fixed collider concept; emitting
+/// such a scene would produce a spec-invalid 0.x file.
 pub fn emit_vrm_with_spring_bone_colliders_v0(
     mtoon: &MToonParams,
     scene: &SpringBoneSceneParams,
     output: &Utf8Path,
 ) -> Result<()> {
+    // Guard: WorldCoordinates is a VRM 1.0-only concept; 0.x secondaryAnimation
+    // has no world-fixed collider form and emitting one would produce an invalid file.
+    for collider in &scene.colliders {
+        if matches!(collider.attach, ColliderAttach::WorldCoordinates { .. }) {
+            anyhow::bail!(
+                "cannot emit VRM 0.x with WorldCoordinates collider: \
+                VRM 0.x secondaryAnimation has no world-fixed collider concept. \
+                Use ColliderAttach::Head or ColliderAttach::NewIntermediateNode, \
+                or use the VRM 1.0 emitter instead."
+            );
+        }
+    }
+
     let spring = &scene.springs[0];
     let mesh = sphere(0.3, 24, 48);
 
@@ -3449,6 +3468,43 @@ mod multichain_v0_emit_tests {
         // Sphere + N chain meshes.
         let meshes = doc["meshes"].as_array().expect("meshes array");
         assert_eq!(meshes.len(), 3, "sphere + 2 chain meshes");
+    }
+
+    /// Fix 4: v0 collider emitter must reject WorldCoordinates.
+    ///
+    /// VRM 0.x secondaryAnimation has no world-fixed collider concept.
+    /// Passing a WorldCoordinates collider must return an error instead of
+    /// silently producing a spec-invalid 0.x file.
+    #[test]
+    fn v0_collider_emit_errors_on_world_coordinates_collider() {
+        let mtoon = MToonParams::defaults("v0_world_guard_test");
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults("chain")],
+            colliders: vec![ColliderParams {
+                shape: ColliderShape::Sphere { radius: 0.05 },
+                offset: [0.0, 0.0, 0.0],
+                attach: ColliderAttach::WorldCoordinates {
+                    center: [0.10, 1.26, 0.0],
+                },
+            }],
+            collider_groups: vec![ColliderGroupParams {
+                name: "g".into(),
+                collider_indices: vec![0],
+            }],
+            spring_collider_groups: vec![vec![0]],
+        };
+        let tmp = tempdir().unwrap();
+        let vrm_path = Utf8Path::from_path(tmp.path()).unwrap().join("out.vrm");
+        let result = emit_vrm_with_spring_bone_colliders_v0(&mtoon, &scene, &vrm_path);
+        assert!(
+            result.is_err(),
+            "v0 emitter must reject WorldCoordinates collider"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("WorldCoordinates") || msg.contains("world-fixed"),
+            "error message must mention WorldCoordinates or world-fixed; got: {msg}"
+        );
     }
 }
 

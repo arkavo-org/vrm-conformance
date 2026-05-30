@@ -829,7 +829,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     "penetration-diff: max_depth={:.4}m epsilon={:.4}m worst_frame={} worst_spring={} worst_joint={} ({})",
                     report.max_penetration_depth_m,
                     report.epsilon_m,
-                    report.worst_frame,
+                    report.worst_frame_index,
                     report.worst_spring,
                     report.worst_joint,
                     if passed { "PASS" } else { "FAIL" },

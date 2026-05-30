@@ -341,6 +341,15 @@ pub enum TestPlanError {
         `animation.vrma` for single-frame tests."
     )]
     BothAnimationAndRenderSequence,
+
+    #[error(
+        "test plan has `ccd_colliders` but `render_sequence` is absent or \
+        `capture_positions` is false — the penetration-diff metric requires \
+        `render_sequence` with `capture_positions: true` so the runner can \
+        record per-frame joint positions. Either remove `ccd_colliders` or add \
+        a `render_sequence` block with `capture_positions: true`."
+    )]
+    CcdCollidersRequireCapture,
 }
 
 impl TestPlan {
@@ -349,9 +358,23 @@ impl TestPlan {
     /// Currently checks:
     ///   - `animation` and `render_sequence` are mutually exclusive
     ///     (RFC-0004: a plan is single-frame OR sequence, not both).
+    ///   - `ccd_colliders` requires `render_sequence` with `capture_positions: true`
+    ///     (the penetration-diff metric needs per-frame joint positions).
     pub fn validate(&self) -> Result<(), TestPlanError> {
         if self.animation.is_some() && self.render_sequence.is_some() {
             return Err(TestPlanError::BothAnimationAndRenderSequence);
+        }
+        if let Some(colliders) = &self.ccd_colliders {
+            if !colliders.is_empty() {
+                let capture_ok = self
+                    .render_sequence
+                    .as_ref()
+                    .map(|rs| rs.capture_positions)
+                    .unwrap_or(false);
+                if !capture_ok {
+                    return Err(TestPlanError::CcdCollidersRequireCapture);
+                }
+            }
         }
         Ok(())
     }
@@ -995,5 +1018,59 @@ mod ccd_colliders_tests {
             radius: 0.05,
         }]);
         assert!(plan.validate().is_ok());
+    }
+
+    /// Fix 3: ccd_colliders without render_sequence must fail validate.
+    #[test]
+    fn validate_rejects_ccd_colliders_without_render_sequence() {
+        let mut plan = make_minimal_plan();
+        // No render_sequence — ccd_colliders alone is invalid.
+        plan.render_sequence = None;
+        plan.ccd_colliders = Some(vec![ColliderWorldSpec::Sphere {
+            center: [0.0, 1.0, 0.0],
+            radius: 0.05,
+        }]);
+        assert_eq!(
+            plan.validate(),
+            Err(TestPlanError::CcdCollidersRequireCapture),
+            "ccd_colliders without render_sequence must fail with CcdCollidersRequireCapture"
+        );
+    }
+
+    /// Fix 3: ccd_colliders with render_sequence but capture_positions=false must fail.
+    #[test]
+    fn validate_rejects_ccd_colliders_when_capture_positions_false() {
+        let mut plan = make_minimal_plan();
+        plan.render_sequence = Some(RenderSequenceBlock {
+            frame_count: 30,
+            frame_hz: 30.0,
+            physics_dt_seconds: 0.01666,
+            output_format: SequenceFormat::PngSequence,
+            animate_root_transform: None,
+            apply_vrma: None,
+            temporal_ssim_threshold: None,
+            capture_positions: false, // <-- must be true for CCD
+        });
+        plan.ccd_colliders = Some(vec![ColliderWorldSpec::Sphere {
+            center: [0.0, 1.0, 0.0],
+            radius: 0.05,
+        }]);
+        assert_eq!(
+            plan.validate(),
+            Err(TestPlanError::CcdCollidersRequireCapture),
+            "ccd_colliders with capture_positions=false must fail with CcdCollidersRequireCapture"
+        );
+    }
+
+    /// Fix 3: empty ccd_colliders does not trigger the guard (Some([]) is allowed).
+    #[test]
+    fn validate_accepts_empty_ccd_colliders_without_render_sequence() {
+        let mut plan = make_minimal_plan();
+        plan.render_sequence = None;
+        plan.ccd_colliders = Some(vec![]); // empty list — no colliders to check
+        assert!(
+            plan.validate().is_ok(),
+            "empty ccd_colliders must not require render_sequence"
+        );
     }
 }
