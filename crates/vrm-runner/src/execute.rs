@@ -116,6 +116,35 @@ pub struct ExecuteOptions {
     pub reference_pose_json: Option<Utf8PathBuf>,
 }
 
+/// One entry in the per-plan positions JSON file written when
+/// `render_sequence.capture_positions` is true.
+///
+/// Schema (`<output_dir>/<plan_id>_<renderer>_positions.json`):
+/// ```json
+/// [
+///   {
+///     "frame_index": 0,
+///     "timestamp_seconds": 0.0,
+///     "springs": [
+///       { "name": "mock_hair", "joint_positions": [[x,y,z], ...] }
+///     ]
+///   },
+///   ...
+/// ]
+/// ```
+/// One entry per frame that carried `spring_positions` data.  The file is
+/// written only when at least one such frame exists; no empty file is produced
+/// when `capture_positions` is false or the adapter returned no positions.
+///
+/// Task 5's `penetration-diff` reads this file by path pattern
+/// `<plan_id>_<renderer>_positions.json` — keep the naming exactly.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FramePositionsEntry {
+    pub frame_index: u32,
+    pub timestamp_seconds: f32,
+    pub springs: Vec<ops::SpringPositions>,
+}
+
 /// Outcome of a `render_sequence` dispatch. All four adapters currently return
 /// `-32000 Unimplemented` for this op (Phase 1 surface); the struct captures
 /// that outcome structurally so callers can distinguish "adapter not yet
@@ -388,6 +417,9 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
             },
         };
 
+        // Persist per-frame spring positions when any frame carried them.
+        persist_positions_json(&seq_result, &opts.output_dir, &plan.id, &opts.renderer_name)?;
+
         // No single PNG in sequence mode — use a sentinel path.
         // (A follow-up will refactor ExecuteResult to handle this cleanly.)
         let placeholder_png = seq_output_dir.join("0000.png");
@@ -613,8 +645,27 @@ pub fn execute_plan_capturing_positions(
         );
         // Ignore Unimplemented (-32000); propagate other errors.
         let result: Result<ops::RenderSequenceResult, _> = adapter.call("render_sequence", params);
-        if let Err(crate::adapter::AdapterError::Rpc(ref rpc_err)) = result {
-            if rpc_err.code != -32000 {
+        match &result {
+            Ok(r) => {
+                // Build a lightweight SequenceExecuteResult so we can reuse
+                // persist_positions_json (which only needs the frames).
+                let seq_result = SequenceExecuteResult {
+                    status: SequenceStatus::Ok,
+                    result: Some(r.clone()),
+                    unimplemented_phase: None,
+                    error_message: None,
+                };
+                persist_positions_json(
+                    &seq_result,
+                    &opts.output_dir,
+                    &plan.id,
+                    &opts.renderer_name,
+                )?;
+            }
+            Err(crate::adapter::AdapterError::Rpc(ref rpc_err)) if rpc_err.code == -32000 => {
+                // Unimplemented — silently skip positions persistence.
+            }
+            Err(_) => {
                 return Err(anyhow::anyhow!("adapter error: {}", result.unwrap_err()));
             }
         }
@@ -674,6 +725,51 @@ fn rehash_frames(result: &mut ops::RenderSequenceResult) -> Result<(), String> {
         let hash = blake3::hash(&bytes);
         frame.blake3 = format!("blake3:{}", hash.to_hex());
     }
+    Ok(())
+}
+
+/// Collect per-frame spring positions from a completed sequence result and
+/// write them to `<output_dir>/<plan_id>_<renderer>_positions.json`.
+///
+/// Only writes when at least one frame has `spring_positions` data.
+/// No file is created when `capture_positions` was false or the adapter
+/// returned no positions — callers should not rely on file absence vs empty.
+///
+/// The file contains a JSON array of [`FramePositionsEntry`] values, one
+/// per frame that carried position data (frames with `spring_positions: None`
+/// are silently skipped so the file stays compact when adapters partially
+/// support the feature).
+fn persist_positions_json(
+    seq_result: &SequenceExecuteResult,
+    output_dir: &Utf8Path,
+    plan_id: &str,
+    renderer_name: &str,
+) -> Result<()> {
+    let frames = match seq_result.result.as_ref() {
+        Some(r) => &r.frames,
+        None => return Ok(()),
+    };
+
+    let entries: Vec<FramePositionsEntry> = frames
+        .iter()
+        .filter_map(|f| {
+            f.spring_positions.as_ref().map(|sp| FramePositionsEntry {
+                frame_index: f.index,
+                timestamp_seconds: f.timestamp_seconds,
+                springs: sp.clone(),
+            })
+        })
+        .collect();
+
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    let path = output_dir.join(format!("{plan_id}_{renderer_name}_positions.json"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&entries)?)?;
     Ok(())
 }
 

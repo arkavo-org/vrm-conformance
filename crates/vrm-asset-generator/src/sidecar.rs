@@ -232,6 +232,7 @@ pub fn build_spring_bone_swing_sequence_test_plan(
         }),
         apply_vrma: None,
         temporal_ssim_threshold: None,
+        capture_positions: false,
     });
     plan.spec_section = "VRMC_materials_mtoon + VRMC_springBone (sequence)".into();
     plan

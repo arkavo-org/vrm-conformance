@@ -67,6 +67,7 @@ fn godot_vrm_render_sequence_with_animate_root_transform_produces_frames() {
         }),
         apply_vrma: None,
         temporal_ssim_threshold: None,
+        capture_positions: false,
     });
     plan.animation = None;
 

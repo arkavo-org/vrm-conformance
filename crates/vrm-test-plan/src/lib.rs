@@ -151,6 +151,13 @@ pub struct RenderSequenceBlock {
     /// Optional override of the RFC-0004 default temporal_ssim_threshold (0.90).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temporal_ssim_threshold: Option<f64>,
+    /// When true, the runner sets `capture_positions = true` in
+    /// `RenderSequenceParams` and, after the sequence completes, persists
+    /// the per-frame spring-bone joint positions to
+    /// `<output_dir>/<plan_id>_<renderer>_positions.json`.
+    /// Default false so existing sequence plans parse unchanged.
+    #[serde(default)]
+    pub capture_positions: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -675,6 +682,39 @@ render_sequence:
         assert!(seq.animate_root_transform.is_some());
     }
 
+    #[test]
+    fn render_sequence_block_capture_positions_defaults_false() {
+        // Legacy plans without capture_positions must parse with default=false.
+        let raw = r#"
+frame_count: 10
+frame_hz: 30.0
+physics_dt_seconds: 0.01666
+output_format: png_sequence
+"#;
+        let b: RenderSequenceBlock = serde_yml::from_str(raw).unwrap();
+        assert!(
+            !b.capture_positions,
+            "capture_positions must default to false"
+        );
+    }
+
+    #[test]
+    fn render_sequence_block_capture_positions_explicit_true_roundtrips() {
+        let raw = r#"
+frame_count: 5
+frame_hz: 30.0
+physics_dt_seconds: 0.01666
+output_format: png_sequence
+capture_positions: true
+"#;
+        let b: RenderSequenceBlock = serde_yml::from_str(raw).unwrap();
+        assert!(b.capture_positions);
+        // Serialise back to YAML and re-parse; must survive the round-trip.
+        let yaml = serde_yml::to_string(&b).unwrap();
+        let back: RenderSequenceBlock = serde_yml::from_str(&yaml).unwrap();
+        assert!(back.capture_positions);
+    }
+
     fn make_minimal_plan() -> TestPlan {
         TestPlan {
             id: "x".into(),
@@ -752,6 +792,7 @@ render_sequence:
             animate_root_transform: None,
             apply_vrma: None,
             temporal_ssim_threshold: None,
+            capture_positions: false,
         });
         assert!(plan.validate().is_ok());
     }
@@ -771,6 +812,7 @@ render_sequence:
             animate_root_transform: None,
             apply_vrma: None,
             temporal_ssim_threshold: None,
+            capture_positions: false,
         });
         assert_eq!(
             plan.validate(),

@@ -114,7 +114,7 @@ pub fn render_sequence_params(
             vrma_handle: v.vrma_handle,
             start_seconds: v.start_seconds,
         }),
-        capture_positions: false,
+        capture_positions: block.capture_positions,
     }
 }
 
