@@ -198,6 +198,32 @@ pub enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Check spring-bone non-penetration against world-fixed colliders.
+    ///
+    /// Loads a per-frame positions JSON (produced by the runner when
+    /// `capture_positions = true` in the plan's `render_sequence` block) and
+    /// a test plan carrying a `ccd_colliders` list, then reports the deepest
+    /// penetration depth across all frames, springs, and joints.
+    ///
+    /// Exits non-zero when the report's `passed` field is false (i.e., the
+    /// maximum penetration depth exceeds `--epsilon`).
+    PenetrationDiff {
+        /// Path to the `*_positions.json` file written by the runner.
+        #[arg(long)]
+        positions: Utf8PathBuf,
+        /// Path to the test plan (`.test.yaml`) carrying `ccd_colliders`.
+        #[arg(long)]
+        plan: Utf8PathBuf,
+        /// Penetration tolerance in metres. A joint whose signed distance to
+        /// the nearest collider surface is more negative than this threshold
+        /// is considered a violation. Default 2 mm (spec floor).
+        #[arg(long, default_value_t = 0.002)]
+        epsilon: f32,
+        /// Emit a JSON object to stdout (mirrors the `PenetrationReport`
+        /// shape from `vrm_diff_engine::penetration`).
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the operation catalog.
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -783,6 +809,35 @@ pub fn run(cli: Cli) -> Result<()> {
                 if !outliers.is_empty() {
                     println!("  coupling outliers: {outliers:?}");
                 }
+            }
+            Ok(())
+        }
+        Cmd::PenetrationDiff {
+            positions,
+            plan,
+            epsilon,
+            json: emit_json,
+        } => {
+            use crate::penetration_diff::run_penetration_diff;
+            let report = run_penetration_diff(&positions, &plan, epsilon)?;
+            let passed = report.passed;
+
+            if emit_json {
+                println!("{}", serde_json::to_string(&report)?);
+            } else {
+                println!(
+                    "penetration-diff: max_depth={:.4}m epsilon={:.4}m worst_frame={} worst_spring={} worst_joint={} ({})",
+                    report.max_penetration_depth_m,
+                    report.epsilon_m,
+                    report.worst_frame,
+                    report.worst_spring,
+                    report.worst_joint,
+                    if passed { "PASS" } else { "FAIL" },
+                );
+            }
+
+            if !passed {
+                std::process::exit(1);
             }
             Ok(())
         }

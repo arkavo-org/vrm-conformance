@@ -34,6 +34,32 @@ pub struct TestPlan {
     /// `CrossVariantAssertion`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cross_variant: Option<CrossVariantAssertion>,
+    /// World-fixed colliders to check for spring-bone non-penetration.
+    /// When present (CCD conformance plans), the runner can run
+    /// `penetration-diff` against the captured per-frame positions.
+    /// Self-contained — does NOT pull in `vrm-diff-engine`; the runner
+    /// maps `ColliderWorldSpec` → `vrm_diff_engine::penetration::ColliderSpec`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ccd_colliders: Option<Vec<ColliderWorldSpec>>,
+}
+
+/// World-fixed collider geometry for spring-bone CCD conformance checks.
+/// Mirrors `vrm_diff_engine::penetration::ColliderSpec` but lives here so
+/// `vrm-test-plan` stays free of any `vrm-diff-engine` dependency.
+/// The runner maps this type to the diff-engine type via
+/// `vrm_runner::penetration_diff::to_collider_spec`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ColliderWorldSpec {
+    Sphere {
+        center: [f32; 3],
+        radius: f32,
+    },
+    Capsule {
+        a: [f32; 3],
+        b: [f32; 3],
+        radius: f32,
+    },
 }
 
 /// Cross-variant SSIM assertion: the render of THIS test and the render of
@@ -760,6 +786,7 @@ capture_positions: true
             animation: None,
             render_sequence: None,
             cross_variant: None,
+            ccd_colliders: None,
         }
     }
 
@@ -844,5 +871,129 @@ capture_positions: true
             .expect("cross_variant present after round-trip");
         assert_eq!(cv.sibling_id, "sibling_xyz");
         assert!((cv.max_ssim - 0.85).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod ccd_colliders_tests {
+    use super::*;
+
+    fn make_minimal_plan() -> TestPlan {
+        TestPlan {
+            id: "x".into(),
+            spec_version: SpecVersion::V1,
+            spec_section: "x".into(),
+            asset: "x.vrm".into(),
+            camera: Camera {
+                position: [0.0; 3],
+                target: [0.0; 3],
+                up: [0.0; 3],
+                fov_degrees: 30.0,
+            },
+            lighting: Lighting {
+                directional: DirectionalLight {
+                    dir: [0.0; 3],
+                    color: [1.0; 3],
+                    intensity: 1.0,
+                },
+                ambient: AmbientLight {
+                    color: [1.0; 3],
+                    intensity: 0.3,
+                },
+                cast_shadows: false,
+                receive_shadows: false,
+            },
+            post_processing: PostProcessing::default(),
+            output: Output {
+                width: 512,
+                height: 512,
+                color_space: ColorSpace::Linear,
+                msaa: 4,
+            },
+            diff: Diff {
+                mode: DiffMode::Ssim,
+                threshold: 0.9,
+                reference_renderer: "vmk".into(),
+                conformance_status: ConformanceStatus::default(),
+                pose_tolerance: None,
+            },
+            ignore_renderers: vec![],
+            properties: vec![],
+            physics: None,
+            animation: None,
+            render_sequence: None,
+            cross_variant: None,
+            ccd_colliders: None,
+        }
+    }
+
+    #[test]
+    fn ccd_colliders_absent_parses_as_none() {
+        // Legacy plans without ccd_colliders must default to None.
+        let plan = make_minimal_plan();
+        assert!(plan.ccd_colliders.is_none());
+        let yaml = serde_yml::to_string(&plan).unwrap();
+        assert!(
+            !yaml.contains("ccd_colliders"),
+            "ccd_colliders must be omitted from YAML when None"
+        );
+    }
+
+    #[test]
+    fn ccd_colliders_sphere_and_capsule_roundtrip() {
+        let sphere = ColliderWorldSpec::Sphere {
+            center: [0.0, 1.0, 0.0],
+            radius: 0.05,
+        };
+        let capsule = ColliderWorldSpec::Capsule {
+            a: [0.0, 0.8, 0.0],
+            b: [0.0, 1.2, 0.0],
+            radius: 0.03,
+        };
+        let mut plan = make_minimal_plan();
+        plan.ccd_colliders = Some(vec![sphere.clone(), capsule.clone()]);
+
+        let yaml = serde_yml::to_string(&plan).unwrap();
+        let back: TestPlan = serde_yml::from_str(&yaml).unwrap();
+        let colliders = back
+            .ccd_colliders
+            .expect("ccd_colliders present after roundtrip");
+        assert_eq!(colliders.len(), 2);
+        match &colliders[0] {
+            ColliderWorldSpec::Sphere { center, radius } => {
+                assert_eq!(*center, [0.0_f32, 1.0, 0.0]);
+                assert!((*radius - 0.05).abs() < 1e-6);
+            }
+            other => panic!("expected Sphere, got {other:?}"),
+        }
+        match &colliders[1] {
+            ColliderWorldSpec::Capsule { a, b, radius } => {
+                assert_eq!(*a, [0.0_f32, 0.8, 0.0]);
+                assert_eq!(*b, [0.0_f32, 1.2, 0.0]);
+                assert!((*radius - 0.03).abs() < 1e-6);
+            }
+            other => panic!("expected Capsule, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_accepts_render_sequence_with_ccd_colliders() {
+        // CCD plans have both render_sequence and ccd_colliders — validate must accept.
+        let mut plan = make_minimal_plan();
+        plan.render_sequence = Some(RenderSequenceBlock {
+            frame_count: 30,
+            frame_hz: 30.0,
+            physics_dt_seconds: 0.01666,
+            output_format: SequenceFormat::PngSequence,
+            animate_root_transform: None,
+            apply_vrma: None,
+            temporal_ssim_threshold: None,
+            capture_positions: true,
+        });
+        plan.ccd_colliders = Some(vec![ColliderWorldSpec::Sphere {
+            center: [0.0, 1.0, 0.0],
+            radius: 0.05,
+        }]);
+        assert!(plan.validate().is_ok());
     }
 }

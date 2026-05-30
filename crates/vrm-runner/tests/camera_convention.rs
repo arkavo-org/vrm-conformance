@@ -57,6 +57,7 @@ fn plan_with(spec_version: SpecVersion, camera_z: f32) -> TestPlan {
         animation: None,
         render_sequence: None,
         cross_variant: None,
+        ccd_colliders: None,
     }
 }
 

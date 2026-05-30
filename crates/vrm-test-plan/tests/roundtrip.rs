@@ -180,6 +180,7 @@ fn plan_without_physics_serializes_without_field() {
         animation: None,
         render_sequence: None,
         cross_variant: None,
+        ccd_colliders: None,
     };
     let yaml = serde_yml::to_string(&plan).unwrap();
     assert!(
