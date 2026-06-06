@@ -2,6 +2,33 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-06 (synthetic-collider augment-on/off validation, VMK 0.17.0-rc.2) — the suite now independently measures VMK's synthetic spring-bone colliders (#309/#311/#312/#313): augmentation **is active** and measurably deflects a chain (ON penetrates 22–29% less than OFF; the non-root chain diverges 139–159 mm ON↔OFF)
+
+**What.** Closes the coverage gap flagged in the verification entry below. The earlier CCD corpus uses *authored* world-fixed colliders (discrete path), so it could not exercise VMK's *synthetic* augmentation (#309) or its swept collision (#313). This adds an end-to-end **augment-ON-vs-OFF** pipeline that does:
+- `load_vrm` honors an `augment_colliders` flag → VMK's `VRMLoadingOptions.augmentSpringBoneColliders` (adapter); `--augment-colliders true|false` on the runner.
+- `render_sequence` dumps each frame's VMK-generated synthetic colliders in **world space** (`SequenceFrame.synthetic_colliders`); the runner persists `<id>_<renderer>_colliders.json`. Synthetic colliders are bone-attached, so this is per-frame.
+- `penetration-diff --colliders <per-frame.json> --exclude-root-joints` measures joints vs the **moving** colliders, excluding each chain's kinematic root joint (index 0) — which is embedded in its own bone's collider by construction and would otherwise dominate the metric (matches VMK's own `HairHeadCollisionTests`).
+- Corpus: `emit-synthetic-collider-asset` → a parametric humanoid + a hair spring-chain **draped forward over the head**, so it falls through the synthetic forehead capsule (the #309 hair→forehead case). Two excitations: `synthcoll_swept` (12 frames, fast — #313) and `synthcoll_static` (120 frames, slow — #309). Single source of truth; CC0.
+
+**Confirmed: augmentation fires for the parametric humanoid.** VMK generates **6** synthetic colliders (4 leg capsules + 1 forehead capsule + 1 skull sphere) for the generated humanoid; they move **600 mm** across frames (= the ±0.30 m root sweep), confirming bone-attached world-space capture is real, not kinematic stub.
+
+**Data — max penetration depth (mm) into the synthetic colliders, root joint excluded, vs the augment-ON colliders.** (OFF has no synthetic colliders to dump, so both runs are measured against the ON-run geometry; valid because the head/leg bones — and thus the synthetic colliders — follow the root animation identically ON and OFF.)
+
+| variant | augment ON | augment OFF | non-root ON↔OFF divergence |
+|---|---|---|---|
+| `synthcoll_swept` (#313) | **16.3** | 20.8 | 139 mm |
+| `synthcoll_static` (#309) | **14.7** | 20.9 | 159 mm |
+
+**Read.**
+1. **Synthetic augmentation is active and works.** Augment-ON penetrates **22–29 % less** than OFF on both excitations, and the non-root chain trajectory diverges by **139–159 mm** between ON and OFF. The synthetic forehead capsule measurably deflects the hair chain. This is the suite's independent confirmation that rc.2's #309/#313 work does what it claims — closing the "post-hoc confirmation" goal.
+2. **Residual ON penetration is a root-adjacency limitation, not a failure.** Worst penetration sits on joint 1 — the first non-root joint, dragged toward the collider by the kinematically-embedded root joint 0 (which collision never moves). So ON does not reach ≈0; it reaches a reduced-but-nonzero floor. This is the same root-adjacency residual class that VMK's own #267 hair-head test navigates, not an augmentation defect.
+3. **Single-renderer feature validation, no oracle.** Synthetic augmentation is a VMK invention, not VRM spec — UniVRM/godot/three-vrm do not generate synthetic colliders. The baseline is therefore VMK-vs-itself (augment ON vs OFF in the same rc.2 build), not a cross-renderer consensus.
+
+**Boundary / reproducibility.**
+- Chain config (logged for reproducibility): 8-joint chain, 0.05 m segments, `chain_axis = [0.0, -0.45, 0.89]` (forward+down), stiffness 0.2, drag 0.2. A straight-down chain (the default axis) misses every synthetic collider and yields **no** ON/OFF signal — the chain must be aimed through a synthetic collider's volume.
+- The metric counts geometric penetration of captured joints into the dumped synthetic colliders; it says nothing about VMK's internal intent. The ON↔OFF *delta* is the signal, not the absolute ON depth.
+- Spec/plan: `docs/superpowers/specs/2026-06-06-synthetic-collider-validation-corpus-design.md`, `docs/superpowers/plans/2026-06-06-synthetic-collider-validation-corpus.md`.
+
 ## 2026-06-06 (VMK 0.17.0-rc.2 verification) — the spring-bone CCD release (#313 swept collision, #316 `dtSub`, #309/#311/#312 synthetic colliders) builds + tests green and produces **byte-identical** CCD-corpus numbers to 0.16.0; the #313 fix is invisible to this suite because the corpus uses *authored* colliders (discrete path) while #313 is scoped to the *synthetic* group
 
 **What.** Bumped the VMK adapter pin from 0.16.0 stable (`392d949`) to **0.17.0-rc.2** (`9b6ad1d`, pre-release 2026-06-06; `adapters/vrm-metal-kit/Package.swift`) and ran the full verification: `swift build` clean, `swift test` 34/34 (2 fixture-skipped, 0 failures), the `capture_positions_vmk` integration test green (real GPU solver on Apple M4 Max — joints lag the root under inertia, confirming captured positions reflect the sim), and the 12-asset `emit-springbone-ccd-sweep` corpus rendered through the real adapter → `penetration-diff`, all 12 with no adapter errors and `overall_passed: true`.
