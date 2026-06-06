@@ -12,6 +12,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadVrmParams {
     pub path: String,
+    /// Renderer-specific: when `Some(false)`, ask the adapter to load the
+    /// model WITHOUT synthesizing bone-derived spring-bone colliders (VMK
+    /// #309). `None` = adapter default (VMK augments by default). Adapters
+    /// that don't synthesize colliders ignore this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub augment_colliders: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +172,24 @@ pub struct SpringPositions {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DumpBonePositionsResult {
     pub springs: Vec<SpringPositions>,
+}
+
+/// A world-space spring-bone collider captured at one frame. Mirrors
+/// `vrm_test_plan::ColliderWorldSpec`; lives here so adapters can report
+/// per-frame (moving) synthetic colliders on `SequenceFrame`. The runner
+/// maps this to `vrm_diff_engine::penetration::ColliderSpec`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SequenceCollider {
+    Sphere {
+        center: [f32; 3],
+        radius: f32,
+    },
+    Capsule {
+        a: [f32; 3],
+        b: [f32; 3],
+        radius: f32,
+    },
 }
 
 /// Load a `.vrma` file (VRMC_vrm_animation glTF) and return an opaque handle
@@ -401,6 +425,12 @@ pub struct SequenceFrame {
     /// supports it. Same shape as `dump_bone_positions`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spring_positions: Option<Vec<SpringPositions>>,
+    /// Per-frame world-space synthetic colliders (VMK #309), present only when
+    /// `RenderSequenceParams.capture_synthetic_colliders` was set and the
+    /// adapter generated any. Bone-attached colliders move per frame, so this
+    /// is captured alongside `spring_positions`. Empty when augmentation is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synthetic_colliders: Option<Vec<SequenceCollider>>,
 }
 
 /// Capture N frames at a fixed display Hz while advancing physics (and
@@ -446,6 +476,11 @@ pub struct RenderSequenceParams {
     /// tests. Adapters that cannot report positions MAY leave it null per frame.
     #[serde(default)]
     pub capture_positions: bool,
+    /// When true, the adapter additionally reports per-frame world-space
+    /// synthetic colliders on each `SequenceFrame.synthetic_colliders`.
+    /// Default false. Adapters without synthetic colliders leave it null.
+    #[serde(default)]
+    pub capture_synthetic_colliders: bool,
 }
 
 /// Result of `render_sequence`. `frames` lists every captured frame in
@@ -469,6 +504,57 @@ mod ccd_capture_positions_tests {
     use super::*;
 
     #[test]
+    fn load_vrm_params_augment_colliders_optional_defaults_none() {
+        let legacy = r#"{"path":"/tmp/a.vrm"}"#;
+        let p: LoadVrmParams = serde_json::from_str(legacy).unwrap();
+        assert_eq!(p.augment_colliders, None);
+    }
+
+    #[test]
+    fn sequence_collider_sphere_and_capsule_roundtrip() {
+        let s = SequenceCollider::Sphere {
+            center: [0.1, 1.2, 0.0],
+            radius: 0.05,
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"type\":\"sphere\""));
+        assert_eq!(serde_json::from_str::<SequenceCollider>(&json).unwrap(), s);
+        let c = SequenceCollider::Capsule {
+            a: [0.0, 0.0, 0.0],
+            b: [0.0, 0.1, 0.0],
+            radius: 0.03,
+        };
+        assert_eq!(
+            serde_json::from_str::<SequenceCollider>(&serde_json::to_string(&c).unwrap()).unwrap(),
+            c
+        );
+    }
+
+    #[test]
+    fn render_sequence_params_capture_synthetic_colliders_defaults_false() {
+        let legacy = r#"{"session_id":"s","width":4,"height":4,"output_dir":"/tmp",
+            "frame_count":2,"frame_hz":30.0,"physics_dt_seconds":0.016666668,
+            "color_space":"Linear","msaa":1,"output_type":"Color","output_format":"png_sequence"}"#;
+        let p: RenderSequenceParams = serde_json::from_str(legacy).unwrap();
+        assert!(!p.capture_synthetic_colliders);
+    }
+
+    #[test]
+    fn sequence_frame_synthetic_colliders_optional_skips_when_none() {
+        let f = SequenceFrame {
+            index: 0,
+            timestamp_seconds: 0.0,
+            path: "0000.png".into(),
+            blake3: "blake3:00".into(),
+            spring_positions: None,
+            synthetic_colliders: None,
+        };
+        assert!(!serde_json::to_string(&f)
+            .unwrap()
+            .contains("synthetic_colliders"));
+    }
+
+    #[test]
     fn render_sequence_params_capture_positions_defaults_false_and_roundtrips() {
         let legacy = r#"{"session_id":"s","width":4,"height":4,"output_dir":"/tmp",
             "frame_count":2,"frame_hz":30.0,"physics_dt_seconds":0.016666668,
@@ -488,6 +574,7 @@ mod ccd_capture_positions_tests {
                 name: "chain".into(),
                 joint_positions: vec![[0.0, 1.0, 0.0], [0.0, 0.95, 0.0]],
             }]),
+            synthetic_colliders: None,
         };
         let s = serde_json::to_string(&f).unwrap();
         let back: SequenceFrame = serde_json::from_str(&s).unwrap();

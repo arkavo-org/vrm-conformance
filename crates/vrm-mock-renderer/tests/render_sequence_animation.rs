@@ -54,6 +54,7 @@ fn base_params(session_id: &str, output_dir: &str) -> ops::RenderSequenceParams 
         animate_root_transform: None,
         apply_vrma: None,
         capture_positions: false,
+        capture_synthetic_colliders: false,
     }
 }
 

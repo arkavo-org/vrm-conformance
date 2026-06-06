@@ -115,6 +115,7 @@ pub fn render_sequence_params(
             start_seconds: v.start_seconds,
         }),
         capture_positions: block.capture_positions,
+        capture_synthetic_colliders: false,
     }
 }
 

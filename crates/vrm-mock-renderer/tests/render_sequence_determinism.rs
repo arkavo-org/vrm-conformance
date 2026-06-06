@@ -62,6 +62,7 @@ fn params(session_id: &str, output_dir: &str) -> ops::RenderSequenceParams {
         }),
         apply_vrma: None,
         capture_positions: false,
+        capture_synthetic_colliders: false,
     }
 }
 

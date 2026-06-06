@@ -210,6 +210,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
             "load_vrm",
             ops::LoadVrmParams {
                 path: asset_path.to_string(),
+                augment_colliders: None,
             },
         )
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
@@ -563,6 +564,7 @@ pub fn execute_plan_capturing_positions(
             "load_vrm",
             ops::LoadVrmParams {
                 path: asset_path.to_string(),
+                augment_colliders: None,
             },
         )
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;

@@ -324,6 +324,7 @@ pub fn render_sequence(
             path: frame_path.to_string(),
             blake3: blake3_hex,
             spring_positions,
+            synthetic_colliders: None,
         });
     }
 

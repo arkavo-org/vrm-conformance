@@ -58,6 +58,7 @@ fn base_params(session_id: &str, output_dir: &str, capture: bool) -> ops::Render
         }),
         apply_vrma: None,
         capture_positions: capture,
+        capture_synthetic_colliders: false,
     }
 }
 
