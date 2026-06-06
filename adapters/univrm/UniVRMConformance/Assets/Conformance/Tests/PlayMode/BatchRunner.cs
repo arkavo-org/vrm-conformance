@@ -377,6 +377,12 @@ namespace Conformance.Tests.Play
                     runtime.SpringBone.Process(rs.physics_dt_seconds);
                 }
 
+                // Capture spring-bone joint world positions at this frame's
+                // post-step pose (the pose this frame renders). Converted back
+                // to the glTF/VRM frame so they match the plan's ccd_colliders.
+                Manifest.SpringPositionsDto[] springPositions =
+                    rs.capture_positions ? CaptureSpringPositions(vrm) : null;
+
                 // Yield so Unity actually renders this frame.
                 yield return null;
 
@@ -401,6 +407,7 @@ namespace Conformance.Tests.Play
                     timestamp_seconds = (float)i / rs.frame_hz,
                     path = captureResult.outputPath,
                     blake3 = zeroHash,
+                    spring_positions = springPositions,
                 });
             }
 
@@ -433,6 +440,38 @@ namespace Conformance.Tests.Play
                     data = new Manifest.ErrorDataDto { phase = phase },
                 },
             };
+        }
+
+        // Capture per-spring joint world positions at the current (post-step)
+        // pose. Positions are converted Unity→glTF by flipping Z (the inverse
+        // of SceneSetup.GltfToUnity) so they share the frame of the plan's
+        // ccd_colliders. joint_positions is FLAT ([x0,y0,z0, ...]) per the
+        // adapter's JsonUtility vec3 convention; the runner reshapes to
+        // canonical [[x,y,z],...] when persisting the positions JSON.
+        private static Manifest.SpringPositionsDto[] CaptureSpringPositions(Vrm10Instance vrm)
+        {
+            var sb = vrm != null ? vrm.SpringBone : null;
+            if (sb == null || sb.Springs == null) return null;
+            var outSprings = new List<Manifest.SpringPositionsDto>(sb.Springs.Count);
+            for (int s = 0; s < sb.Springs.Count; s++)
+            {
+                var spring = sb.Springs[s];
+                var flat = new List<float>();
+                if (spring != null && spring.Joints != null)
+                {
+                    foreach (var joint in spring.Joints)
+                    {
+                        if (joint == null) continue;
+                        var p = joint.transform.position;
+                        flat.Add(p.x);
+                        flat.Add(p.y);
+                        flat.Add(-p.z); // Unity → glTF
+                    }
+                }
+                var name = (spring != null && !string.IsNullOrEmpty(spring.Name)) ? spring.Name : ("spring_" + s);
+                outSprings.Add(new Manifest.SpringPositionsDto { name = name, joint_positions = flat.ToArray() });
+            }
+            return outSprings.ToArray();
         }
 
         private static List<string> ExtractAdapterArgs()

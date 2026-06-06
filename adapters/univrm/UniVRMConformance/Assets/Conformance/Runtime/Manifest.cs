@@ -130,6 +130,7 @@ namespace Conformance
             public RenderSequenceAnimateDto animate_root_transform; // may be null
             public RenderSequenceVrmaDto apply_vrma;                // may be null
             public float temporal_ssim_threshold;                   // 0 ⇒ unset (use RFC default)
+            public bool capture_positions;                          // emit per-frame spring positions
         }
 
         [Serializable]
@@ -189,6 +190,20 @@ namespace Conformance
             public float timestamp_seconds;
             public string path;
             public string blake3;
+            // Per-spring joint positions, present only when capture_positions
+            // was set. Null/empty for normal sequence frames.
+            public SpringPositionsDto[] spring_positions;
+        }
+
+        // Per-spring joint world positions for one frame. joint_positions is
+        // FLAT ([x0,y0,z0, x1,y1,z1, ...]) — Unity JsonUtility cannot emit
+        // nested arrays, so this follows the adapter's flat-float[] vec3
+        // convention. The runner reshapes to canonical [[x,y,z],...] on disk.
+        [Serializable]
+        public class SpringPositionsDto
+        {
+            public string name;
+            public float[] joint_positions;
         }
 
         [Serializable]

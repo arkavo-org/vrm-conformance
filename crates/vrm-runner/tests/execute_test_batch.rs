@@ -514,3 +514,58 @@ fn cli_invocation_end_to_end_with_mock() {
         "local-manifest.json should be written"
     );
 }
+
+// =====================================================================
+// capture_positions (batch) — runner persists per-plan positions JSON
+// =====================================================================
+
+use vrm_runner::execute::FramePositionsEntry;
+
+/// When a batch adapter returns `frames` carrying `spring_positions`, the
+/// runner must persist `<test_id>_<renderer>_positions.json` (the same
+/// canonical schema as the per-op path), so `penetration-diff` can consume
+/// a real-adapter trace. Positions must round-trip and reflect motion.
+#[test]
+fn batch_capture_positions_writes_positions_json() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let plans_dir = tmp.path().join("plans");
+    std::fs::create_dir_all(&plans_dir).unwrap();
+    write_synthetic_plan_files(&plans_dir, "seqcap");
+
+    let output_dir = tmp.path().join("out");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let opts = RunOptions {
+        plans_dir: Utf8PathBuf::from_path_buf(plans_dir).unwrap(),
+        adapter_bin: fixture("mock-univrm-seq-positions.sh"),
+        output_dir: Utf8PathBuf::from_path_buf(output_dir.clone()).unwrap(),
+        renderer_name: "univrm".into(),
+    };
+
+    let summary = run_batch(&opts).expect("run");
+    assert_eq!(summary.ok_count, 1);
+
+    let pos_path = output_dir.join("seqcap_univrm_positions.json");
+    assert!(
+        pos_path.exists(),
+        "batch must persist positions JSON at {} — runner must read spring_positions from batch frames",
+        pos_path.display()
+    );
+
+    let entries: Vec<FramePositionsEntry> =
+        serde_json::from_str(&std::fs::read_to_string(&pos_path).unwrap())
+            .expect("positions JSON parses as Vec<FramePositionsEntry>");
+    assert_eq!(entries.len(), 2, "one positions entry per frame");
+    for e in &entries {
+        assert!(
+            !e.springs.is_empty(),
+            "frame {} has a spring",
+            e.frame_index
+        );
+        assert!(!e.springs[0].joint_positions.is_empty());
+    }
+    assert_ne!(
+        entries[0].springs[0].joint_positions, entries[1].springs[0].joint_positions,
+        "positions must differ across frames (real solver under animation)"
+    );
+}

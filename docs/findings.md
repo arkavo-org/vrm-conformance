@@ -2,7 +2,32 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-06 (CCD sweep, golden baseline) — UniVRM CCD capture landed: the oracle DEFLECTS fast sweeps (radius-responsive) but PENETRATES slow sustained-contact sweeps; godot under-deflects vs the oracle on fast, matches it on slow
+
+**What.** UniVRM (the golden) is now the **second real adapter** to report per-frame spring-bone positions, and the first *oracle* CCD trace. Implemented in the PlayMode batch (`adapters/univrm` `BatchRunner.CaptureSpringPositions`: `vrm.SpringBone.Springs[].Joints[].transform.position` captured post-`Process`, Unity→glTF z-flip). Wire detail: Unity `JsonUtility` can't emit nested arrays, so positions go over as the adapter's existing flat-`float[]` vec3 convention and the runner reshapes flat→`[[x,y,z]]` (`execute_batch.rs`), keeping the on-disk schema identical to the per-op path. Verified end-to-end through Unity 6000.4.6f1 PlayMode; the 12-asset CCD sweep runs and all 12 cells produce captured, *moving* chains (dynamic joints lag/swing under inertia — real FastSpringBone, not a static chain).
+
+**Data — closest approach of any joint to the collider center `[0.10,1.26,0]` (collider R, hitRadius 0.02; chain swept x −0.5→0.5).** This is the discriminator: a working collision keeps the chain *out* by an amount that grows with collider radius.
+
+| | r0.005 fast | r0.02 fast | r0.05 fast | r0.005 slow | r0.02 slow | r0.05 slow |
+|---|---|---|---|---|---|---|
+| **UniVRM** (closest, m) | 0.022 | 0.032 | 0.036 | 0.003 | 0.003 | 0.003 |
+| **godot** (closest, m) | 0.013 | 0.013 | 0.013 | 0.004 | 0.004 | 0.004 |
+| **UniVRM** penetration | 0 ✓ | 0 ✓ | 0.014 | 0.002 | 0.017 | 0.047 |
+| **godot** penetration | 0 ✓ | 0.007 | 0.037 | 0.001 | 0.016 | 0.046 |
+
+**Read.**
+1. **The oracle is not a perfect collider either.** UniVRM **deflects fast sweeps** — closest approach grows with collider radius (0.022 → 0.032 → 0.036), the signature of real push-out, and penetration is 0 for r ≤ 0.02 — but it **penetrates every slow sweep** (closest ~0.003 regardless of radius; penetration ∝ radius up to 0.047). Slow = sustained contact: the chain drapes under gravity and the single-step positional collision can't hold a stiff chain out of the collider over many frames (the #313 family — positional collision vs sustained load). So "non-penetration" is *not* the oracle's behavior on slow cells.
+2. **godot diverges on fast, conforms on slow.** On **fast** cells godot's closest approach is a flat ~0.013 (radius-independent → collision barely engaging, per the godot-CCD entry below), so it penetrates r0.02-fast (0.007) and r0.05-fast (0.037) where UniVRM is clean or near-clean. godot's collision is **weaker than the oracle's** on fast motion — a real, file-worthy divergence. On **slow** cells godot (~0.004, pen ∝ radius) **matches UniVRM** (~0.003, pen ∝ radius): both penetrate, comparably. So slow-cell penetration is **conformant-to-oracle**, not a godot defect.
+3. **Conformance bar ≠ the absolute `passed` flag.** `penetration-diff`'s `passed` means "no solid-radius penetration," and the *oracle fails it on every slow cell*. So a red `passed=false` on a slow cell is conformant (matches UniVRM); the conformance-relevant signal is **the fast cells, where godot trails the oracle.** This is the oracle baseline the metric needed: pass/fail is absolute, but conformance is "match UniVRM," and now we can.
+
+**Boundary.**
+- **Single-step, same caveats as the oracle.** UniVRM runs one Verlet step/frame at frame-rate `dt` (no substep — see the methodology pin), so its slow-cell penetration is expected, not a bug to fix in godot. The tail-vs-origin mechanism noted in the godot-CCD entry likely also bounds UniVRM (collision protects tails; the metric reads origins) — both renderers are measured the same way, so the *comparison* holds even if the absolute depth is a slight over-read.
+- **godot upstream items, now oracle-anchored.** The godot "discrete collision under-resolves under swept motion" divergence (below) is confirmed as **fast-sweep-specific under-deflection vs the golden** — that's the file-worthy part. The slow-cell penetration is shared with the oracle and should *not* be filed. (The `"stiffiness"` 1.0-importer typo is still held, per the user.)
+- **Unity-gated.** Capture verified on Unity 6000.4.6f1 locally; covered by `crates/vrm-runner/tests/capture_positions_univrm.rs` (Unity-gated, slow) plus the fast no-Unity runner-persistence test `batch_capture_positions_writes_positions_json`.
+
 ## 2026-06-06 (CCD sweep, first real-engine measurement) — `penetration-diff` now runs against a real spring-bone solver (godot-vrm); the chain passes straight through the world-fixed colliders (no deflection), depth ∝ radius
+
+> **Refined by the UniVRM golden baseline (entry above).** The "no deflection" framing holds on **fast** cells *relative to the oracle* (godot's closest approach is a flat ~0.013 while UniVRM's grows with radius to ~0.036) — that fast under-deflection is the real divergence. But the oracle *also* penetrates the **slow** cells (~0.003, pen ∝ radius), so godot's slow-cell penetration below is **conformant-to-oracle**, not a defect. Read the radius-∝-penetration data below as the fast-vs-slow picture the oracle later disambiguated.
 
 **What.** godot-vrm is now the first **real** adapter (non-mock) to report per-frame spring-bone positions: `render_sequence` with `capture_positions: true` returns `SequenceFrame.spring_positions` from godot's actual L4 solver (it reuses the same per-joint world-position extraction as `dump_bone_positions`). This closes the gap recorded in the methodology pin ("CCD / `penetration-diff` is mock-backed only") — the metric had only ever seen the mock's static synthetic chain. Running the 12-asset CCD sweep (`emit-springbone-ccd-sweep`) through godot is the first time `penetration-diff` has measured a real spring-bone simulation.
 

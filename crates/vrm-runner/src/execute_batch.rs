@@ -152,6 +152,23 @@ pub struct SequenceFrameEntry {
     pub timestamp_seconds: f32,
     pub path: String,
     pub blake3: String,
+    /// Per-spring joint world positions at this frame, present only when the
+    /// adapter ran with `capture_positions`. Joint positions are FLAT
+    /// (`[x0,y0,z0, x1,y1,z1, ...]`) — the batch adapter's JsonUtility vec3
+    /// convention (Unity JsonUtility cannot emit nested arrays). The runner
+    /// reshapes to canonical `[[x,y,z], ...]` when persisting the positions
+    /// JSON, so the on-disk schema matches the per-op path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spring_positions: Option<Vec<BatchSpringPositions>>,
+}
+
+/// Adapter-wire spring positions for batch mode: flat `joint_positions`
+/// (`[x0,y0,z0, ...]`). Reshaped to `vrm_ops::tools::SpringPositions` (with
+/// `[f32;3]` triples) before the runner writes the canonical positions JSON.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct BatchSpringPositions {
+    pub name: String,
+    pub joint_positions: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -395,6 +412,55 @@ pub fn run(opts: &RunOptions) -> anyhow::Result<RunSummary> {
                     }
                 }
             }
+        }
+    }
+
+    // Persist per-plan positions JSON when the adapter captured spring-bone
+    // positions (render_sequence + capture_positions). Mirrors the per-op
+    // path (`execute::persist_positions_json`): one
+    // `<test_id>_<renderer>_positions.json` of `FramePositionsEntry` values,
+    // the canonical schema `penetration-diff` consumes.
+    for entry in parsed.entries.iter() {
+        let Some(frames) = entry.frames.as_ref() else {
+            continue;
+        };
+        let positions: Vec<crate::execute::FramePositionsEntry> = frames
+            .iter()
+            .filter_map(|f| {
+                f.spring_positions
+                    .as_ref()
+                    .map(|sp| crate::execute::FramePositionsEntry {
+                        frame_index: f.index,
+                        timestamp_seconds: f.timestamp_seconds,
+                        // Reshape flat [x,y,z,...] → canonical [[x,y,z], ...].
+                        springs: sp
+                            .iter()
+                            .map(|s| vrm_ops::tools::SpringPositions {
+                                name: s.name.clone(),
+                                joint_positions: s
+                                    .joint_positions
+                                    .chunks_exact(3)
+                                    .map(|c| [c[0], c[1], c[2]])
+                                    .collect(),
+                            })
+                            .collect(),
+                    })
+            })
+            .collect();
+        if positions.is_empty() {
+            continue;
+        }
+        let path = opts.output_dir.join(format!(
+            "{}_{}_positions.json",
+            entry.test_id, opts.renderer_name
+        ));
+        match serde_json::to_string_pretty(&positions) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(path.as_std_path(), json) {
+                    tracing::warn!("failed to write positions JSON {path}: {e}");
+                }
+            }
+            Err(e) => tracing::warn!("failed to serialize positions for {}: {e}", entry.test_id),
         }
     }
 
