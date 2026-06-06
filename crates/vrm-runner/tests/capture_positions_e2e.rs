@@ -93,6 +93,7 @@ fn capture_positions_true_writes_positions_json() {
         vrma_path: None,
         apply_at_time: 0.0,
         reference_pose_json: None,
+        augment_colliders: None,
     };
 
     let result =
@@ -177,6 +178,7 @@ fn capture_positions_false_writes_no_json() {
         vrma_path: None,
         apply_at_time: 0.0,
         reference_pose_json: None,
+        augment_colliders: None,
     };
 
     let result =

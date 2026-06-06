@@ -114,6 +114,20 @@ pub struct ExecuteOptions {
     /// lookAt state. When set, the runner runs pose_diff against this
     /// reference and includes the report in `ExecuteResult::pose_diff`.
     pub reference_pose_json: Option<Utf8PathBuf>,
+    /// Renderer-specific: forwarded to `load_vrm` as `augment_colliders`.
+    /// `None` = adapter default. Used by the synthetic-collider corpus to
+    /// render the same asset with VMK augmentation on vs off.
+    pub augment_colliders: Option<bool>,
+}
+
+/// One entry per frame that carried `synthetic_colliders` data. Written to
+/// `<output_dir>/<plan_id>_<renderer>_colliders.json` when
+/// `render_sequence.capture_synthetic_colliders` is true. Consumed by
+/// `penetration-diff --colliders`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FrameCollidersEntry {
+    pub frame_index: u32,
+    pub colliders: Vec<ops::SequenceCollider>,
 }
 
 /// One entry in the per-plan positions JSON file written when
@@ -210,7 +224,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
             "load_vrm",
             ops::LoadVrmParams {
                 path: asset_path.to_string(),
-                augment_colliders: None,
+                augment_colliders: opts.augment_colliders,
             },
         )
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
@@ -420,6 +434,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
 
         // Persist per-frame spring positions when any frame carried them.
         persist_positions_json(&seq_result, &opts.output_dir, &plan.id, &opts.renderer_name)?;
+        persist_colliders_json(&seq_result, &opts.output_dir, &plan.id, &opts.renderer_name)?;
 
         // No single PNG in sequence mode — use a sentinel path.
         // (A follow-up will refactor ExecuteResult to handle this cleanly.)
@@ -564,7 +579,7 @@ pub fn execute_plan_capturing_positions(
             "load_vrm",
             ops::LoadVrmParams {
                 path: asset_path.to_string(),
-                augment_colliders: None,
+                augment_colliders: opts.augment_colliders,
             },
         )
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
@@ -658,6 +673,12 @@ pub fn execute_plan_capturing_positions(
                     error_message: None,
                 };
                 persist_positions_json(
+                    &seq_result,
+                    &opts.output_dir,
+                    &plan.id,
+                    &opts.renderer_name,
+                )?;
+                persist_colliders_json(
                     &seq_result,
                     &opts.output_dir,
                     &plan.id,
@@ -773,6 +794,56 @@ fn persist_positions_json(
     }
     std::fs::write(&path, serde_json::to_string_pretty(&entries)?)?;
     Ok(())
+}
+
+/// Collect per-frame synthetic colliders and write
+/// `<output_dir>/<plan_id>_<renderer>_colliders.json`. Only writes when at
+/// least one frame carried colliders.
+fn persist_colliders_json(
+    seq_result: &SequenceExecuteResult,
+    output_dir: &Utf8Path,
+    plan_id: &str,
+    renderer_name: &str,
+) -> Result<()> {
+    let frames = match seq_result.result.as_ref() {
+        Some(r) => &r.frames,
+        None => return Ok(()),
+    };
+    let entries: Vec<FrameCollidersEntry> = frames
+        .iter()
+        .filter_map(|f| {
+            f.synthetic_colliders.as_ref().map(|c| FrameCollidersEntry {
+                frame_index: f.index,
+                colliders: c.clone(),
+            })
+        })
+        .collect();
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let path = output_dir.join(format!("{plan_id}_{renderer_name}_colliders.json"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&entries)?)?;
+    Ok(())
+}
+
+/// Test-only shim so an integration test can exercise `persist_colliders_json`
+/// against a hand-built `RenderSequenceResult` without spawning an adapter.
+pub fn persist_colliders_json_for_test(
+    result: &ops::RenderSequenceResult,
+    output_dir: &Utf8Path,
+    plan_id: &str,
+    renderer_name: &str,
+) -> Result<()> {
+    let seq = SequenceExecuteResult {
+        status: SequenceStatus::Ok,
+        result: Some(result.clone()),
+        unimplemented_phase: None,
+        error_message: None,
+    };
+    persist_colliders_json(&seq, output_dir, plan_id, renderer_name)
 }
 
 fn progress(opts: &ExecuteOptions, phase: &str, test_id: &str, extra: serde_json::Value) {

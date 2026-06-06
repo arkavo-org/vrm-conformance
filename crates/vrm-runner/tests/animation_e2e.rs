@@ -81,6 +81,7 @@ fn execute_plan_with_animation_against_mock_succeeds() {
         vrma_path: None,
         apply_at_time: 0.0,
         reference_pose_json: None,
+        augment_colliders: None,
     };
 
     let result = execute_plan(&plan, &opts).expect("execute_plan must succeed");

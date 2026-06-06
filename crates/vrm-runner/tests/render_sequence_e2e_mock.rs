@@ -85,6 +85,7 @@ fn render_sequence_against_mock_produces_frames() {
         vrma_path: None,
         apply_at_time: 0.0,
         reference_pose_json: None,
+        augment_colliders: None,
     };
 
     // Sequence-mode execution must succeed (no anyhow propagation).

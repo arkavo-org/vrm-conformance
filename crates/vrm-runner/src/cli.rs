@@ -298,6 +298,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 vrma_path,
                 apply_at_time,
                 reference_pose_json,
+                augment_colliders: None,
             };
             let result = execute_plan(&plan_value, &opts)?;
             if emit_json {

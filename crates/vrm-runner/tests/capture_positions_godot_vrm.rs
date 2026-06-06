@@ -87,6 +87,7 @@ fn godot_vrm_render_sequence_captures_moving_spring_positions() {
         vrma_path: None,
         apply_at_time: 0.0,
         reference_pose_json: None,
+        augment_colliders: None,
     };
 
     let result = execute_plan(&plan, &opts).expect("execute_plan against godot-vrm must succeed");

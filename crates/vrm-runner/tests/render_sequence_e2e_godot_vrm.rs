@@ -84,6 +84,7 @@ fn godot_vrm_render_sequence_with_animate_root_transform_produces_frames() {
         vrma_path: None,
         apply_at_time: 0.0,
         reference_pose_json: None,
+        augment_colliders: None,
     };
 
     let result = execute_plan(&plan, &opts)

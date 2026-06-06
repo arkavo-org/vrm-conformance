@@ -79,6 +79,7 @@ fn execute_plan_with_reference_positions_against_mock_passes() {
         vrma_path: None,
         apply_at_time: 0.0,
         reference_pose_json: None,
+        augment_colliders: None,
     };
 
     let result = execute_plan(&plan, &opts).expect("execute_plan should succeed");
