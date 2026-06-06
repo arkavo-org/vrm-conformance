@@ -2345,10 +2345,17 @@ pub fn run(cli: Cli) -> Result<()> {
             for (id, is_fast) in variants {
                 let mtoon = MToonParams::defaults(*id);
                 let mut spring = SpringBoneParams::defaults(*id);
-                spring.joint_count = 6;
-                spring.segment_length_m = 0.06;
+                spring.joint_count = 8;
+                spring.segment_length_m = 0.05;
                 spring.stiffness = 0.2;
                 spring.drag_force = 0.2;
+                // Drape the chain forward-and-down off the head so it falls
+                // over the synthetic forehead capsule (VMK #309's hair→forehead
+                // case): augment-OFF, the chain passes through the forehead
+                // volume; augment-ON, the synthetic capsule deflects it. A
+                // straight-down chain (the default axis) misses every synthetic
+                // collider, producing no ON/OFF signal.
+                spring.chain_axis = [0.0, -0.45, 0.89];
 
                 if emit_json {
                     let evt = json!({
