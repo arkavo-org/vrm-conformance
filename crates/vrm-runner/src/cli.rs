@@ -229,6 +229,13 @@ pub enum Cmd {
         /// is considered a violation. Default 2 mm (spec floor).
         #[arg(long, default_value_t = 0.002)]
         epsilon: f32,
+        /// Exclude each chain's root joint (index 0) from the penetration
+        /// measurement. Root joints are kinematically driven by their parent
+        /// bone and are never pushed out by the collision solver, so for
+        /// bone-attached (synthetic) colliders they sit inside by construction
+        /// and would dominate the metric. Matches VMK's HairHeadCollisionTests.
+        #[arg(long = "exclude-root-joints")]
+        exclude_root_joints: bool,
         /// Emit a JSON object to stdout (mirrors the `PenetrationReport`
         /// shape from `vrm_diff_engine::penetration`).
         #[arg(long)]
@@ -829,10 +836,17 @@ pub fn run(cli: Cli) -> Result<()> {
             plan,
             colliders,
             epsilon,
+            exclude_root_joints,
             json: emit_json,
         } => {
             use crate::penetration_diff::run_penetration_diff;
-            let report = run_penetration_diff(&positions, &plan, colliders.as_deref(), epsilon)?;
+            let report = run_penetration_diff(
+                &positions,
+                &plan,
+                colliders.as_deref(),
+                epsilon,
+                exclude_root_joints,
+            )?;
             let passed = report.passed;
 
             if emit_json {

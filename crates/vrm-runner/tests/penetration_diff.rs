@@ -228,6 +228,7 @@ fn run_penetration_diff_passes_when_no_penetration() {
         plan_file.path().try_into().unwrap(),
         None,
         0.002,
+        false,
     )
     .unwrap();
 
@@ -250,6 +251,7 @@ fn run_penetration_diff_fails_when_penetrating_sphere() {
         plan_file.path().try_into().unwrap(),
         None,
         0.002,
+        false,
     )
     .unwrap();
 
@@ -287,6 +289,7 @@ fn run_penetration_diff_passes_for_capsule_outside() {
         plan_file.path().try_into().unwrap(),
         None,
         0.002,
+        false,
     )
     .unwrap();
 
@@ -304,6 +307,7 @@ fn run_penetration_diff_fails_for_capsule_penetrating() {
         plan_file.path().try_into().unwrap(),
         None,
         0.002,
+        false,
     )
     .unwrap();
 
@@ -354,6 +358,7 @@ diff:
         plan_file.path().try_into().unwrap(),
         None,
         0.002,
+        false,
     );
     let err = result.unwrap_err();
     assert!(
@@ -395,6 +400,7 @@ fn run_penetration_diff_sorts_by_frame_index() {
         plan_file.path().try_into().unwrap(),
         None,
         0.002,
+        false,
     )
     .unwrap();
 
@@ -453,6 +459,7 @@ fn run_penetration_diff_reports_real_frame_index_for_non_contiguous_frames() {
         plan_file.path().try_into().unwrap(),
         None,
         0.002,
+        false,
     )
     .unwrap();
 

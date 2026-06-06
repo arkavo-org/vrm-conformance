@@ -95,10 +95,18 @@ pub fn worst_penetration(
 /// joints are tested only against `colliders_per_frame[i]`. Iterates the
 /// shorter of the two lengths. Used for bone-attached (synthetic) colliders
 /// captured alongside positions. Empty input passes with depth 0.
+///
+/// When `exclude_root_joints` is `true`, joint index 0 of each spring chain is
+/// skipped. Root joints (index 0) are kinematically driven by their parent bone
+/// and are never pushed out by the collision solver, so for bone-attached
+/// (synthetic) colliders they sit inside the collider by construction and would
+/// dominate the metric — matching VMK's `HairHeadCollisionTests` which excludes
+/// root joints.
 pub fn worst_penetration_per_frame(
     frames: &[Vec<SpringPositions>],
     colliders_per_frame: &[Vec<ColliderSpec>],
     epsilon_m: f32,
+    exclude_root_joints: bool,
 ) -> PenetrationReport {
     let mut deepest = 0.0_f32;
     let (mut wf, mut ws, mut wj) = (0usize, 0usize, 0usize);
@@ -106,6 +114,9 @@ pub fn worst_penetration_per_frame(
     for fi in 0..n {
         for (si, spring) in frames[fi].iter().enumerate() {
             for (ji, &p) in spring.joint_positions.iter().enumerate() {
+                if exclude_root_joints && ji == 0 {
+                    continue;
+                }
                 for c in &colliders_per_frame[fi] {
                     let depth = -signed_distance(p, c);
                     if depth > deepest {
@@ -235,10 +246,28 @@ mod tests {
                 radius: 0.05,
             }],
         ];
-        let r = worst_penetration_per_frame(&frames, &colliders_per_frame, 0.002);
+        let r = worst_penetration_per_frame(&frames, &colliders_per_frame, 0.002, false);
         assert!(!r.passed);
         assert!((r.max_penetration_depth_m - 0.03).abs() < 1e-5);
         assert_eq!(r.worst_frame, 1);
+    }
+
+    #[test]
+    fn per_frame_excludes_root_joint_when_requested() {
+        // Joint 0 (root) is deep inside the collider; joint 1 is outside.
+        let frames = vec![vec![sp(vec![[0.0, 0.0, 0.0], [0.10, 0.0, 0.0]])]];
+        let colliders_per_frame = vec![vec![ColliderSpec::Sphere {
+            center: [0.0, 0.0, 0.0],
+            radius: 0.05,
+        }]];
+        // Including root: deep penetration at joint 0.
+        let incl = worst_penetration_per_frame(&frames, &colliders_per_frame, 0.002, false);
+        assert!(!incl.passed);
+        assert_eq!(incl.worst_joint, 0);
+        // Excluding root: only joint 1 considered → outside → passes.
+        let excl = worst_penetration_per_frame(&frames, &colliders_per_frame, 0.002, true);
+        assert!(excl.passed);
+        assert_eq!(excl.max_penetration_depth_m, 0.0);
     }
 
     #[test]
@@ -254,7 +283,7 @@ mod tests {
                 radius: 0.05,
             }],
         ];
-        let r = worst_penetration_per_frame(&frames, &colliders_per_frame, 0.002);
+        let r = worst_penetration_per_frame(&frames, &colliders_per_frame, 0.002, false);
         assert!(!r.passed);
         assert_eq!(r.worst_frame, 1);
     }

@@ -107,6 +107,7 @@ pub fn run_penetration_diff(
     plan_path: &Utf8Path,
     colliders_json_path: Option<&Utf8Path>,
     epsilon_m: f32,
+    exclude_root_joints: bool,
 ) -> Result<PenetrationDiffResult> {
     // ── Load positions ────────────────────────────────────────────────────────
     let positions_raw = std::fs::read_to_string(positions_json_path)
@@ -166,6 +167,7 @@ pub fn run_penetration_diff(
             &frames,
             &colliders_per_frame,
             epsilon_m,
+            exclude_root_joints,
         )
     } else {
         let world_specs = plan.ccd_colliders.as_deref().unwrap_or(&[]);
@@ -250,7 +252,7 @@ mod per_frame_colliders_tests {
         let plan_path = d.join("x.test.yaml");
         std::fs::write(&plan_path, MINIMAL_PLAN_YAML).unwrap();
 
-        let r = run_penetration_diff(&pos_path, &plan_path, Some(&col_path), 0.002).unwrap();
+        let r = run_penetration_diff(&pos_path, &plan_path, Some(&col_path), 0.002, false).unwrap();
         assert!(!r.passed);
         assert!((r.max_penetration_depth_m - 0.03).abs() < 1e-5);
         assert_eq!(r.worst_frame_index, 1);
@@ -286,12 +288,61 @@ mod per_frame_colliders_tests {
         std::fs::write(&plan_path, MINIMAL_PLAN_YAML).unwrap();
 
         // Must error, not return passed=true with depth 0.
-        let err = run_penetration_diff(&pos_path, &plan_path, Some(&col_path), 0.002)
+        let err = run_penetration_diff(&pos_path, &plan_path, Some(&col_path), 0.002, false)
             .expect_err("mismatched colliders file must fail loudly");
         assert!(
             err.to_string().contains("no colliders matching"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn exclude_root_joints_passes_when_only_root_penetrates() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+
+        // Two joints per spring: joint 0 (root) is inside the collider, joint 1 is outside.
+        // sphere center=[0,0,0] radius=0.05; joint 0 at [0,0,0] (depth=0.05), joint 1 at [0.10,0,0] (outside).
+        let positions = vec![FramePositionsEntry {
+            frame_index: 0,
+            timestamp_seconds: 0.0,
+            springs: vec![SpringPositions {
+                name: "hair".into(),
+                joint_positions: vec![[0.0, 0.0, 0.0], [0.10, 0.0, 0.0]],
+            }],
+        }];
+        let colliders = vec![FrameCollidersEntry {
+            frame_index: 0,
+            timestamp_seconds: 0.0,
+            colliders: vec![SequenceCollider::Sphere {
+                center: [0.0, 0.0, 0.0],
+                radius: 0.05,
+            }],
+        }];
+        let pos_path = d.join("excl_root_positions.json");
+        let col_path = d.join("excl_root_colliders.json");
+        std::fs::write(&pos_path, serde_json::to_string(&positions).unwrap()).unwrap();
+        std::fs::write(&col_path, serde_json::to_string(&colliders).unwrap()).unwrap();
+        let plan_path = d.join("excl_root.test.yaml");
+        std::fs::write(&plan_path, MINIMAL_PLAN_YAML).unwrap();
+
+        // Without exclusion: root joint dominates → fails.
+        let r_incl =
+            run_penetration_diff(&pos_path, &plan_path, Some(&col_path), 0.002, false).unwrap();
+        assert!(
+            !r_incl.passed,
+            "root joint penetration must be detected without exclusion"
+        );
+        assert_eq!(r_incl.worst_joint, 0);
+
+        // With exclusion: root joint skipped, joint 1 is outside → passes.
+        let r_excl =
+            run_penetration_diff(&pos_path, &plan_path, Some(&col_path), 0.002, true).unwrap();
+        assert!(
+            r_excl.passed,
+            "excluding root joint must make the report pass"
+        );
+        assert_eq!(r_excl.max_penetration_depth_m, 0.0);
     }
 
     const MINIMAL_PLAN_YAML: &str = r#"id: x
