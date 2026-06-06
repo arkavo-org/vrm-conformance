@@ -218,8 +218,13 @@ final class Operations: @unchecked Sendable {
             return loadFailed("no Metal device available on this host")
         }
 
+        let augment: Bool = {
+            if case .bool(let b) = obj["augment_colliders"] { return b }
+            return true  // VMK default
+        }()
+
         let url = URL(fileURLWithPath: path)
-        switch blockingLoad(url: url, device: device) {
+        switch blockingLoad(url: url, device: device, augmentColliders: augment) {
         case .failure(let err):
             return loadFailed("VRMModel.load failed: \(err)")
         case .success(let model):
@@ -1492,12 +1497,13 @@ final class Operations: @unchecked Sendable {
     /// deliberate choice: the JSON-RPC server is single-threaded, sessions
     /// load one at a time, and the call site needs the result before it
     /// can return.
-    private func blockingLoad(url: URL, device: MTLDevice) -> Result<VRMModel, Error> {
+    private func blockingLoad(url: URL, device: MTLDevice, augmentColliders: Bool = true) -> Result<VRMModel, Error> {
         let box = ResultBox()
         let sem = DispatchSemaphore(value: 0)
         Task {
             do {
-                let model = try await VRMModel.load(from: url, device: device)
+                let options = VRMLoadingOptions(augmentSpringBoneColliders: augmentColliders)
+                let model = try await VRMModel.load(from: url, device: device, options: options)
                 box.value = .success(model)
             } catch {
                 box.value = .failure(error)
