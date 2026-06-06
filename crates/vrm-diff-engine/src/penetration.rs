@@ -91,6 +91,43 @@ pub fn worst_penetration(
     }
 }
 
+/// Like [`worst_penetration`] but the colliders move per frame: `frames[i]`
+/// joints are tested only against `colliders_per_frame[i]`. Iterates the
+/// shorter of the two lengths. Used for bone-attached (synthetic) colliders
+/// captured alongside positions. Empty input passes with depth 0.
+pub fn worst_penetration_per_frame(
+    frames: &[Vec<SpringPositions>],
+    colliders_per_frame: &[Vec<ColliderSpec>],
+    epsilon_m: f32,
+) -> PenetrationReport {
+    let mut deepest = 0.0_f32;
+    let (mut wf, mut ws, mut wj) = (0usize, 0usize, 0usize);
+    let n = frames.len().min(colliders_per_frame.len());
+    for fi in 0..n {
+        for (si, spring) in frames[fi].iter().enumerate() {
+            for (ji, &p) in spring.joint_positions.iter().enumerate() {
+                for c in &colliders_per_frame[fi] {
+                    let depth = -signed_distance(p, c);
+                    if depth > deepest {
+                        deepest = depth;
+                        wf = fi;
+                        ws = si;
+                        wj = ji;
+                    }
+                }
+            }
+        }
+    }
+    PenetrationReport {
+        max_penetration_depth_m: deepest,
+        epsilon_m,
+        worst_frame: wf,
+        worst_spring: ws,
+        worst_joint: wj,
+        passed: deepest <= epsilon_m,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +214,48 @@ mod tests {
         let r = worst_penetration(&[], &[c], 0.002);
         assert!(r.passed);
         assert_eq!(r.max_penetration_depth_m, 0.0);
+    }
+
+    #[test]
+    fn per_frame_collider_moves_with_frame() {
+        // Joint fixed at x=0.10. Collider sphere (r=0.05) sits at x=0.20 in
+        // frame 0 (joint outside) and sweeps to x=0.12 in frame 1 (joint 0.02
+        // inside the surface → 0.03 penetration).
+        let frames = vec![
+            vec![sp(vec![[0.10, 0.0, 0.0]])],
+            vec![sp(vec![[0.10, 0.0, 0.0]])],
+        ];
+        let colliders_per_frame = vec![
+            vec![ColliderSpec::Sphere {
+                center: [0.20, 0.0, 0.0],
+                radius: 0.05,
+            }],
+            vec![ColliderSpec::Sphere {
+                center: [0.12, 0.0, 0.0],
+                radius: 0.05,
+            }],
+        ];
+        let r = worst_penetration_per_frame(&frames, &colliders_per_frame, 0.002);
+        assert!(!r.passed);
+        assert!((r.max_penetration_depth_m - 0.03).abs() < 1e-5);
+        assert_eq!(r.worst_frame, 1);
+    }
+
+    #[test]
+    fn per_frame_empty_colliders_for_a_frame_is_skipped() {
+        let frames = vec![
+            vec![sp(vec![[0.0, 0.0, 0.0]])],
+            vec![sp(vec![[0.0, 0.0, 0.0]])],
+        ];
+        let colliders_per_frame = vec![
+            vec![],
+            vec![ColliderSpec::Sphere {
+                center: [0.0, 0.0, 0.0],
+                radius: 0.05,
+            }],
+        ];
+        let r = worst_penetration_per_frame(&frames, &colliders_per_frame, 0.002);
+        assert!(!r.passed);
+        assert_eq!(r.worst_frame, 1);
     }
 }
