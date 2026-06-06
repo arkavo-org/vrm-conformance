@@ -84,6 +84,8 @@ Future tightening (post-1.0) can ratchet the MToon-material threshold toward 0.9
 
 `VRMC_springBone` does not pin a fixed time-step. Adapters must guarantee deterministic stepping at 60 Hz with reset between tests.
 
+**The golden (UniVRM) does not substep** — its FastSpringBone runs a *single* Verlet step per frame at frame-rate `deltaTime` (`FastSpringBoneScheduler.Schedule(Time.deltaTime)`, no accumulator, no clamp; our harness drives it at 1/60). Consequence for collision conformance: stiff-chain collision is a large-`dt` instability, and at 60 Hz single-step the reference is *more* susceptible to it, not less. A renderer that substeps (e.g. 240/480 Hz) will resolve a stiff-chain–vs-collider contact more stably than UniVRM does — that is a **divergence *above* the reference**, a deliberate quality choice to be logged and frozen-baselined, **not** a conformance win. Matching UniVRM means matching its single-step behavior, catapult included. See `docs/findings.md` 2026-06-06 (#313 Track 2) for the worked case.
+
 **Asset emission (Phase 2D-a)**: the asset generator's `emit-springbone` subcommand produces VRM 1.0 assets with `VRMC_springBone` chains attached to the head bone. Each chain is parametrized by `SpringBoneParams` (joint_count, segment_length_m, stiffness, drag_force, gravity_power, gravity_dir, hit_radius). The renderer-side `step_physics` / `reset_physics` / `animate_root_transform` ops that exercise these assets land in 2D-b.
 
 **Sweep emission (Phase 2D-c)**: `emit-springbone-sweep` produces the full one-axis-at-a-time parameter sweep (~18 assets) so a regression in any single dimension (joints, stiffness, drag, gravity, segment length) can be pinned without confounding. Default MToon is held constant across all variants; the spring-bone axis is what is under test.
@@ -118,6 +120,18 @@ Settle thresholds reflect that two correctly-converged renderers should agree to
 `vrm-runner execute-test-plan --reference-positions <renderer>=<positions.json>` runs the diff. `vrm-runner consensus-diff --render-positions <name>=<path>` produces N-way outlier flagging.
 
 These thresholds are operational, not spec-defined. Future tightening follows the same trajectory as the cross-renderer SSIM thresholds.
+
+### CCD / `penetration-diff` is mock-backed only — no real solver has produced a position trace yet
+
+The position-based collision metric (`vrm-runner penetration-diff`, the `ccd_colliders` plans, and the `spring_bone_ccd_sweep` corpus) consumes per-frame joint world positions, captured via `render_sequence` with `capture_positions: true` (→ `SequenceFrame.spring_positions`). **Today that capture is implemented in exactly one adapter: `vrm-mock-renderer`.** The mock has no VRM loader, no shader, and no physics engine (`render.rs`: *"Not a renderer in any meaningful sense"*); its `capture_positions` output is a hardcoded **static** 4-joint chain (`handlers.rs::synthetic_spring_chain`) that does not move, does not read the chain's stiffness/drag/gravity, and ignores both the colliders and `root_translation`.
+
+Consequences, to be stated plainly when reporting CCD results:
+
+- The end-to-end mock penetration run validates **pipeline wiring only** — positions JSON emitted → parsed → `worst_penetration` → result. It **cannot** observe tunneling or tunnel-prevention: there is no integrator to tunnel, and the static chain (x=0) never approaches the swept collider (x=0.10). A "0 penetration" mock result is structural, not evidence the CCD works.
+- The four real adapters (UniVRM, godot-vrm, three-vrm, VMK) render `render_sequence` PNGs but return frames **without** `spring_positions`. So the penetration / CCD metric **has never run against a real spring-bone solver.**
+- This is a limitation of the *position/penetration* path specifically. The image-SSIM consensus path (settle/swing sweeps) does drive the real engines — see `docs/findings.md` 2026-05-29 — and that fidelity signal is genuine.
+
+Unblocking requires implementing `RenderSequenceParams.capture_positions` → `SequenceFrame.spring_positions` in a real adapter. The UniVRM PlayMode batch (`adapters/univrm`) is the highest-value target, since it makes `penetration-diff` run against the golden's actual FastSpringBone solver. Until then, CCD/penetration findings rest on unit tests + the source-level analysis in the `docs/findings.md` 2026-06-06 entry (the spec-reference collision push-out feeds next-frame Verlet velocity), not on a measured real-engine trace.
 
 ### Exception: VRM 0.x leaf-tail sweep is a 2-factor grid
 
