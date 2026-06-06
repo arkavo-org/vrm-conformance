@@ -115,7 +115,7 @@ pub fn render_sequence_params(
             start_seconds: v.start_seconds,
         }),
         capture_positions: block.capture_positions,
-        capture_synthetic_colliders: false,
+        capture_synthetic_colliders: block.capture_synthetic_colliders,
     }
 }
 
@@ -146,5 +146,35 @@ pub fn apply_vrma_at_time_params(
         vrma_handle,
         vrm_handle,
         time_seconds: apply_at_time,
+    }
+}
+
+#[cfg(test)]
+mod synthetic_collider_threading_tests {
+    use super::*;
+
+    #[test]
+    fn capture_synthetic_colliders_projects_into_params() {
+        let output = plan::Output {
+            width: 256,
+            height: 256,
+            color_space: plan::ColorSpace::Srgb,
+            msaa: 1,
+        };
+        let block = plan::RenderSequenceBlock {
+            frame_count: 10,
+            frame_hz: 30.0,
+            physics_dt_seconds: 0.016_666_668,
+            output_format: plan::SequenceFormat::PngSequence,
+            animate_root_transform: None,
+            apply_vrma: None,
+            temporal_ssim_threshold: None,
+            capture_positions: false,
+            capture_synthetic_colliders: true,
+        };
+        let p = render_sequence_params("s", &output, &block, "/tmp".into());
+        assert!(p.capture_synthetic_colliders);
+        // Sanity: capture_positions still projects independently.
+        assert_eq!(p.capture_positions, block.capture_positions);
     }
 }
