@@ -2803,7 +2803,7 @@ pub fn run(cli: Cli) -> Result<()> {
                         }
                     },
                     "emit-synthetic-collider-asset": {
-                        "summary": "Emit 2 synthetic-collider corpus triplets (humanoid + 6-joint hair chain, fast + static variants). Plans use render_sequence with capture_positions and capture_synthetic_colliders true; no authored ccd_colliders — synthetic colliders are dumped at runtime by the adapter. Validates VMK synthetic spring-bone collider augmentation (VMK #309/#313).",
+                        "summary": "Emit 2 synthetic-collider corpus triplets (humanoid + 8-joint hair chain, fast + static variants). Plans use render_sequence with capture_positions and capture_synthetic_colliders true; no authored ccd_colliders — synthetic colliders are dumped at runtime by the adapter. Validates VMK synthetic spring-bone collider augmentation (VMK #309/#313).",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],
