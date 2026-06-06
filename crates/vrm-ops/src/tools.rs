@@ -14,8 +14,9 @@ pub struct LoadVrmParams {
     pub path: String,
     /// Renderer-specific: when `Some(false)`, ask the adapter to load the
     /// model WITHOUT synthesizing bone-derived spring-bone colliders (VMK
-    /// #309). `None` = adapter default (VMK augments by default). Adapters
-    /// that don't synthesize colliders ignore this field.
+    /// #309). `Some(true)` forces synthesis on. `None` = adapter default
+    /// (VMK augments by default). Adapters that don't synthesize colliders
+    /// ignore this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub augment_colliders: Option<bool>,
 }
@@ -428,7 +429,8 @@ pub struct SequenceFrame {
     /// Per-frame world-space synthetic colliders (VMK #309), present only when
     /// `RenderSequenceParams.capture_synthetic_colliders` was set and the
     /// adapter generated any. Bone-attached colliders move per frame, so this
-    /// is captured alongside `spring_positions`. Empty when augmentation is off.
+    /// is captured alongside `spring_positions`. Absent from JSON (`None`) when
+    /// augmentation is off or capture was not requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub synthetic_colliders: Option<Vec<SequenceCollider>>,
 }
@@ -508,6 +510,9 @@ mod ccd_capture_positions_tests {
         let legacy = r#"{"path":"/tmp/a.vrm"}"#;
         let p: LoadVrmParams = serde_json::from_str(legacy).unwrap();
         assert_eq!(p.augment_colliders, None);
+        let explicit = r#"{"path":"/tmp/a.vrm","augment_colliders":false}"#;
+        let p2: LoadVrmParams = serde_json::from_str(explicit).unwrap();
+        assert_eq!(p2.augment_colliders, Some(false));
     }
 
     #[test]
