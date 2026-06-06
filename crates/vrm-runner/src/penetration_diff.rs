@@ -46,6 +46,24 @@ pub fn to_collider_spec(c: &ColliderWorldSpec) -> ColliderSpec {
     }
 }
 
+/// Map a `vrm_ops::tools::SequenceCollider` (per-frame capture) to the engine
+/// `ColliderSpec`. Structurally identical; lives in the runner per the
+/// dependency-direction rule.
+pub fn to_collider_spec_seq(c: &vrm_ops::tools::SequenceCollider) -> ColliderSpec {
+    use vrm_ops::tools::SequenceCollider as S;
+    match c {
+        S::Sphere { center, radius } => ColliderSpec::Sphere {
+            center: *center,
+            radius: *radius,
+        },
+        S::Capsule { a, b, radius } => ColliderSpec::Capsule {
+            a: *a,
+            b: *b,
+            radius: *radius,
+        },
+    }
+}
+
 /// Runner-level penetration diff result.  Wraps the engine's `PenetrationReport`
 /// and adds `worst_frame_index` — the real `frame_index` from the positions
 /// JSON (not the 0-based slice index used internally by the engine).
@@ -67,19 +85,25 @@ pub struct PenetrationDiffResult {
 
 /// Load the positions JSON from `positions_json_path`, reshape it into
 /// `Vec<Vec<SpringPositions>>` (one inner `Vec` per frame, ordered by
-/// `frame_index`), load the test plan at `plan_path`, map `ccd_colliders`
-/// to engine specs, and call `worst_penetration`.
+/// `frame_index`), load the test plan at `plan_path`, map colliders
+/// to engine specs, and call the appropriate penetration check.
+///
+/// When `colliders_json_path` is `Some`, the per-frame moving colliders file
+/// is used (bone-attached synthetic colliders captured alongside positions).
+/// When `None`, the plan's static `ccd_colliders` list is used instead.
 ///
 /// The returned [`PenetrationDiffResult::worst_frame_index`] is the real
 /// `frame_index` from the positions JSON (not the engine's slice index).
 ///
 /// Returns an error when:
-/// - The file cannot be read or is invalid JSON.
+/// - Any file cannot be read or is invalid JSON/YAML.
 /// - The plan cannot be parsed.
-/// - The plan has no `ccd_colliders` (or an empty list).
+/// - Neither `colliders_json_path` nor the plan's `ccd_colliders` provide
+///   any colliders.
 pub fn run_penetration_diff(
     positions_json_path: &Utf8Path,
     plan_path: &Utf8Path,
+    colliders_json_path: Option<&Utf8Path>,
     epsilon_m: f32,
 ) -> Result<PenetrationDiffResult> {
     // ── Load positions ────────────────────────────────────────────────────────
@@ -107,16 +131,42 @@ pub fn run_penetration_diff(
     let plan: vrm_test_plan::TestPlan = serde_yml::from_str(&plan_raw)
         .with_context(|| format!("failed to parse test plan {plan_path}"))?;
 
-    // ── Extract and map colliders ─────────────────────────────────────────────
-    let world_specs = plan.ccd_colliders.as_deref().unwrap_or(&[]);
-    if world_specs.is_empty() {
-        bail!("plan has no ccd_colliders — cannot run penetration-diff");
-    }
-
-    let colliders: Vec<ColliderSpec> = world_specs.iter().map(to_collider_spec).collect();
-
-    // ── Run penetration check ─────────────────────────────────────────────────
-    let report = worst_penetration(&frames, &colliders, epsilon_m);
+    // ── Run penetration check (branch on collider source) ────────────────────
+    let report = if let Some(col_path) = colliders_json_path {
+        use crate::execute::FrameCollidersEntry;
+        let col_raw = std::fs::read_to_string(col_path)
+            .with_context(|| format!("failed to read colliders file {col_path}"))?;
+        let mut col_entries: Vec<FrameCollidersEntry> = serde_json::from_str(&col_raw)
+            .with_context(|| format!("failed to parse colliders JSON {col_path}"))?;
+        col_entries.sort_by_key(|e| e.frame_index);
+        let by_index: std::collections::HashMap<u32, Vec<ColliderSpec>> = col_entries
+            .into_iter()
+            .map(|e| {
+                (
+                    e.frame_index,
+                    e.colliders.iter().map(to_collider_spec_seq).collect(),
+                )
+            })
+            .collect();
+        let colliders_per_frame: Vec<Vec<ColliderSpec>> = original_frame_indices
+            .iter()
+            .map(|fi| by_index.get(fi).cloned().unwrap_or_default())
+            .collect();
+        vrm_diff_engine::penetration::worst_penetration_per_frame(
+            &frames,
+            &colliders_per_frame,
+            epsilon_m,
+        )
+    } else {
+        let world_specs = plan.ccd_colliders.as_deref().unwrap_or(&[]);
+        if world_specs.is_empty() {
+            bail!(
+                "plan has no ccd_colliders and no --colliders given — cannot run penetration-diff"
+            );
+        }
+        let colliders: Vec<ColliderSpec> = world_specs.iter().map(to_collider_spec).collect();
+        worst_penetration(&frames, &colliders, epsilon_m)
+    };
 
     // Translate the engine's slice index back to the real frame_index.
     let worst_frame_index = original_frame_indices
@@ -133,4 +183,115 @@ pub fn run_penetration_diff(
         worst_joint: report.worst_joint,
         passed: report.passed,
     })
+}
+
+#[cfg(test)]
+mod per_frame_colliders_tests {
+    use super::*;
+    use crate::execute::{FrameCollidersEntry, FramePositionsEntry};
+    use vrm_ops::tools::{SequenceCollider, SpringPositions};
+
+    #[test]
+    fn colliders_path_measures_against_moving_colliders() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+
+        let positions = vec![
+            FramePositionsEntry {
+                frame_index: 0,
+                timestamp_seconds: 0.0,
+                springs: vec![SpringPositions {
+                    name: "hair".into(),
+                    joint_positions: vec![[0.10, 0.0, 0.0]],
+                }],
+            },
+            FramePositionsEntry {
+                frame_index: 1,
+                timestamp_seconds: 0.033,
+                springs: vec![SpringPositions {
+                    name: "hair".into(),
+                    joint_positions: vec![[0.10, 0.0, 0.0]],
+                }],
+            },
+        ];
+        let colliders = vec![
+            FrameCollidersEntry {
+                frame_index: 0,
+                timestamp_seconds: 0.0,
+                colliders: vec![SequenceCollider::Sphere {
+                    center: [0.20, 0.0, 0.0],
+                    radius: 0.05,
+                }],
+            },
+            FrameCollidersEntry {
+                frame_index: 1,
+                timestamp_seconds: 0.033,
+                colliders: vec![SequenceCollider::Sphere {
+                    center: [0.12, 0.0, 0.0],
+                    radius: 0.05,
+                }],
+            },
+        ];
+        let pos_path = d.join("x_vmk_positions.json");
+        let col_path = d.join("x_vmk_colliders.json");
+        std::fs::write(&pos_path, serde_json::to_string(&positions).unwrap()).unwrap();
+        std::fs::write(&col_path, serde_json::to_string(&colliders).unwrap()).unwrap();
+
+        let plan_path = d.join("x.test.yaml");
+        std::fs::write(&plan_path, MINIMAL_PLAN_YAML).unwrap();
+
+        let r = run_penetration_diff(&pos_path, &plan_path, Some(&col_path), 0.002).unwrap();
+        assert!(!r.passed);
+        assert!((r.max_penetration_depth_m - 0.03).abs() < 1e-5);
+        assert_eq!(r.worst_frame_index, 1);
+    }
+
+    const MINIMAL_PLAN_YAML: &str = r#"id: x
+spec_section: test
+asset: x.vrm
+camera:
+  position:
+  - 0.0
+  - 1.4
+  - 1.5
+  target:
+  - 0.0
+  - 1.4
+  - 0.0
+  up:
+  - 0.0
+  - 1.0
+  - 0.0
+  fov_degrees: 30.0
+lighting:
+  directional:
+    dir:
+    - -0.3
+    - -0.6
+    - -0.7
+    color:
+    - 1.0
+    - 1.0
+    - 1.0
+    intensity: 1.0
+  ambient:
+    color:
+    - 0.5
+    - 0.5
+    - 0.5
+    intensity: 0.3
+  cast_shadows: false
+  receive_shadows: false
+output:
+  width: 1024
+  height: 1024
+  color_space: srgb
+  msaa: 4
+diff:
+  mode: ssim
+  threshold: 0.85
+  reference_renderer: univrm
+  conformance_status:
+    kind: included
+"#;
 }

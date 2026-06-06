@@ -54,6 +54,11 @@ pub enum Cmd {
         /// pose_diff and includes the report in JSON output.
         #[arg(long = "reference-pose-json", value_name = "PATH")]
         reference_pose_json: Option<Utf8PathBuf>,
+        /// Renderer-specific: forward to `load_vrm` as `augment_colliders`.
+        /// `true`/`false` toggles VMK synthetic-collider augmentation (#309);
+        /// omit for the adapter default. Used by the synthetic-collider corpus.
+        #[arg(long = "augment-colliders")]
+        augment_colliders: Option<bool>,
         #[arg(long)]
         json: bool,
     },
@@ -214,6 +219,11 @@ pub enum Cmd {
         /// Path to the test plan (`.test.yaml`) carrying `ccd_colliders`.
         #[arg(long)]
         plan: Utf8PathBuf,
+        /// Optional per-frame colliders JSON (`<id>_<renderer>_colliders.json`).
+        /// When set, penetration is measured against these moving colliders
+        /// instead of the plan's static `ccd_colliders`.
+        #[arg(long, value_name = "PATH")]
+        colliders: Option<Utf8PathBuf>,
         /// Penetration tolerance in metres. A joint whose signed distance to
         /// the nearest collider surface is more negative than this threshold
         /// is considered a violation. Default 2 mm (spec floor).
@@ -283,6 +293,7 @@ pub fn run(cli: Cli) -> Result<()> {
             vrma_path,
             apply_at_time,
             reference_pose_json,
+            augment_colliders,
             json: emit_json,
         } => {
             let plan_value = load_plan(&plan)?;
@@ -298,7 +309,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 vrma_path,
                 apply_at_time,
                 reference_pose_json,
-                augment_colliders: None,
+                augment_colliders,
             };
             let result = execute_plan(&plan_value, &opts)?;
             if emit_json {
@@ -816,11 +827,12 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::PenetrationDiff {
             positions,
             plan,
+            colliders,
             epsilon,
             json: emit_json,
         } => {
             use crate::penetration_diff::run_penetration_diff;
-            let report = run_penetration_diff(&positions, &plan, epsilon)?;
+            let report = run_penetration_diff(&positions, &plan, colliders.as_deref(), epsilon)?;
             let passed = report.passed;
 
             if emit_json {
