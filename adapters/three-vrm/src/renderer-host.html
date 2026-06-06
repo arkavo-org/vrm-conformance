@@ -543,6 +543,7 @@
         const width = typeof params.width === "number" ? params.width : 512;
         const height = typeof params.height === "number" ? params.height : 512;
         const colorSpace = typeof params.color_space === "string" ? params.color_space : "Srgb";
+        const capturePositions = params.capture_positions === true;
         ensureRenderer(width, height);
 
         const frameCount = typeof params.frame_count === "number" ? params.frame_count : 1;
@@ -572,13 +573,18 @@
           // Drive spring-bone physics one step.
           state.vrm.update(dt);
 
+          // Capture spring positions at this frame's post-step pose (the pose
+          // this frame renders), reusing the dump_bone_positions extraction.
+          // three.js world space is glTF/VRM space (Y-up, -Z fwd) — no convert.
+          const positions = capturePositions ? window.__dumpBonePositions({}) : null;
+
           // Render and collect data URL.
           const dataUrl = await window.__render({
             width: width,
             height: height,
             color_space: colorSpace,
           });
-          results.push(dataUrl);
+          results.push({ dataUrl: dataUrl, positions: positions });
         }
 
         // Restore original root position.

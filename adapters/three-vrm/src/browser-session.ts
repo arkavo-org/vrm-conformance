@@ -275,12 +275,14 @@ export class BrowserSession {
     frame_hz: number;
     physics_dt_seconds: number;
     animate_root_transform: unknown;
+    capture_positions: boolean;
   }): Promise<{
     frames: Array<{
       index: number;
       timestamp_seconds: number;
       path: string;
       blake3: string;
+      spring_positions?: Array<{ name: string; joint_positions: number[][] }>;
     }>;
     duration_seconds: number;
     actual_color_space: string;
@@ -289,7 +291,14 @@ export class BrowserSession {
     if (!this.page) throw new Error("BrowserSession not started");
     await fs.mkdir(params.output_dir, { recursive: true });
 
-    const dataUrls: string[] = await this.page.evaluate(
+    // __renderSequence returns one object per frame: { dataUrl, positions }.
+    // `positions` is the dump_bone_positions result ({springs:[...]}) when
+    // capture_positions was set, else null.
+    type FrameOut = {
+      dataUrl: string;
+      positions: { springs: Array<{ name: string; joint_positions: number[][] }> } | null;
+    };
+    const frameOuts: FrameOut[] = await this.page.evaluate(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (p) => (window as any).__renderSequence(p),
       {
@@ -299,6 +308,7 @@ export class BrowserSession {
         frame_count: params.frame_count,
         physics_dt_seconds: params.physics_dt_seconds,
         animate_root_transform: params.animate_root_transform,
+        capture_positions: params.capture_positions,
       },
     );
 
@@ -308,9 +318,10 @@ export class BrowserSession {
       timestamp_seconds: number;
       path: string;
       blake3: string;
+      spring_positions?: Array<{ name: string; joint_positions: number[][] }>;
     }> = [];
-    for (let i = 0; i < dataUrls.length; i++) {
-      const dataUrl = dataUrls[i];
+    for (let i = 0; i < frameOuts.length; i++) {
+      const dataUrl = frameOuts[i].dataUrl;
       const comma = dataUrl.indexOf(",");
       if (comma < 0) throw new Error(`frame ${i}: malformed data URL`);
       const b64 = dataUrl.slice(comma + 1);
@@ -318,12 +329,21 @@ export class BrowserSession {
       const frameIndex = String(i).padStart(4, "0");
       const framePath = path.join(params.output_dir, `${frameIndex}.png`);
       await fs.writeFile(framePath, png);
-      frames.push({
+      const frame: {
+        index: number;
+        timestamp_seconds: number;
+        path: string;
+        blake3: string;
+        spring_positions?: Array<{ name: string; joint_positions: number[][] }>;
+      } = {
         index: i,
         timestamp_seconds: i / params.frame_hz,
         path: framePath,
         blake3: ZERO_BLAKE3,
-      });
+      };
+      const pos = frameOuts[i].positions;
+      if (pos && pos.springs) frame.spring_positions = pos.springs;
+      frames.push(frame);
     }
 
     return {

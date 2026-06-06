@@ -116,6 +116,7 @@ export async function dispatch(
           physics_dt_seconds?: number;
           animate_root_transform?: unknown;
           apply_vrma?: unknown;
+          capture_positions?: boolean;
         };
         // Validation order: more-specific rejections first so callers
         // get the most relevant error (mutual exclusion / physics_dt
@@ -151,6 +152,7 @@ export async function dispatch(
           frame_hz: frameHz,
           physics_dt_seconds: physicsDt,
           animate_root_transform: p.animate_root_transform ?? null,
+          capture_positions: p.capture_positions ?? false,
         });
         return { ok: true, result };
       }
