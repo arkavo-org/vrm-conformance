@@ -122,11 +122,25 @@ pub struct ExecuteOptions {
 
 /// One entry per frame that carried `synthetic_colliders` data. Written to
 /// `<output_dir>/<plan_id>_<renderer>_colliders.json` when
-/// `render_sequence.capture_synthetic_colliders` is true. Consumed by
+/// `render_sequence.capture_synthetic_colliders` is true; consumed by
 /// `penetration-diff --colliders`.
+///
+/// Schema (one array element per frame that carried colliders):
+/// ```json
+/// [
+///   {
+///     "frame_index": 0,
+///     "timestamp_seconds": 0.0,
+///     "colliders": [ { "type": "sphere", "center": [x,y,z], "radius": r } ]
+///   }
+/// ]
+/// ```
+/// Mirrors [`FramePositionsEntry`] (same `frame_index`/`timestamp_seconds`
+/// keys) so a consumer can align positions and colliders frame-by-frame.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FrameCollidersEntry {
     pub frame_index: u32,
+    pub timestamp_seconds: f32,
     pub colliders: Vec<ops::SequenceCollider>,
 }
 
@@ -814,6 +828,7 @@ fn persist_colliders_json(
         .filter_map(|f| {
             f.synthetic_colliders.as_ref().map(|c| FrameCollidersEntry {
                 frame_index: f.index,
+                timestamp_seconds: f.timestamp_seconds,
                 colliders: c.clone(),
             })
         })
@@ -831,6 +846,9 @@ fn persist_colliders_json(
 
 /// Test-only shim so an integration test can exercise `persist_colliders_json`
 /// against a hand-built `RenderSequenceResult` without spawning an adapter.
+/// Integration tests compile as a separate crate, so this must be `pub` rather
+/// than `#[cfg(test)]`; `#[doc(hidden)]` keeps it out of the public API docs.
+#[doc(hidden)]
 pub fn persist_colliders_json_for_test(
     result: &ops::RenderSequenceResult,
     output_dir: &Utf8Path,
