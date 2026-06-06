@@ -938,6 +938,13 @@ final class Operations: @unchecked Sendable {
             return false
         }()
 
+        // When set, emit world-space synthetic colliders (VMK #309) per frame.
+        // Bone-attached colliders move each frame; captured alongside spring_positions.
+        let captureSyntheticColliders: Bool = {
+            if case .bool(let b) = obj["capture_synthetic_colliders"] { return b }
+            return false
+        }()
+
         guard let session = lookupSession(sessionId) else {
             return invalidParams("unknown session_id: \(sessionId)")
         }
@@ -1109,6 +1116,42 @@ final class Operations: @unchecked Sendable {
                 }
             }
 
+            // Capture world-space synthetic colliders (VMK #309) for this frame.
+            // Bone-attached → they move each frame; transform each local shape
+            // by its node's worldMatrix. Empty when augmentation is off.
+            var frameColliders: [JSONValue] = []
+            if captureSyntheticColliders, let springBone = session.model.springBone {
+                let nodes = session.model.nodes
+                for collider in springBone.syntheticColliders {
+                    guard collider.node >= 0 && collider.node < nodes.count else { continue }
+                    let m = nodes[collider.node].worldMatrix
+                    func toWorld(_ p: SIMD3<Float>) -> SIMD3<Float> {
+                        let w = m * SIMD4<Float>(p.x, p.y, p.z, 1.0)
+                        return SIMD3<Float>(w.x, w.y, w.z)
+                    }
+                    func vec(_ p: SIMD3<Float>) -> JSONValue {
+                        .array([.number(Double(p.x)), .number(Double(p.y)), .number(Double(p.z))])
+                    }
+                    switch collider.shape {
+                    case .sphere(let offset, let radius):
+                        frameColliders.append(.object([
+                            "type": .string("sphere"),
+                            "center": vec(toWorld(offset)),
+                            "radius": .number(Double(radius)),
+                        ]))
+                    case .capsule(let offset, let radius, let tail):
+                        frameColliders.append(.object([
+                            "type": .string("capsule"),
+                            "a": vec(toWorld(offset)),
+                            "b": vec(toWorld(tail)),
+                            "radius": .number(Double(radius)),
+                        ]))
+                    case .plane, .insideSphere, .insideCapsule:
+                        continue
+                    }
+                }
+            }
+
             var frameObj: [String: JSONValue] = [
                 "index": .number(Double(i)),
                 "timestamp_seconds": .number(Double(i) / Double(frameHz)),
@@ -1117,6 +1160,12 @@ final class Operations: @unchecked Sendable {
             ]
             if capturePositions {
                 frameObj["spring_positions"] = .array(framePositions)
+            }
+            // Only emit the key when there are colliders to report.
+            // An absent key (vs empty array) signals "augmentation off/no colliders"
+            // to the runner's persist_colliders_json, keeping the OFF-assertion clean.
+            if captureSyntheticColliders && !frameColliders.isEmpty {
+                frameObj["synthetic_colliders"] = .array(frameColliders)
             }
             frames.append(.object(frameObj))
         }
