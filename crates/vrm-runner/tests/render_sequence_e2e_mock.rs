@@ -69,6 +69,7 @@ fn render_sequence_against_mock_produces_frames() {
         apply_vrma: None,
         temporal_ssim_threshold: None,
         capture_positions: false,
+        capture_synthetic_colliders: false,
     });
 
     let renderer_name = "mock-seq";

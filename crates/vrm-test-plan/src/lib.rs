@@ -184,6 +184,12 @@ pub struct RenderSequenceBlock {
     /// Default false so existing sequence plans parse unchanged.
     #[serde(default)]
     pub capture_positions: bool,
+    /// When true, the runner sets `capture_synthetic_colliders = true` in
+    /// `RenderSequenceParams` and persists the per-frame world-space synthetic
+    /// colliders to `<output_dir>/<plan_id>_<renderer>_colliders.json`.
+    /// Default false so existing sequence plans parse unchanged.
+    #[serde(default)]
+    pub capture_synthetic_colliders: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -748,6 +754,13 @@ output_format: png_sequence
     }
 
     #[test]
+    fn render_sequence_block_capture_synthetic_colliders_defaults_false() {
+        let yaml = "frame_count: 2\nframe_hz: 30.0\nphysics_dt_seconds: 0.016666668\noutput_format: png_sequence\n";
+        let block: RenderSequenceBlock = serde_yml::from_str(yaml).unwrap();
+        assert!(!block.capture_synthetic_colliders);
+    }
+
+    #[test]
     fn render_sequence_block_capture_positions_explicit_true_roundtrips() {
         let raw = r#"
 frame_count: 5
@@ -843,6 +856,7 @@ capture_positions: true
             apply_vrma: None,
             temporal_ssim_threshold: None,
             capture_positions: false,
+            capture_synthetic_colliders: false,
         });
         assert!(plan.validate().is_ok());
     }
@@ -863,6 +877,7 @@ capture_positions: true
             apply_vrma: None,
             temporal_ssim_threshold: None,
             capture_positions: false,
+            capture_synthetic_colliders: false,
         });
         assert_eq!(
             plan.validate(),
@@ -1012,6 +1027,7 @@ mod ccd_colliders_tests {
             apply_vrma: None,
             temporal_ssim_threshold: None,
             capture_positions: true,
+            capture_synthetic_colliders: false,
         });
         plan.ccd_colliders = Some(vec![ColliderWorldSpec::Sphere {
             center: [0.0, 1.0, 0.0],
@@ -1050,6 +1066,7 @@ mod ccd_colliders_tests {
             apply_vrma: None,
             temporal_ssim_threshold: None,
             capture_positions: false, // <-- must be true for CCD
+            capture_synthetic_colliders: false,
         });
         plan.ccd_colliders = Some(vec![ColliderWorldSpec::Sphere {
             center: [0.0, 1.0, 0.0],

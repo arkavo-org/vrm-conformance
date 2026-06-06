@@ -62,6 +62,7 @@ fn make_plan_with_capture(
         apply_vrma: None,
         temporal_ssim_threshold: None,
         capture_positions: capture,
+        capture_synthetic_colliders: false,
     });
     plan
 }

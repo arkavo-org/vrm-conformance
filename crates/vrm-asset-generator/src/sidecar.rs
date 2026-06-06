@@ -234,6 +234,7 @@ pub fn build_spring_bone_swing_sequence_test_plan(
         apply_vrma: None,
         temporal_ssim_threshold: None,
         capture_positions: false,
+        capture_synthetic_colliders: false,
     });
     plan.spec_section = "VRMC_materials_mtoon + VRMC_springBone (sequence)".into();
     plan
@@ -725,6 +726,7 @@ pub fn build_spring_bone_ccd_test_plan(
         apply_vrma: None,
         temporal_ssim_threshold: None,
         capture_positions: true,
+        capture_synthetic_colliders: false,
     });
     plan.ccd_colliders = Some(vec![ccd_collider]);
     plan

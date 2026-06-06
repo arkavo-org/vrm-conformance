@@ -73,6 +73,7 @@ fn vmk_render_sequence_with_animate_root_transform_produces_frames() {
         apply_vrma: None,
         temporal_ssim_threshold: None,
         capture_positions: false,
+        capture_synthetic_colliders: false,
     });
     // Validator rejects animation + render_sequence both set; the default
     // plan doesn't set animation but be explicit for clarity.
