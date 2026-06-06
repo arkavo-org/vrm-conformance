@@ -121,17 +121,18 @@ Settle thresholds reflect that two correctly-converged renderers should agree to
 
 These thresholds are operational, not spec-defined. Future tightening follows the same trajectory as the cross-renderer SSIM thresholds.
 
-### CCD / `penetration-diff` is mock-backed only — no real solver has produced a position trace yet
+### CCD / `penetration-diff` position-capture support (per-adapter)
 
-The position-based collision metric (`vrm-runner penetration-diff`, the `ccd_colliders` plans, and the `spring_bone_ccd_sweep` corpus) consumes per-frame joint world positions, captured via `render_sequence` with `capture_positions: true` (→ `SequenceFrame.spring_positions`). **Today that capture is implemented in exactly one adapter: `vrm-mock-renderer`.** The mock has no VRM loader, no shader, and no physics engine (`render.rs`: *"Not a renderer in any meaningful sense"*); its `capture_positions` output is a hardcoded **static** 4-joint chain (`handlers.rs::synthetic_spring_chain`) that does not move, does not read the chain's stiffness/drag/gravity, and ignores both the colliders and `root_translation`.
+The position-based collision metric (`vrm-runner penetration-diff`, the `ccd_colliders` plans, and the `spring_bone_ccd_sweep` corpus) consumes per-frame joint world positions, captured via `render_sequence` with `capture_positions: true` (→ `SequenceFrame.spring_positions`).
 
-Consequences, to be stated plainly when reporting CCD results:
+Adapter support:
 
-- The end-to-end mock penetration run validates **pipeline wiring only** — positions JSON emitted → parsed → `worst_penetration` → result. It **cannot** observe tunneling or tunnel-prevention: there is no integrator to tunnel, and the static chain (x=0) never approaches the swept collider (x=0.10). A "0 penetration" mock result is structural, not evidence the CCD works.
-- The four real adapters (UniVRM, godot-vrm, three-vrm, VMK) render `render_sequence` PNGs but return frames **without** `spring_positions`. So the penetration / CCD metric **has never run against a real spring-bone solver.**
-- This is a limitation of the *position/penetration* path specifically. The image-SSIM consensus path (settle/swing sweeps) does drive the real engines — see `docs/findings.md` 2026-05-29 — and that fidelity signal is genuine.
+- **`vrm-mock-renderer`** — implements capture, but as a hardcoded **static** 4-joint chain (`handlers.rs::synthetic_spring_chain`): no loader, no shader, no physics (`render.rs`: *"Not a renderer in any meaningful sense"*); ignores the chain's stiffness/drag/gravity, the colliders, and `root_translation`. A mock penetration run validates **pipeline wiring only** — it cannot observe tunneling or tunnel-prevention (no integrator to tunnel; the static chain at x=0 never approaches the x=0.10 swept collider). A "0 penetration" mock result is structural, not evidence CCD works.
+- **`godot-vrm`** — **implements capture against the real L4 solver** (as of 2026-06-06; `session.gd::_collect_spring_positions`, shared with `dump_bone_positions`). First real-engine CCD measurement: `docs/findings.md` 2026-06-06 (chain passes through the world-fixed colliders undeflected; depth ∝ radius). This is the proof the metric works against a real spring-bone simulation, not just the static mock.
+- **three-vrm, VMK** — implement single-frame `dump_bone_positions` but do **not** yet populate per-frame `spring_positions` in `render_sequence`. Cheap follow-ups (reuse their existing extraction per frame, the godot pattern).
+- **UniVRM** — no position extraction at all; highest-value follow-up because it measures whether **the golden** deflects off world-fixed colliders (deciding divergence-from-oracle vs shared behavior). Requires implementing extraction in the PlayMode batch.
 
-Unblocking requires implementing `RenderSequenceParams.capture_positions` → `SequenceFrame.spring_positions` in a real adapter. The UniVRM PlayMode batch (`adapters/univrm`) is the highest-value target, since it makes `penetration-diff` run against the golden's actual FastSpringBone solver. Until then, CCD/penetration findings rest on unit tests + the source-level analysis in the `docs/findings.md` 2026-06-06 entry (the spec-reference collision push-out feeds next-frame Verlet velocity), not on a measured real-engine trace.
+The image-SSIM consensus path (settle/swing sweeps, `docs/findings.md` 2026-05-29) is independent of all this and drives the real engines for fidelity; the position/penetration path is the one whose real-engine backing is being filled in adapter by adapter.
 
 ### Exception: VRM 0.x leaf-tail sweep is a 2-factor grid
 

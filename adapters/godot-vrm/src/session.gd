@@ -260,26 +260,22 @@ func reset_physics(params: Dictionary) -> Dictionary:
         vrm_secondary.do_process(1.0/60.0)
     return _ok({})
 
-func dump_bone_positions(params: Dictionary) -> Dictionary:
-    # No spring-bone manager: return empty result deterministically,
-    # mirroring the step_physics no-op behavior for spring-bone-less VRMs.
+# Collect per-spring joint world positions for every spring chain, in spring
+# order. Returns [{ "name": String, "joint_positions": [[x,y,z], ...] }, ...].
+# Empty array when there is no spring-bone manager / skeleton. Single source of
+# the SpringPositions shape, shared by dump_bone_positions (single-frame) and
+# render_sequence (per-frame capture_positions).
+func _collect_spring_positions() -> Array:
     if vrm_secondary == null:
-        return _ok({"springs": []})
-
+        return []
     var skel: Skeleton3D = vrm_secondary.get_node_or_null(vrm_secondary.skeleton) as Skeleton3D
     if skel == null:
-        return _ok({"springs": []})
-
-    var want_idx: int = -1
-    if params.has("spring_index"):
-        want_idx = int(params.get("spring_index"))
+        return []
 
     var skel_xform: Transform3D = skel.global_transform
     var springs_out: Array = []
     var spring_bones: Array = vrm_secondary.spring_bones
     for i in range(spring_bones.size()):
-        if want_idx >= 0 and i != want_idx:
-            continue
         var spring = spring_bones[i]  # VRMSpringBone — avoid explicit type to not require addon preload
         var joint_positions: Array = []
         for bone_name in spring.joint_nodes:
@@ -295,7 +291,21 @@ func dump_bone_positions(params: Dictionary) -> Dictionary:
             "joint_positions": joint_positions,
         })
 
-    return _ok({"springs": springs_out})
+    return springs_out
+
+func dump_bone_positions(params: Dictionary) -> Dictionary:
+    # No spring-bone manager: returns empty springs deterministically (the
+    # helper handles that), mirroring the step_physics no-op for spring-bone-
+    # less VRMs.
+    var all_springs: Array = _collect_spring_positions()
+    var want_idx: int = -1
+    if params.has("spring_index"):
+        want_idx = int(params.get("spring_index"))
+    if want_idx < 0:
+        return _ok({"springs": all_springs})
+    if want_idx < all_springs.size():
+        return _ok({"springs": [all_springs[want_idx]]})
+    return _ok({"springs": []})
 
 func animate_root_transform(params: Dictionary) -> Dictionary:
     if scene == null:
@@ -362,6 +372,7 @@ func render_sequence(tree: SceneTree, params: Dictionary) -> Dictionary:
     var height: int = params.get("height", 512)
     var msaa: int = params.get("msaa", 4)
     var color_space: String = params.get("color_space", "Srgb")
+    var capture_positions: bool = params.get("capture_positions", false)
 
     # Configure viewport once.
     viewport.size = Vector2i(width, height)
@@ -400,6 +411,14 @@ func render_sequence(tree: SceneTree, params: Dictionary) -> Dictionary:
         if vrm_secondary != null:
             vrm_secondary.do_process(physics_dt)
 
+        # Capture spring-bone positions right after the physics step — the
+        # post-step, post-collision pose this frame renders, and what
+        # penetration-diff evaluates. Captured before the render await; the
+        # await does not advance physics, so the pose is stable.
+        var frame_positions: Array = []
+        if capture_positions:
+            frame_positions = _collect_spring_positions()
+
         # Let the viewport render. Two frames so the pipeline catches up
         # (matches the warm-up in the existing render() handler).
         await tree.process_frame
@@ -417,12 +436,15 @@ func render_sequence(tree: SceneTree, params: Dictionary) -> Dictionary:
                 (scene as Node3D).position = original_translation
             return _err(-32002, "RenderFailed", { "reason": "frame %d: save_png err %d" % [i, save_err] })
 
-        frames.append({
+        var frame_dict := {
             "index": i,
             "timestamp_seconds": float(i) / frame_hz,
             "path": frame_path,
             "blake3": zero_hash,
-        })
+        }
+        if capture_positions:
+            frame_dict["spring_positions"] = frame_positions
+        frames.append(frame_dict)
 
     # Restore root.
     if scene is Node3D:

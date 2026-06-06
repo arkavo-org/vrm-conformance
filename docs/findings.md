@@ -2,6 +2,39 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-06 (CCD sweep, first real-engine measurement) — `penetration-diff` now runs against a real spring-bone solver (godot-vrm); the chain passes straight through the world-fixed colliders (no deflection), depth ∝ radius
+
+**What.** godot-vrm is now the first **real** adapter (non-mock) to report per-frame spring-bone positions: `render_sequence` with `capture_positions: true` returns `SequenceFrame.spring_positions` from godot's actual L4 solver (it reuses the same per-joint world-position extraction as `dump_bone_positions`). This closes the gap recorded in the methodology pin ("CCD / `penetration-diff` is mock-backed only") — the metric had only ever seen the mock's static synthetic chain. Running the 12-asset CCD sweep (`emit-springbone-ccd-sweep`) through godot is the first time `penetration-diff` has measured a real spring-bone simulation.
+
+**Data — penetration depth tracks collider *radius*, not the fast/slow axis; the chain reaches the collider center regardless of size.** 12 cells (2 shapes × 3 radii × 2 speeds), world-fixed collider at `[0.10, 1.26, 0]`, root swept x: 0 → (fast 0.5 / slow smaller) over 12 frames @ `physics_dt = 1/60`, `epsilon = 2 mm`:
+
+| shape | radius (m) | speed | max_pen (m) | worst frame | passed |
+|---|---|---|---|---|---|
+| sphere | 0.005 | fast | 0.00000 | 0 | ✓ |
+| sphere | 0.005 | slow | 0.00078 | 73 | ✓ |
+| sphere | 0.02 | fast | 0.00672 | 8 | ✗ |
+| sphere | 0.02 | slow | 0.01592 | 73 | ✗ |
+| sphere | 0.05 | fast | 0.03674 | 8 | ✗ |
+| sphere | 0.05 | slow | 0.04592 | 73 | ✗ |
+| capsule | 0.005 | fast | 0.00000 | 0 | ✓ |
+| capsule | 0.005 | slow | 0.00213 | 74 | ✗ |
+| capsule | 0.02 | fast | 0.00820 | 8 | ✗ |
+| capsule | 0.02 | slow | 0.01759 | 74 | ✗ |
+| capsule | 0.05 | fast | 0.03930 | 8 | ✗ |
+| capsule | 0.05 | slow | 0.04761 | 74 | ✗ |
+
+`max_pen ≈ radius` for every cell (r0.05 → ~0.046, i.e. ~92% of radius; r0.02 → ~0.016–0.018; r0.005 → ≤0.002). Penetration depth is therefore `radius − (closest approach to collider center)`, and the closest approach is a near-constant ~2–4 mm across **all** radii and speeds. That means **the chain's trajectory is collider-independent** — it sweeps through the collider's location essentially undeflected, and the metric is simply measuring how deep inside the (larger or smaller) collider the undeflected chain ends up. The thin (r0.005) cells "pass" not because collision worked but because a 5 mm sphere is too small to accumulate >2 mm of depth. Within a radius, **slow penetrates more than fast** (the slow chain dwells in the collider region longer; the fast chain whips through), and the worst frame moves later for slow (≈73) vs fast (≈8) — consistent with no-deflection-plus-dwell, not with a tunneling signature.
+
+**Read — the prediction was overturned; record the observation, not a verdict.** The design spec predicted a *tunneling* signature (fast/thin cells penetrate, slow/large pass) on the assumption godot has working discrete collision that only fails when a fast step skips a thin collider. The real measurement shows the opposite shape: **no deflection at all**, with depth driven by collider radius. So the headline is two-fold:
+1. **The metric works against a real solver.** `penetration-diff` produced a clean, monotonic, physically-interpretable signal from real godot positions — not the structural `0.0` the static mock yields. The pipeline (capture → persist → signed-distance vs world collider) is validated end-to-end on a real spring-bone simulation.
+2. **godot-vrm applies no deflection from the CCD sweep's world-fixed colliders.** This is an *observation*, not yet an attributed defect. Two candidate causes, to disambiguate before filing anything upstream: (a) godot-vrm's `VRMSpringBone` collision is bone-attached and may not wire **world-coordinate** colliders (`ColliderAttach::WorldCoordinates`, the form this sweep uses to test CCD) into its per-frame collision at all; or (b) the emitted `.vrm` does not present the world-fixed collider in a form godot's loader registers. Either way the chain is undeflected; which one it is needs a godot-side collider-registration check.
+
+**Boundary.**
+- **Real solver, but penetration metric still measures geometry, not godot's intent.** `penetration-diff` computes signed distance from captured joints to the world collider purely geometrically; a non-zero result means the joints are inside the collider volume, regardless of whether godot "knows" about that collider. The no-deflection reading follows from the collider-*independence* of the trajectory (closest-approach ≈ constant across radii), not from any godot internal state.
+- **Scope.** First real-engine capture lives in godot-vrm only. UniVRM (the golden) remains the highest-value follow-up — and would say whether *the reference* deflects off world-fixed colliders, which decides whether godot's no-deflection is a divergence-from-oracle or shared behavior. VMK/three-vrm already have `dump_bone_positions`, so they are cheap follow-ups too.
+- **Cause not yet attributed** — do not file a godot issue until (a) vs (b) above is resolved. This entry records the measurement and the open question, per "confirm before filing."
+- Implementation: `adapters/godot-vrm/src/session.gd` (`_collect_spring_positions` shared by `dump_bone_positions` + `render_sequence`); runner unchanged; covered by `crates/vrm-runner/tests/capture_positions_godot_vrm.rs` (godot-on-PATH gated; asserts positions are captured and **move** across frames — the property the static mock fails).
+
 ## 2026-06-06 (issue #313 Track 2, golden UniVRM by source) — spring-bone collision push-out feeds next-frame Verlet velocity in the spec-reference algorithm: "catapult" off a collider is conformant-to-oracle, not a VMK defect
 
 > **⚠ CAUSATION SUPERSEDED — see "UPDATE (2026-06-06, later): the catapult is a large-timestep instability" at the end of this entry.** The *conclusion* below (the catapult is conformant-to-oracle, not a VMK defect) stands and is now better grounded. But the *mechanism* attributed below — collision push-out re-entering the Verlet velocity term ("energy injection") — was **refuted** by VMK's substep sweep: the velocity-kill lever failed (pure projection was the *worst* setting) and the true cause is time-discretization (large-timestep instability of the stiff chain). Read the original Data/Read sections as the (partly wrong) reasoning trail; the UPDATE carries the corrected mechanism and the resolved productionization gate.
