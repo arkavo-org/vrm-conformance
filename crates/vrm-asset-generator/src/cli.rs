@@ -490,6 +490,20 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the synthetic-collider corpus (2 triplets): a humanoid + hair
+    /// spring-chain rendered to validate VMK's synthetic spring-bone collider
+    /// augmentation (VMK #309 / #313). One fast variant (12 frames, wider
+    /// root sweep) and one static-ish variant (120 frames, narrower sweep).
+    /// Plans have `render_sequence` with `capture_positions: true` and
+    /// `capture_synthetic_colliders: true`; NO authored `ccd_colliders`
+    /// (the synthetic colliders are dumped at runtime by the adapter).
+    EmitSyntheticColliderAsset {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the operation catalog (JSON Schema by default).
     Describe {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
@@ -2310,6 +2324,74 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitSyntheticColliderAsset {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_vrm_with_spring_bone;
+            use crate::sidecar::{
+                build_synthetic_collider_test_plan, write_meta_json, write_test_yaml,
+            };
+            use crate::spring_bone::SpringBoneParams;
+
+            std::fs::create_dir_all(&output_dir)?;
+
+            let variants: &[(&str, bool)] =
+                &[("synthcoll_swept", true), ("synthcoll_static", false)];
+            let mut emitted: Vec<camino::Utf8PathBuf> = Vec::new();
+
+            for (id, is_fast) in variants {
+                let mtoon = MToonParams::defaults(*id);
+                let mut spring = SpringBoneParams::defaults(*id);
+                spring.joint_count = 6;
+                spring.segment_length_m = 0.06;
+                spring.stiffness = 0.2;
+                spring.drag_force = 0.2;
+
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-synthetic-collider-asset",
+                        "id": id,
+                        "fast": is_fast
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{}] {}", if *is_fast { "fast" } else { "slow" }, id);
+                }
+
+                let stem = output_dir.join(id);
+                let vrm_path = stem.with_extension("vrm");
+                emit_vrm_with_spring_bone(&mtoon, &spring, &vrm_path)?;
+
+                let meta_path = stem.with_extension("meta.json");
+                write_meta_json(&mtoon, Some(&spring), &vrm_path, &meta_path)?;
+
+                let asset_relpath = format!("{id}.vrm");
+                let plan = build_synthetic_collider_test_plan(&mtoon, &asset_relpath, *is_fast);
+                let yaml_path = stem.with_extension("test.yaml");
+                write_test_yaml(&plan, &yaml_path)?;
+
+                emitted.push(stem);
+            }
+
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} synthetic-collider assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-asset-generator",
@@ -2690,6 +2772,29 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-springbone-ccd-sweep": {
                         "summary": "CCD / tunneling spring-bone sweep (12 assets = 2 shapes × 3 radii × 2 speeds). VRM 1.0 only — world-fixed collider requires VRMC_springBone 1.0. Each plan uses render_sequence with capture_positions: true and ccd_colliders for penetration-diff. Speed tag (fast/slow) encodes per-frame root displacement; radii {0.005, 0.02, 0.05} straddle the CCD tunneling threshold.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-synthetic-collider-asset": {
+                        "summary": "Emit 2 synthetic-collider corpus triplets (humanoid + 6-joint hair chain, fast + static variants). Plans use render_sequence with capture_positions and capture_synthetic_colliders true; no authored ccd_colliders — synthetic colliders are dumped at runtime by the adapter. Validates VMK synthetic spring-bone collider augmentation (VMK #309/#313).",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],

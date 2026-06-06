@@ -469,6 +469,50 @@ fn default_properties(_params: &MToonParams) -> Vec<PropertyAssertion> {
     }]
 }
 
+/// Plan for the synthetic-collider validation corpus. Drives `render_sequence`
+/// with both `capture_positions` and `capture_synthetic_colliders` true, a
+/// fast (swept) or slow (static-ish) root translation to excite the hair
+/// chain, and NO authored `ccd_colliders` — the synthetic colliders are dumped
+/// at runtime by the adapter. Rendered twice (augment on/off) by the runner.
+pub fn build_synthetic_collider_test_plan(
+    params: &MToonParams,
+    asset_relpath: &str,
+    fast: bool,
+) -> TestPlan {
+    let (frame_count, frame_hz) = if fast {
+        (12u32, 60.0_f32)
+    } else {
+        (120u32, 60.0_f32)
+    };
+    let translation_start = [-0.30_f32, 0.0, 0.0];
+    let translation_end = [0.30_f32, 0.0, 0.0];
+
+    let mut plan = build_default_test_plan(params, asset_relpath);
+    plan.spec_section = "VMK synthetic collider augmentation (#309/#313) — augment on/off".into();
+    plan.physics = Some(PhysicsConfig { settle_steps: 60 });
+    plan.post_processing = PostProcessing {
+        tone_mapping: ToneMapping::None,
+        exposure: 1.0,
+    };
+    plan.animation = None;
+    plan.render_sequence = Some(RenderSequenceBlock {
+        frame_count,
+        frame_hz,
+        physics_dt_seconds: 1.0 / 60.0,
+        output_format: SequenceFormat::PngSequence,
+        animate_root_transform: Some(SequenceRootTransformAnimation {
+            translation_start,
+            translation_end,
+        }),
+        apply_vrma: None,
+        temporal_ssim_threshold: None,
+        capture_positions: true,
+        capture_synthetic_colliders: true,
+    });
+    plan.ccd_colliders = None;
+    plan
+}
+
 pub fn write_test_yaml(plan: &TestPlan, out: &Utf8Path) -> Result<()> {
     let yaml = serde_yml::to_string(plan)?;
     std::fs::write(out, yaml)?;
@@ -941,5 +985,29 @@ mod ccd_plan_tests {
             "slow substep velocity {v} m should be ≤ 2 × small radius {} m",
             2.0 * r_small
         );
+    }
+}
+
+#[cfg(test)]
+mod synthetic_collider_plan_tests {
+    use super::*;
+
+    #[test]
+    fn synthetic_collider_plan_captures_positions_and_colliders_no_ccd() {
+        let mtoon = MToonParams::defaults("synthcoll_swept");
+        let plan = build_synthetic_collider_test_plan(&mtoon, "synthcoll_swept.vrm", true);
+        let rs = plan.render_sequence.as_ref().expect("render_sequence");
+        assert!(rs.capture_positions);
+        assert!(rs.capture_synthetic_colliders);
+        assert!(
+            rs.animate_root_transform.is_some(),
+            "swept uses root translation"
+        );
+        assert!(
+            plan.ccd_colliders.is_none(),
+            "synthetic colliders are runtime-dumped, not authored"
+        );
+        assert!(plan.animation.is_none());
+        plan.validate().expect("plan must validate");
     }
 }
