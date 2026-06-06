@@ -479,6 +479,12 @@ pub fn build_synthetic_collider_test_plan(
     asset_relpath: &str,
     fast: bool,
 ) -> TestPlan {
+    // Both speeds sweep the same ±0.30 m displacement; only velocity differs.
+    // Fast: 12 frames @ 60 Hz → 0.20 s, Δx/frame ≈ 0.050 m (the lagging chain
+    // is overtaken by the moving synthetic collider — the #313 swept case).
+    // Slow: 120 frames @ 60 Hz → 2.0 s, Δx/frame ≈ 0.005 m (near-static contact
+    // — the #309 resting-deflection case). The ±0.30 (vs the CCD sweep's ±0.50)
+    // keeps the head-attached colliders within reach of the hair chain.
     let (frame_count, frame_hz) = if fast {
         (12u32, 60.0_f32)
     } else {
@@ -1008,6 +1014,19 @@ mod synthetic_collider_plan_tests {
             "synthetic colliders are runtime-dumped, not authored"
         );
         assert!(plan.animation.is_none());
+        assert_eq!(rs.frame_count, 12, "fast variant is 12 frames");
+        plan.validate().expect("plan must validate");
+    }
+
+    #[test]
+    fn synthetic_collider_plan_slow_variant_is_120_frames_and_validates() {
+        let mtoon = MToonParams::defaults("synthcoll_static");
+        let plan = build_synthetic_collider_test_plan(&mtoon, "synthcoll_static.vrm", false);
+        let rs = plan.render_sequence.as_ref().expect("render_sequence");
+        assert_eq!(rs.frame_count, 120, "slow variant is 120 frames");
+        assert!(rs.capture_positions);
+        assert!(rs.capture_synthetic_colliders);
+        assert!(plan.ccd_colliders.is_none());
         plan.validate().expect("plan must validate");
     }
 }

@@ -492,8 +492,10 @@ pub enum Cmd {
 
     /// Emit the synthetic-collider corpus (2 triplets): a humanoid + hair
     /// spring-chain rendered to validate VMK's synthetic spring-bone collider
-    /// augmentation (VMK #309 / #313). One fast variant (12 frames, wider
-    /// root sweep) and one static-ish variant (120 frames, narrower sweep).
+    /// augmentation (VMK #309 / #313). Both variants sweep the SAME ±0.30 m
+    /// total displacement; they differ only in velocity — a fast variant
+    /// (12 frames @ 60 Hz ≈ 0.05 m/frame) and a slow variant (120 frames @
+    /// 60 Hz ≈ 0.005 m/frame).
     /// Plans have `render_sequence` with `capture_positions: true` and
     /// `capture_synthetic_colliders: true`; NO authored `ccd_colliders`
     /// (the synthetic colliders are dumped at runtime by the adapter).
