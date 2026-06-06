@@ -2,6 +2,29 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-06 (VMK 0.17.0-rc.2 verification) — the spring-bone CCD release (#313 swept collision, #316 `dtSub`, #309/#311/#312 synthetic colliders) builds + tests green and produces **byte-identical** CCD-corpus numbers to 0.16.0; the #313 fix is invisible to this suite because the corpus uses *authored* colliders (discrete path) while #313 is scoped to the *synthetic* group
+
+**What.** Bumped the VMK adapter pin from 0.16.0 stable (`392d949`) to **0.17.0-rc.2** (`9b6ad1d`, pre-release 2026-06-06; `adapters/vrm-metal-kit/Package.swift`) and ran the full verification: `swift build` clean, `swift test` 34/34 (2 fixture-skipped, 0 failures), the `capture_positions_vmk` integration test green (real GPU solver on Apple M4 Max — joints lag the root under inertia, confirming captured positions reflect the sim), and the 12-asset `emit-springbone-ccd-sweep` corpus rendered through the real adapter → `penetration-diff`, all 12 with no adapter errors and `overall_passed: true`.
+
+**Data — penetration depth (m), sphere cells, vs the prior 0.16.0 baseline. Identical to within rounding.**
+
+| sphere cell | 0.16.0 | **0.17.0-rc.2** |
+|---|---|---|
+| r0.005 fast | 0 ✓ | 0 ✓ |
+| r0.02 fast | **0 ✓** | **0 ✓** |
+| r0.05 fast | 0.026 | 0.0259 |
+| r0.005 slow | 0.001 ✓ | 0.0011 ✓ |
+| r0.02 slow | 0.016 | 0.0161 |
+| r0.05 slow | 0.046 | 0.0461 |
+
+Capsule r0.02 fast = 0.0127 (matches the prior 0.013 sphere-vs-capsule asymmetry). Every cell tracks 0.16.0.
+
+**Read.** The release notes scope #313 explicitly: *"Continuous (swept) collision for the synthetic group… Authored colliders keep discrete collision."* This suite's CCD corpus is built from **authored** VRM 1.0 world-fixed colliders (`ccd_colliders`), so it exercises VMK's discrete path — which #313 deliberately leaves untouched. The byte-identical numbers are therefore the **expected** outcome and a clean regression-green signal (matching upstream's "default AvatarSample_A trajectory byte-preserved"), *not* evidence that the swept fix doesn't work. The fix is real but lives on a path this corpus does not reach.
+
+**Boundary / gap.** To exercise #313's swept collision the suite needs a **synthetic-collider** scenario — bone-derived leg/head capsules + lateral skull sphere on a humanoid avatar (#309/#311/#312), which VMK generates automatically and which this parametric authored-collider corpus does not produce. That coverage is upstream-validated (regression baselines #319) but currently unmeasurable by `penetration-diff`, which keys off the plan's authored `ccd_colliders`. Closing it would mean a synthetic-augmentation corpus + a way to read VMK's synthetic group back into the metric — a worthwhile follow-up, filed here as the known coverage gap, not a defect. #316 (`dtSub`) and the conformance methodology pin both concern the **ultra** tier this suite renders at, which the release leaves unchanged; non-ultra tiers were the buggy ones and are out of the default render path.
+
+**Pin decision (open).** The adapter is currently pinned to a **pre-release**. Bump kept only if we want this suite tracking the CCD cohort ahead of 0.17.0 stable; otherwise revert to `392d949`. Pending user call (see session).
+
 ## 2026-06-06 (CCD sweep, 4-renderer comparison vs the golden) — all four real adapters now capture spring positions; the oracle (UniVRM) deflects fast / penetrates slow; on fast cells VMK matches the oracle (spheres), three-vrm and godot under-deflect; all four penetrate slow (sustained-contact limit)
 
 **What.** All four real adapters now report per-frame spring-bone positions via `render_sequence` + `capture_positions` — godot, three-vrm (per-op; reuse `dump_bone_positions` extraction per frame) and UniVRM (PlayMode batch; `BatchRunner.CaptureSpringPositions`, flat-`float[]` wire reshaped by the runner) and VMK (`Operations.swift`; node world positions post-draw, which reflect the GPU spring sim — confirmed by joint lag below). The runner persists the canonical `<id>_<renderer>_positions.json` for all of them (per-op via `execute.rs`, batch via `execute_batch.rs`). This is the first **4-way** CCD comparison against the golden; UniVRM is the oracle.
