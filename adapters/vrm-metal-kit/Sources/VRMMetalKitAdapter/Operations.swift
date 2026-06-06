@@ -926,6 +926,13 @@ final class Operations: @unchecked Sendable {
             return invalidParams("output_format \"\(outputFormat)\" is not yet supported by vrm-metal-kit; only png_sequence")
         }
 
+        // When set, emit per-frame spring-bone joint world positions
+        // (same shape as dump_bone_positions) for penetration-diff.
+        let capturePositions: Bool = {
+            if case .bool(let b) = obj["capture_positions"] { return b }
+            return false
+        }()
+
         guard let session = lookupSession(sessionId) else {
             return invalidParams("unknown session_id: \(sessionId)")
         }
@@ -1080,12 +1087,33 @@ final class Operations: @unchecked Sendable {
                 return renderFailed("frame \(i): PNG export failed: \(error)")
             }
 
-            frames.append(.object([
+            // Capture spring-bone joint world positions for this frame's pose
+            // (post-draw; the spring sim advances on the GPU during the draw).
+            // Same extraction as dump_bone_positions: node world positions.
+            var framePositions: [JSONValue] = []
+            if capturePositions, let springBone = session.model.springBone {
+                let nodes = session.model.nodes
+                framePositions = springBone.springs.enumerated().map { (si, spring) in
+                    let name = spring.name ?? "spring_\(si)"
+                    let jp: [JSONValue] = spring.joints.compactMap { joint in
+                        guard joint.node >= 0 && joint.node < nodes.count else { return nil }
+                        let p = nodes[joint.node].worldPosition
+                        return .array([.number(Double(p.x)), .number(Double(p.y)), .number(Double(p.z))])
+                    }
+                    return .object(["name": .string(name), "joint_positions": .array(jp)])
+                }
+            }
+
+            var frameObj: [String: JSONValue] = [
                 "index": .number(Double(i)),
                 "timestamp_seconds": .number(Double(i) / Double(frameHz)),
                 "path": .string(framePath),
                 "blake3": .string(zeroHash),
-            ]))
+            ]
+            if capturePositions {
+                frameObj["spring_positions"] = .array(framePositions)
+            }
+            frames.append(.object(frameObj))
         }
 
         // Restore original root translations so subsequent ops on this
