@@ -26,7 +26,9 @@ use vrm_diff_engine::penetration::{worst_penetration, ColliderSpec};
 use vrm_ops::tools::SpringPositions;
 use vrm_test_plan::ColliderWorldSpec;
 
-use crate::execute::FramePositionsEntry;
+use std::collections::HashMap;
+
+use crate::execute::{FrameCollidersEntry, FramePositionsEntry};
 
 /// Map a `ColliderWorldSpec` (from the test plan) to a
 /// `vrm_diff_engine::penetration::ColliderSpec`.
@@ -133,13 +135,11 @@ pub fn run_penetration_diff(
 
     // ── Run penetration check (branch on collider source) ────────────────────
     let report = if let Some(col_path) = colliders_json_path {
-        use crate::execute::FrameCollidersEntry;
         let col_raw = std::fs::read_to_string(col_path)
             .with_context(|| format!("failed to read colliders file {col_path}"))?;
-        let mut col_entries: Vec<FrameCollidersEntry> = serde_json::from_str(&col_raw)
+        let col_entries: Vec<FrameCollidersEntry> = serde_json::from_str(&col_raw)
             .with_context(|| format!("failed to parse colliders JSON {col_path}"))?;
-        col_entries.sort_by_key(|e| e.frame_index);
-        let by_index: std::collections::HashMap<u32, Vec<ColliderSpec>> = col_entries
+        let by_index: HashMap<u32, Vec<ColliderSpec>> = col_entries
             .into_iter()
             .map(|e| {
                 (
@@ -152,6 +152,16 @@ pub fn run_penetration_diff(
             .iter()
             .map(|fi| by_index.get(fi).cloned().unwrap_or_default())
             .collect();
+        // Guard against a silent pass: if no captured frame has any collider to
+        // test against (empty/corrupt file, or frame_index mismatch with the
+        // positions), the measurement is meaningless — fail loudly like the
+        // static branch does on empty `ccd_colliders`.
+        if colliders_per_frame.iter().all(Vec::is_empty) {
+            bail!(
+                "colliders file {col_path} has no colliders matching the captured \
+                 frame indices — cannot run penetration-diff"
+            );
+        }
         vrm_diff_engine::penetration::worst_penetration_per_frame(
             &frames,
             &colliders_per_frame,
@@ -244,6 +254,44 @@ mod per_frame_colliders_tests {
         assert!(!r.passed);
         assert!((r.max_penetration_depth_m - 0.03).abs() < 1e-5);
         assert_eq!(r.worst_frame_index, 1);
+    }
+
+    #[test]
+    fn colliders_with_no_matching_frames_bails_instead_of_silent_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+
+        // Positions at frames 0,1; colliders only at frame 99 → zero overlap.
+        let positions = vec![FramePositionsEntry {
+            frame_index: 0,
+            timestamp_seconds: 0.0,
+            springs: vec![SpringPositions {
+                name: "hair".into(),
+                joint_positions: vec![[0.0, 0.0, 0.0]],
+            }],
+        }];
+        let colliders = vec![FrameCollidersEntry {
+            frame_index: 99,
+            timestamp_seconds: 3.3,
+            colliders: vec![SequenceCollider::Sphere {
+                center: [0.0, 0.0, 0.0],
+                radius: 0.05,
+            }],
+        }];
+        let pos_path = d.join("y_vmk_positions.json");
+        let col_path = d.join("y_vmk_colliders.json");
+        std::fs::write(&pos_path, serde_json::to_string(&positions).unwrap()).unwrap();
+        std::fs::write(&col_path, serde_json::to_string(&colliders).unwrap()).unwrap();
+        let plan_path = d.join("y.test.yaml");
+        std::fs::write(&plan_path, MINIMAL_PLAN_YAML).unwrap();
+
+        // Must error, not return passed=true with depth 0.
+        let err = run_penetration_diff(&pos_path, &plan_path, Some(&col_path), 0.002)
+            .expect_err("mismatched colliders file must fail loudly");
+        assert!(
+            err.to_string().contains("no colliders matching"),
+            "unexpected error: {err}"
+        );
     }
 
     const MINIMAL_PLAN_YAML: &str = r#"id: x
