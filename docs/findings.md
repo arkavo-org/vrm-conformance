@@ -2,6 +2,25 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-07 (spring-bone gravity scale, VMK 0.17.0-rc.3) — VMK applies gravity at **9.8× the spec scale** (Earth-gravity multiplier retained after the #270 dt-fix); confirmed from source **and** a 10.6× cross-renderer first-step measurement. Corrects this log's earlier "spec-correct ~12×" mislabel. Filed [VMK#324](https://github.com/arkavo-org/VRMMetalKit/issues/324)
+
+**What.** The `VRMC_springBone` algorithm — and three-vrm + godot-vrm — apply `external = gravityDir · gravityPower · deltaTime`, i.e. `gravityPower` is the strength scalar. VMK instead computes `effectiveGravity = gravityDir · length(globalParams.gravity) · gravityBoost · gravityPower` with `length([0,−9.8,0]) = 9.8`, so steady-state gravity is **9.8×** the spec, plus an up-to-5× transient during the settling window (`gravityBoost = 1 + settlingFactor·4`). Source: `SpringBonePredict.metal:257-258`; the defending comment ("callers ship gravity=(0,−9.8,0) and expect that scale") is circular.
+
+**Measurement (cross-renderer, this session's `capture_positions`).** A 4-joint chain (hangs −Y) with **sideways gravity** `gravityDir=[1,0,0]`, `gravityPower=0.5`, captured per-frame through VMK rc.3 vs three-vrm. The endpoint saturates (the 0.15 m chain can only bend to horizontal), so the clean signal is the **first physics step from rest**:
+
+| renderer | first-step sideways tip displacement |
+|---|---|
+| three-vrm | 8.75 mm (≈ `gravityPower·dt` = 0.5·1/60 = 8.3 mm — spec-exact) |
+| VMK rc.3 | 92.68 mm |
+
+→ **10.6×** (= the 9.8× base × ~1.1 settling-boost at frame 0). Direct empirical confirmation of the source. (godot is *not* a clean 1× reference — it carries its own `gravity_scale`/`gravity_multiplier` factors + the stiffness-key bug — so three-vrm is the spec-clean comparison.)
+
+**Correction to this log.** A prior entry + the gravity-sweep code comment called VMK's scale *"spec-correct (~12× stronger than 0.14.0)"*. That was wrong: #270 correctly fixed the dt-**exponent** (`dt²`→`dt`), which made gravity ~12× stronger than the broken 0.14.0 baseline and *looked* right (hair finally drooped) — but the absolute scale is still 9.8× over spec because the Earth-gravity multiplier was retained. "Correct dt power" was conflated with "correct scale." The sweep comment in `spring_bone.rs` is fixed to match.
+
+**Why the corpus didn't catch it as a clean outlier.** The gravity **magnitude** sweep is (a) degenerate when gravity is colinear with the downward chain (gravity along the chain axis can't bend it — no signal), and (b) saturated on VMK at any non-tiny `gravityPower` (9.8× yanks the short stiff chain to its length cap within the window — 3 of 4 renderers collapse to one SHA). The gravity **direction** sweep (sideways gravity) is what exposes scale, and only the new per-frame position capture quantifies it. So "are we checking gravity?" — yes nominally, but the magnitude axis never measured *scale*; this entry is the first quantified scale comparison.
+
+**Class.** Deliberate scale divergence (same bucket as opt-in DQS #197 and rim-lighting #226): not a crash/parse bug, but divergent from spec + every reference renderer. Filed VMK#324 for the VRM/VMK side to decide whether to converge (drop the 9.8 multiplier) or document + flag it.
+
 ## 2026-06-07 (VMK 0.17.0-rc.3 verification) — avatar-fidelity cohort bumped; all four fixes (#321/#322/#197/#267) confirmed landed, **zero regressions** vs rc.2
 
 **What.** Bumped the VMK adapter pin from rc.2 (`9b6ad1d`) to **0.17.0-rc.3** (`f07d19f`, pre-release 2026-06-07) and verified end-to-end.

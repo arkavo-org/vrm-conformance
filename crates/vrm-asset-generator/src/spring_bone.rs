@@ -145,13 +145,17 @@ pub fn spring_bone_basic_sweep() -> Vec<SpringBoneParams> {
     }
 
     // Gravity magnitude sweep. Values calibrated to discriminate under
-    // VMK 0.15.1's spec-correct gravity scale (~12× stronger than the
-    // VMK 0.14.0 baseline). The previous `{0.0, 1.0, 2.0}` calibration
-    // saturated on 3 of 4 renderers (only three-vrm distinguished); the
-    // new range produces distinct chain rest positions across the full
-    // sweep on all post-spec-compliance renderers. 0.0 is the no-gravity
-    // boundary; 0.2 is comfortably above the bone's stiffness restore
-    // band so the chain visibly hangs.
+    // VMK's ~9.8× gravity scale (#270 fixed the dt-exponent but kept the
+    // Earth-gravity 9.8 multiplier — see VMK#324; NOT "spec-correct" as an
+    // earlier note here claimed: the spec + three-vrm + godot apply
+    // `gravityPower` directly with no 9.8 constant). The previous
+    // `{0.0, 1.0, 2.0}` calibration saturated on 3 of 4 renderers (only
+    // three-vrm distinguished); the small range here keeps VMK below its
+    // saturation ceiling so the magnitude axis still produces distinct
+    // rest positions. NOTE: this axis is degenerate when gravity is
+    // colinear with the (downward) chain — the gravity-DIR sweep (sideways
+    // gravity) is what actually exposes scale divergence, e.g. the VMK#324
+    // 10.6× first-step measurement. 0.0 is the no-gravity boundary.
     for &g in &[0.0_f32, 0.02, 0.05, 0.10, 0.20] {
         let mut p = SpringBoneParams::defaults(format!("springbone_gravity_{}", fmt_num(g)));
         p.gravity_power = g;
