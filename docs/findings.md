@@ -2,6 +2,37 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-07 (VMK 0.17.0 FINAL — full conformance run, 1.0 candidate) — **65/66 included single-frame tests pass vs the UniVRM golden (98.5%)**, zero regressions; the only miss is the known sub-0.001 rim residual (#226). Both gravity issues (#324, #326) resolved.
+
+**What.** Pinned the adapter to **0.17.0** (`5cd0a95`, the first non-pre-release of the 0.17 line; consolidates rc.1…rc.5). It closes the two gravity issues this suite filed — **#324** (9.8× over-drive → spec scale) and **#326** (0.x `gravityPower=0` now respected; the `0→1.0` substitution removed) — plus #321 hand/arm colliders, #313 swept CCD, #316/#318 dtSub, #322 render-order, #197 opt-in DQS. Ran the committed single-frame corpus through VMK 0.17.0 and diffed each test against the UniVRM golden (UniVRM unchanged → a true conformance comparison).
+
+**Conformance — VMK 0.17.0 vs UniVRM golden, at declared per-test thresholds:**
+
+| family | pass |
+|---|---|
+| mtoon_shading | 17/17 |
+| mtoon_gi | 6/6 |
+| mtoon_alpha | 5/5 |
+| mtoon_rim | 5/6 |
+| mtoon_render | 3/3 |
+| mtoon_double | 2/2 |
+| mtoon_default | 1/1 |
+| mtoon_outline | 6/9 (3 `conformance_status: excluded` — spec-flood, vrm-conformance#3) |
+| springbone (settle) | 20/20 |
+| **TOTAL (included)** | **65/66 (98.5%)** |
+
+The single included miss: `mtoon_rimLightingMix_1` at SSIM **0.9491** vs a 0.95 threshold — off by 0.0009, the documented #226 high-mix rim residual. The 3 outline sub-threshold tests are `excluded` (whole-frame SSIM measures only outline AA on the spec-correct flood).
+
+**Zero regressions.** Every one of the 69 VMK 0.17.0 renders is **≥0.99 SSIM vs the cached (prior-version) VMK golden** — no rendered-output drift on the committed corpus. Adapter `swift test` 34/0. Swing (dynamic) corpus 20/20 `overall_passed`, 0 adapter errors. CCD + synthetic corpus run clean. (The parametric corpus is untouched by #321/#322 — no body-collider interaction or eyelashes in these assets.)
+
+**Gravity fix carried from rc.4** (0.17.0 = rc.4 physics + #326). Sideways-gravity first-step VMK 10.83 mm = 1.24× three-vrm (was 10.6× at rc.3); #326 doesn't affect our `gravityPower>0` assets.
+
+**Honest coverage caveats (for the 1.0 gate):**
+1. **Spring-bone settle (20/20) is gravity-magnitude-blind** — those chains hang −Y under −Y gravity (colinear), so gravity *magnitude* can't bend them; the settle renders neither caught the 9.8× bug nor change under the fix. The gravity fix's correctness is established by direct measurement (sideways first-step) + the CCD/synthetic dynamic shifts, not by these tests.
+2. **The 73 swing (dynamic) UniVRM goldens are single representative PNGs** (no frame sequence cached), so they can't be cleanly SSIM-diffed without the bootstrap's frame-selection. The dynamic path was confirmed to render clean (20/20, 0 errors) but not golden-diffed this pass. The gravity behavior change makes the old swing goldens stale regardless.
+
+**1.0-candidate assessment.** On the validated surface — the committed single-frame golden corpus — 0.17.0 is a strong 1.0 candidate: 98.5% included pass, the only miss a sub-0.001 known residual, zero regressions, both gravity issues resolved and measured. Remaining to complete a full 267-test gate: **re-baseline the dynamic/swing spring-bone goldens against 0.17.0** (stale after the intentional gravity behavior change) and run the full bootstrap across all renderers.
+
 ## 2026-06-07 (VMK 0.17.0-rc.4 — gravity fix verified) — [VMK#324](https://github.com/arkavo-org/VRMMetalKit/issues/324) **fixed**: the 9.8× over-drive is gone, VMK now matches three-vrm/spec scale; no regressions
 
 **What.** Bumped rc.3 (`f07d19f`) → **0.17.0-rc.4** (`b412db9`), which closes #324: gravity is now `effectiveGravity = gravityDir · gravityPower` (the 9.8 Earth-gravity multiplier + up-to-5× settling boost removed; `SpringBoneGlobalParams.gravity` repurposed as the spec's additive external force, default `[0,−9.8,0]`→`[0,0,0]`). The release notes credit the spec + three-reference comparison this suite filed.

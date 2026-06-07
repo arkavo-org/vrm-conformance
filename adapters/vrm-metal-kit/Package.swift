@@ -470,24 +470,25 @@ let package = Package(
         //   - #181 (non-skinned mesh dropped when skin present)
         //   - #182 (VRM 1.0 spring chain over-expansion)
         // All nine were first filed by this conformance suite.
-        // 0.17.0-rc.4 (commit b412db9, pre-release 2026-06-07) fixes the
-        // spring-bone gravity 9.8× over-drive this suite reported as
-        // VMK#324: gravity is now `effectiveGravity = gravityDir · gravityPower`
-        // (spec scale, matching UniVRM 0.x+1.0, three-vrm, godot). The 9.8
-        // Earth-gravity multiplier + up-to-5× settling boost are removed;
-        // `SpringBoneGlobalParams.gravity` is repurposed as the spec's
-        // additive external force (default flipped [0,−9.8,0]→[0,0,0]).
-        // **Behaviour change**: hair/cloth sags ~9.8× less than rc.3 (now
-        // spec-exact). The VRM 0.x `gravityPower=0→1.0` substitution (#162)
-        // is split off to VMK#326, still open. Carries forward rc.3's
-        // #321 hand/arm colliders, #322 eyelash sort, #197 opt-in DQS.
-        // Held as a pre-release pending Muse asset validation of the reduced
-        // sag; we pin the exact commit so the gate does not affect us.
-        // Bumped from rc.3 (f07d19f) to confirm the #324 gravity fix landed
-        // (VMK now matches three-vrm scale) with no other regressions.
+        // 0.17.0 (commit 5cd0a95, **final** release 2026-06-07) — the
+        // 1.0-candidate avatar-fidelity release. Consolidates rc.1…rc.5:
+        //   - #324 spring-bone gravity at VRM spec scale (the 9.8× over-drive
+        //          this suite reported; now `gravityDir · gravityPower`,
+        //          matching UniVRM/three-vrm/godot). Verified at rc.4.
+        //   - #326 VRM 0.x `gravityPower=0` respected — the `0→1.0`
+        //          substitution this suite flagged is removed (authored
+        //          inert chains stay inert, as in UniVRM/three-vrm).
+        //   - #321 synthetic hand/arm colliders, #313 swept CCD, #309/#311/
+        //          #312 synthetic collider augmentation, #316/#318 non-ultra
+        //          `dtSub`, #322 render-order, #197 opt-in DQS (default-off).
+        // First non-pre-release of the 0.17 line; SPM stable resolvers accept
+        // it. Two intentional spring-bone behaviour changes vs 0.16.0 (gravity
+        // ~9.8× less; authored gravityPower=0 inert) → spring-bone goldens
+        // must be re-baselined. Bumped from rc.4 (b412db9) for the full
+        // conformance run that gates this as the 1.0 candidate.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "b412db9ff46931b6163313b764a8957b773903a1"
+            revision: "5cd0a95c6f05fe8c7960d958781d201b36184369"
         ),
     ],
     targets: [
