@@ -407,6 +407,90 @@ pub fn emit_vrm_doublesided_quad(params: &MToonParams, output: &Utf8Path) -> Res
     Ok(())
 }
 
+/// Emit a flat quad textured with the procedural quadrant checkerboard on
+/// `baseColorTexture` (requires `params.texture_transform = Some(..)`).
+///
+/// Unlike the sphere assets, the quad's UVs map **unambiguously** to screen
+/// corners (vertex TL `[-s,+s]`→UV(0,0), TR→(1,0), BL→(0,1), BR→(1,1)). Under
+/// glTF's V-down convention the checkerboard image (red TL / green TR / blue
+/// BL / yellow BR) therefore renders un-mirrored on a spec-correct renderer:
+/// **red top-left, green top-right, blue bottom-left, yellow bottom-right**.
+/// A renderer that mirrors texture-U shows it flipped (green top-left). This
+/// is the definitive control for the sphere shadetex/uvxform texture-U
+/// divergence (see docs/findings.md) — no sphere-projection ambiguity.
+pub fn emit_vrm_textured_quad(params: &MToonParams, output: &Utf8Path) -> Result<()> {
+    let mesh = quad(0.3);
+    let packed = pack_mesh(&mesh);
+
+    let skeleton = minimal_skeleton();
+    let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
+    let head_node = skeleton.bone_to_node["head"];
+
+    let mesh_node_index = nodes.len();
+    nodes.push(json!({ "name": format!("{}_quad", params.id), "mesh": 0 }));
+    let head = &mut nodes[head_node];
+    let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
+    head_children.push(json!(mesh_node_index));
+    head["children"] = Value::Array(head_children);
+
+    let mut doc = json!({
+        "asset": {
+            "version": "2.0",
+            "generator": "arkavo-org/vrm-conformance vrm-asset-generator 0.1"
+        },
+        "extensionsUsed": ["KHR_materials_unlit", "KHR_texture_transform", "VRMC_vrm", "VRMC_materials_mtoon"],
+        "extensionsRequired": ["VRMC_vrm"],
+        "scene": 0,
+        "scenes": [ { "nodes": [skeleton.root_node] } ],
+        "nodes": nodes,
+        "meshes": [
+            {
+                "name": format!("{}_geom", params.id),
+                "primitives": [
+                    {
+                        "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 },
+                        "indices": 3,
+                        "material": 0,
+                        "mode": 4
+                    }
+                ]
+            }
+        ],
+        "materials": [base_material(params)],
+        "extensions": {
+            "VRMC_vrm": vrmc_vrm(&params.id, &skeleton.bone_to_node, mesh_node_index)
+        }
+    });
+
+    // Checkerboard as baseColorTexture index 0 (data URI in JSON, matching
+    // emit_vrm's convention). REPEAT sampler.
+    let img = crate::texture::quadrant_checkerboard_16();
+    let data_uri = crate::texture::image_as_data_uri(&img);
+    doc["images"] = json!([{
+        "name": format!("{}_checkerboard", params.id),
+        "uri": data_uri,
+        "mimeType": "image/png"
+    }]);
+    doc["samplers"] =
+        json!([{ "wrapS": 10497, "wrapT": 10497, "magFilter": 9729, "minFilter": 9729 }]);
+    doc["textures"] = json!([{ "source": 0, "sampler": 0 }]);
+
+    for key in ["buffers", "bufferViews", "accessors"] {
+        doc[key] = packed.json[key].clone();
+    }
+
+    let json_bytes = serde_json::to_vec(&doc)?;
+    let glb = write_glb(&GlbDocument {
+        json: json_bytes,
+        binary: packed.binary,
+    })?;
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(output, glb)?;
+    Ok(())
+}
+
 /// Returns `true` when the scene contains any extended-shape collider
 /// (Plane, InsideSphere, InsideCapsule) or any spring with a joint angle
 /// limit. When true, the glTF `extensionsUsed` must declare
@@ -492,6 +576,31 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
         .unwrap_or_default();
     let plan = build_default_test_plan(params, &asset_relpath);
     write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// `emit_with_sidecars` for the flat-quad checkerboard control
+/// ([`emit_vrm_textured_quad`]). Forces `texture_transform = Some(identity)`
+/// so the checkerboard binds to `baseColorTexture` (the default plan's +Z
+/// camera frames the quad head-on, so corner colors read directly).
+pub fn emit_with_sidecars_textured_quad(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
+    let mut p = params.clone();
+    if p.texture_transform.is_none() {
+        p.texture_transform = Some(crate::params::TextureTransform::identity());
+    }
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_textured_quad(&p, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(&p, None, &vrm_path, &meta_path)?;
+
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan = build_default_test_plan(&p, &asset_relpath);
+    write_test_yaml(&plan, &stem.with_extension("test.yaml"))?;
 
     Ok(())
 }

@@ -38,6 +38,18 @@ pub enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Emit a flat-quad checkerboard control: the quadrant checkerboard on
+    /// baseColorTexture over a +Z-facing quad with unambiguous corner UVs
+    /// (TL=red, TR=green, BL=blue, BR=yellow under glTF V-down). Definitive
+    /// texture-U/V orientation control vs the geometry-ambiguous sphere.
+    EmitTexturedQuad {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Emit the full MToon basic sweep (~50 assets) into output_dir/.
     EmitSweep {
@@ -549,6 +561,30 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("emitted: {}", stem.with_extension("vrm"));
                 println!("emitted: {}", stem.with_extension("meta.json"));
                 println!("emitted: {}", stem.with_extension("test.yaml"));
+            }
+            Ok(())
+        }
+        Cmd::EmitTexturedQuad {
+            id,
+            output_dir,
+            json: emit_json,
+        } => {
+            std::fs::create_dir_all(&output_dir)?;
+            let stem = output_dir.join(&id);
+            let params = MToonParams::defaults(&id);
+            crate::emit::emit_with_sidecars_textured_quad(&params, &stem)?;
+            if emit_json {
+                println!(
+                    "{}",
+                    serde_json::to_string(
+                        &json!({ "ok": true, "vrm": stem.with_extension("vrm") })
+                    )?
+                );
+            } else {
+                println!(
+                    "emitted textured-quad control: {}",
+                    stem.with_extension("vrm")
+                );
             }
             Ok(())
         }

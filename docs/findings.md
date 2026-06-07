@@ -2,6 +2,26 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-07 (shadetex SETTLED via flat-quad control) — **VMK's texture handling is spec-correct**; the sphere divergence is a sphere-UV-projection artifact, **not a VMK bug**. Closed.
+
+**Built the control.** Added `emit-textured-quad` (`emit_vrm_textured_quad`): the quadrant checkerboard on `baseColorTexture` over a +Z-facing quad with unambiguous corner UVs (TL→UV(0,0), TR→(1,0), BL→(0,1), BR→(1,1)). Under glTF's V-down convention the spec-correct render is **TL=red, TR=green, BL=blue, BR=yellow** — no sphere-projection ambiguity. Validates clean (0 errors).
+
+**Result (corner-color sampling of each render):**
+
+| renderer | TL | TR | BL | BR | verdict |
+|---|---|---|---|---|---|
+| **VMK** | red | green | blue | yellow | **spec-correct** ✓ |
+| **three-vrm** | red | green | blue | yellow | **spec-correct** ✓ |
+| UniVRM | — (blank) | | | | culled the single-sided quad (see below) |
+
+**Conclusion — overturns the geometry-derivation guess in the entry below.** VMK renders the unambiguous quad checkerboard **exactly per spec**, so VMK has **no texture-U flip**. (My sphere `u∈(0,0.5)` derivation had a sign error.) Since all renderers read the *same* baked sphere UVs and VMK samples them correctly (quad-proven), the sphere shadetex/uvxform divergence (VMK+three-vrm green/yellow vs UniVRM red/blue) is **a sphere-UV-projection artifact of the suite's procedural sphere** — likely a seam/winding or visible-hemisphere interpretation difference — **not a VMK renderer defect.** VMK + three-vrm agree and are both quad-correct; on the sphere UniVRM is the outlier.
+
+**Verdict: no VMK bug. Closed — not filing.** matcap + the sphere shadetex/uvxform tests should be `conformance_status: excluded` (or wide-tolerance) as synthetic-sphere texture-projection artifacts. **Texture-orientation conformance should use the new flat-quad control, not the ambiguous sphere** — that's the durable fix; the `emit-textured-quad` asset is now in-tree for it.
+
+**Side observations (not blocking, not texture-U):**
+- UniVRM renders the **single-sided** quad blank — it culls the front-facing single-sided quad here (connects to the doubleSided culling spec test). The quad control should set `double_sided` (or be paired) if a UniVRM golden is wanted; VMK + three-vrm render it single-sided fine.
+- On the sphere, UniVRM being the lone outlier vs two quad-correct renderers is a mild caveat to "UniVRM = golden" for synthetic-sphere texture tests.
+
 ## 2026-06-07 (shadetex root-cause, follow-up to the triage below) — it's a **general texture-U (horizontal) orientation difference, not shadeMultiply-specific**: VMK+three-vrm sample the visible hemisphere's texture U one way, UniVRM the mirror. Self-consistent within each renderer; geometry favors UniVRM but a definitive verdict needs a flat-quad control (the synthetic sphere is too ambiguous). **Not filing.**
 
 **Refines the triage entry below** (which called it "texture-V-orientation, shadeMultiply-specific" — both wrong). Established by image inspection of `/tmp/goldens-0170`:
