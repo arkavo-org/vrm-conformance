@@ -470,20 +470,29 @@ let package = Package(
         //   - #181 (non-skinned mesh dropped when skin present)
         //   - #182 (VRM 1.0 spring chain over-expansion)
         // All nine were first filed by this conformance suite.
-        // 0.17.0-rc.2 (commit 9b6ad1d, pre-release 2026-06-06) is the
-        // spring-bone CCD cohort: synthetic collider augmentation on by
-        // default (#309/#311/#312), continuous swept collision for the
-        // synthetic group with inward-velocity bleed on contact (#313), and
-        // the non-ultra `dtSub` fix (#316). Held as a pre-release per the
-        // behaviour-change policy (default-avatar spring-bone trajectory
-        // shifts for fast joints near synthetic colliders); SPM stable
-        // resolvers skip it. We pin the exact commit, so the pre-release
-        // gate does not affect us. Bumped from 0.16.0 stable (392d949) to
-        // verify the #313/#316 fixes against this suite's CCD/penetration
-        // pipeline.
+        // 0.17.0-rc.3 (commit f07d19f, pre-release 2026-06-07) is the
+        // avatar-fidelity cohort, building on rc.2's spring-bone CCD work
+        // (#309/#311/#312 synthetic colliders, #313 swept collision, #316
+        // `dtSub`):
+        //   - #321 synthetic hand/arm colliders (lower-arm→hand capsules +
+        //          palm sphere), default-on — extends the augmented group
+        //          this suite validates via the synthetic-collider corpus.
+        //   - #322 eyelash/bangs transparency sort fix (default-on;
+        //          `VRMRenderer.nonFaceRenderOrder`).
+        //   - #197 dual-quaternion skinning, OPT-IN / default-off
+        //          (`RendererConfig.dualQuaternionSkinning`) — a deliberate
+        //          quality-above-reference divergence (LBS is glTF-standard),
+        //          so it stays off on the conformance path.
+        //   - #267 async-matrix regression guard (test-only).
+        // Held as a pre-release per the behaviour-change policy (hand
+        // colliders + eyelash sort are default-on, so default-avatar renders
+        // differ slightly from rc.2); SPM stable resolvers skip it. We pin
+        // the exact commit, so the pre-release gate does not affect us.
+        // Bumped from rc.2 (9b6ad1d) to confirm no regressions and that the
+        // #321/#322/#197/#267 fixes landed.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "9b6ad1d252abaa739f6c4ba12061d8f10ec4b440"
+            revision: "f07d19fac99fd574850035662576353ff666d30e"
         ),
     ],
     targets: [

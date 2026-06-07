@@ -2,6 +2,23 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-07 (VMK 0.17.0-rc.3 verification) — avatar-fidelity cohort bumped; all four fixes (#321/#322/#197/#267) confirmed landed, **zero regressions** vs rc.2
+
+**What.** Bumped the VMK adapter pin from rc.2 (`9b6ad1d`) to **0.17.0-rc.3** (`f07d19f`, pre-release 2026-06-07) and verified end-to-end.
+
+**Fixes landed (confirmed):**
+- **#321 synthetic hand/arm colliders** (default-on) — the suite's synthetic-collider corpus now dumps **10** colliders/frame (was 6 at rc.2): the original 4 leg capsules + forehead capsule + skull sphere, **plus** 2 lower-arm→hand capsules (r=0.05) + 2 palm spheres (r=0.10, `handSphereRadiusFraction = 0.40`). Direct measured confirmation that hand/arm augmentation is active.
+- **#322 eyelash/bangs sort** — `VRMRenderer.nonFaceRenderOrder` present and wired into the draw-order path. (Not pixel-verifiable by this suite — the parametric corpus has no eyelashes/bangs; symbol + code path confirmed.)
+- **#197 dual-quaternion skinning** — `RendererConfig.dualQuaternionSkinning` present, **default-off / opt-in**. Correctly framed by upstream as a quality-above-reference divergence (LBS is glTF-standard), matching the suite's scoping note on VMK#197. The conformance path leaves it **off**, so renders are unaffected.
+- **#267 async-matrix guard** — `HairHeadCollisionTests` green at rc.3: walk **0.0%** (0/3600), static clean (3 root-only). rc.3's new `testHairHead_asyncMatrix_regressionGuard` passes across Run (0.25%), Jog (0.03%), AvatarSample_U×Walk (0.00%) — all under the 1% bar.
+
+**No regressions (measured):**
+- Adapter `swift test`: 34 executed, 2 fixture-skipped, **0 failures** (identical to rc.2).
+- **Authored-collider CCD sweep byte-identical** to the rc.2/0.16.0 baseline — sphere cells r0.005/r0.02/r0.05 fast = 0/0/25.9 mm, slow = 1.1/16.1/46.1 mm. (#321 adds *synthetic* colliders, which do not touch the authored/discrete path — exactly as scoped.)
+- **Synthetic-collider deflection unchanged**: forehead-hair augment-ON 16.25 mm / OFF 20.76 mm — identical to rc.2. The new hand/arm colliders sit at the hands, far from the head chain, so they add coverage without perturbing the existing deflection signal.
+
+**Read.** rc.3 extends the synthetic-augmentation group (#321) and lands the avatar-fidelity fixes without regressing any measured behavior. DQS (#197) is correctly opt-in, so the conformance baseline is stable; making it default would be the logged, gated, pre-released divergence the suite's methodology requires.
+
 ## 2026-06-06 (synthetic-collider augment-on/off validation, VMK 0.17.0-rc.2) — the suite now independently measures VMK's synthetic spring-bone colliders (#309/#311/#312/#313): augmentation **is active** and measurably deflects a chain (ON penetrates 22–29% less than OFF; the non-root chain diverges 139–159 mm ON↔OFF)
 
 **What.** Closes the coverage gap flagged in the verification entry below. The earlier CCD corpus uses *authored* world-fixed colliders (discrete path), so it could not exercise VMK's *synthetic* augmentation (#309) or its swept collision (#313). This adds an end-to-end **augment-ON-vs-OFF** pipeline that does:
