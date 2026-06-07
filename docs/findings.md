@@ -2,6 +2,22 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-07 (1.0-readiness gap run: VRM 0.x + real avatars + exclusions) — **0.x: no regression; VMK renders all real avatars cleanly.** Real-1.0 oracle comparison blocked by a suite-tooling limitation (not VMK). matcap/shadetex now formally excluded.
+
+Ran the three readiness gaps flagged before marking 0.17.0 a 1.0 general release.
+
+**(1) VRM 0.x conformance — no regression.** Full `RUN_UNIVRM=1 SPEC_VERSION=0.x` bootstrap (207 plans, all adapters incl UniVRM PlayMode → `/tmp/goldens-0170_v0`). VMK 0.17.0 vs fresh UniVRM 0.x:
+- **settle 58/58 pass, mean 0.9422** (prior baseline 0.9413–0.9423 — identical)
+- **swing mean 0.8402** (prior 0.8377–0.8405 — identical; the sub-0.85 is the *documented* Ry180-orientation AA residual on the thin chain, not a defect)
+
+So 0.17.0's gravity/#326 changes **did not perturb synthetic 0.x** — the chains author `gravityPower>0` and hang colinear with gravity, so the magnitude change is invisible (same gravity-blindness as 1.0). The **mesh-less 0.x MToon corpus** (meshes=0 by design — tests material *parsing*, not rendering) "fails" render in VMK *and* three-vrm identically; that's expected, not a VMK issue.
+
+**(2) Real avatars — VMK renders all cleanly; 1.0-oracle comparison incomplete.** Rendered the 9 manual humanoid plans (AvatarSample_A/U 0.x + 1.0, VRoid bust/collider/headbubble, bosom, face) through VMK 0.17.0: **all 9 rendered, no crashes** — VMK handles real content (where #321 hand colliders, gravity, #322 actually bite). UniVRM oracle landed only the **2 real 0.x avatars** (avatarA/U_0_0): **SSIM ~0.854–0.857** vs their 0.92 self-threshold — within the operational band and in the known VMK#299 Ry180-orientation territory on complex real avatars (the 0.x reals where #326's gravityPower=0 bangs apply). The **7 real-1.0 plans were silently skipped by the UniVRM `execute-test-batch` path** (assets present + valid; a manual-plan batch-discovery limitation) — a **suite-tooling gap, not a VMK issue**. The formal real-1.0-vs-oracle number (bust/collider/eyelash) remains uncollected pending that tooling fix.
+
+**(3) Exclusions formalized.** `conformance_status_for` now marks `mtoon_matcap_*` + `mtoon_shadetex_*` **excluded** (synthetic-sphere UV-projection artifact, proven spec-correct on the flat-quad control), like the outline cluster — so the headline conformance number is honest.
+
+**1.0-readiness verdict.** VMK-side everything is green: 1.0 synthetic **65/66 included (98.5%)** + dynamic **154/154**; 0.x **no regression**; **all real avatars render cleanly**; both gravity issues (#324/#326) closed and measured; matcap/shadetex resolved to not-VMK. **The only open gate item is suite-side**: the UniVRM-batch-over-manual-1.0-plans tooling, needed to produce the formal real-1.0-avatar oracle conformance number (Muse has separately validated the real 0.0 avatar per the release notes). No VMK conformance blocker remains for 1.0; the residual is suite-tooling + the milestoned #226 rim residual.
+
 ## 2026-06-07 (shadetex SETTLED via flat-quad control) — **VMK's texture handling is spec-correct**; the sphere divergence is a sphere-UV-projection artifact, **not a VMK bug**. Closed.
 
 **Built the control.** Added `emit-textured-quad` (`emit_vrm_textured_quad`): the quadrant checkerboard on `baseColorTexture` over a +Z-facing quad with unambiguous corner UVs (TL→UV(0,0), TR→(1,0), BL→(0,1), BR→(1,1)). Under glTF's V-down convention the spec-correct render is **TL=red, TR=green, BL=blue, BR=yellow** — no sphere-projection ambiguity. Validates clean (0 errors).

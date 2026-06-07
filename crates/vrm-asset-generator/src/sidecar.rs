@@ -163,6 +163,23 @@ fn conformance_status_for(test_id: &str) -> ConformanceStatus {
                     .into(),
         };
     }
+    // Excluded: matcap + shadeMultiplyTexture on the procedural sphere diverge
+    // cross-renderer purely from the sphere's UV projection, NOT from renderer
+    // texture-handling — the flat-quad checkerboard control proves VMK (and
+    // three-vrm) sample texture-U correctly (TL=red/TR=green/BL=blue/BR=yellow);
+    // on the sphere VMK+three-vrm agree and UniVRM is the outlier. matcap is
+    // additionally noisy across all renderers (near-black, low-contrast SSIM).
+    // Texture-orientation conformance uses the `emit-textured-quad` control, not
+    // the sphere. See docs/findings.md (2026-06-07 shadetex SETTLED via flat-quad).
+    if test_id.starts_with("mtoon_matcap_") || test_id.starts_with("mtoon_shadetex_") {
+        return ConformanceStatus::Excluded {
+            reason:
+                "matcap/shadeMultiplyTexture on the procedural sphere is a UV-projection artifact, \
+                 not a renderer texture-handling defect (proven spec-correct on the flat-quad \
+                 checkerboard control); texture-orientation conformance uses the quad control"
+                    .into(),
+        };
+    }
     ConformanceStatus::Included
 }
 
