@@ -2,6 +2,32 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-07 (VMK 0.17.0-rc.4 — gravity fix verified) — [VMK#324](https://github.com/arkavo-org/VRMMetalKit/issues/324) **fixed**: the 9.8× over-drive is gone, VMK now matches three-vrm/spec scale; no regressions
+
+**What.** Bumped rc.3 (`f07d19f`) → **0.17.0-rc.4** (`b412db9`), which closes #324: gravity is now `effectiveGravity = gravityDir · gravityPower` (the 9.8 Earth-gravity multiplier + up-to-5× settling boost removed; `SpringBoneGlobalParams.gravity` repurposed as the spec's additive external force, default `[0,−9.8,0]`→`[0,0,0]`). The release notes credit the spec + three-reference comparison this suite filed.
+
+**Fix confirmed (the same sideways-gravity capture as the #324 measurement):**
+
+| | first-step sideways tip displacement | ratio vs three-vrm |
+|---|---|---|
+| three-vrm (spec-clean) | 8.75 mm | 1.0× |
+| VMK **rc.3** | 92.68 mm | **10.6×** |
+| VMK **rc.4** | **10.83 mm** | **1.24×** |
+
+The 9.8× over-drive is eliminated; VMK rc.4 and three-vrm now converge to the same ~131 mm saturation trajectory. The residual 1.24× is solver-phase noise (first-frame substep timing), not scale.
+
+**No regressions:**
+- `swift build` clean; adapter `swift test` 34 executed / 2 fixture-skipped / **0 failures**.
+- CCD sweep runs clean (0 adapter errors, all `overall_passed=true`).
+- Synthetic-collider augmentation **still fires** — 10 colliders/frame (gravity fix doesn't touch collider generation); ON<OFF deflection intact (ON 11.9 / OFF 26.4 mm, 0 errors).
+- #267 hair-head guard green at rc.4: walk **0.0%**, static clean, asyncMatrix Run/Jog/Walk **0.17–0.22%** (all <1%). (A signal-5 on the combined run was a Metal teardown flake — each test passes in isolation.)
+
+**Expected physics shifts (NOT regressions — the gravity fix propagating).** With ~9.8× less gravity the chain is no longer pinned straight down, so it swings more freely:
+- CCD sphere penetration shifted: r0.02-fast 0→5.3, r0.05-fast 25.9→35.3, r0.02-slow 16.1→18.6, r0.05-slow 46.1→48.6 mm (less gravity-pinning → more lateral swing into the world collider).
+- Synthetic forehead-hair deflection: ON 16.25/OFF 20.76 → ON 11.9/OFF 26.4 mm — the augment ON↔OFF *gap widened* (4.5→14.5 mm), i.e. the synthetic capsule's push-out is more visible once gravity stops pinning the chain.
+
+These shifts are the direct, expected consequence of correcting gravity to spec scale; the suite's CCD/synthetic baselines should be re-recorded against rc.4 as the new reference. #162 (0.x `gravityPower=0→1.0` substitution) remains open as [VMK#326](https://github.com/arkavo-org/VRMMetalKit/issues/326).
+
 ## 2026-06-07 (spring-bone gravity scale, VMK 0.17.0-rc.3) — VMK applies gravity at **9.8× the spec scale** (Earth-gravity multiplier retained after the #270 dt-fix); confirmed from source **and** a 10.6× cross-renderer first-step measurement. Corrects this log's earlier "spec-correct ~12×" mislabel. Filed [VMK#324](https://github.com/arkavo-org/VRMMetalKit/issues/324)
 
 **What.** The `VRMC_springBone` algorithm — and three-vrm + godot-vrm — apply `external = gravityDir · gravityPower · deltaTime`, i.e. `gravityPower` is the strength scalar. VMK instead computes `effectiveGravity = gravityDir · length(globalParams.gravity) · gravityBoost · gravityPower` with `length([0,−9.8,0]) = 9.8`, so steady-state gravity is **9.8×** the spec, plus an up-to-5× transient during the settling window (`gravityBoost = 1 + settlingFactor·4`). Source: `SpringBonePredict.metal:257-258`; the defending comment ("callers ship gravity=(0,−9.8,0) and expect that scale") is circular.
