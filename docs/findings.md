@@ -2,6 +2,26 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-07 (VMK 0.17.0 — dynamic/swing golden re-baseline, full bootstrap) — spring-bone/dynamic **154/154 pass vs the fresh UniVRM oracle** (mean SSIM 0.961); the gravity fix is SSIM-invisible at single-frame golden resolution (old≈new), confirming it via measurement not goldens. MToon matcap/shadetex divergences surfaced for triage.
+
+**What.** Ran the full `bootstrap-goldens.sh` (`RUN_UNIVRM=1`) at VMK 0.17.0 → regenerated 336 plans through all four adapters incl. the **UniVRM oracle via Unity 6000.4.6f1 PlayMode** (VMK 336, three-vrm 300, godot 297, univrm 277 PNGs → `/tmp/goldens-0170`). Then diffed VMK 0.17.0 vs the **fresh** UniVRM goldens (UniVRM unchanged, so this is the real conformance comparison).
+
+**Result — VMK 0.17.0 vs fresh UniVRM, by family:**
+
+| family | n | mean | min | pass@0.85 |
+|---|---|---|---|---|
+| **spring-bone/dynamic** | 154 | **0.9608** | 0.9468 | **154/154** |
+| vrma | 15 | 0.9642 | 0.9625 | 15/15 |
+| mtoon (full corpus) | 107 | 0.9142 | 0.6055 | 89/107 |
+
+The dynamic re-baseline is clean: **every one of the 154 dynamic/spring-bone tests passes** (swing, collider, extended-collider, gravity-dir, taper, multichain, VMK#162 coupling), tightly clustered 0.947–0.967. Worst cells are the dense 5-share multichain variants (0.947, still well over threshold).
+
+**Honest nuance — the gravity fix doesn't move these goldens.** Old (pre-fix VMK vs old UniVRM) ≈ new (0.17.0 vs fresh UniVRM) on the same swing cells: `gravity_0p2` 0.9653→0.9642, `stiffness_0p2` 0.9663→0.9642, `drag_0p2` 0.9657→0.9645. The swing tests are **single-frame `animation: root_transform:` poses** (not `render_sequence`), so they're stiffness/pose-dominated; the 9.8× gravity-magnitude change contributes negligible *visible* single-frame displacement at 1024² → SSIM-invisible (same degeneracy as the settle corpus). So this re-baseline **confirms dynamic stability against the oracle**; the gravity fix's correctness rests on the direct sideways measurement (10.83 mm, [VMK#324](https://github.com/arkavo-org/VRMMetalKit/issues/324)), not these single-frame goldens.
+
+**Side-finding surfaced by the fuller corpus (separate from the re-baseline, not a 0.17.0 regression).** The bootstrap covers MToon families absent from the committed 69-test set; two diverge sharply vs UniVRM: **matcap** (baseline 0.6055; tints 0.69–0.81) and **shadetex** (0.72–0.75), with pbrtex borderline (0.84). matcap/shadetex weren't touched in 0.17.0 → pre-existing MToon-texture divergences, now visible. Candidate for triage/upstream filing after confirming they're real (not fresh-oracle artifacts).
+
+**Publish status.** Goldens regenerated to `/tmp/goldens-0170`; `goldens-cache/` is gitignored — the canonical publish is S3 + `goldens/manifest.json` (needs `VRM_GOLDENS_BUCKET` + AWS creds, not available in this session). The re-baselined PNGs are ready to push via that path.
+
 ## 2026-06-07 (VMK 0.17.0 FINAL — full conformance run, 1.0 candidate) — **65/66 included single-frame tests pass vs the UniVRM golden (98.5%)**, zero regressions; the only miss is the known sub-0.001 rim residual (#226). Both gravity issues (#324, #326) resolved.
 
 **What.** Pinned the adapter to **0.17.0** (`5cd0a95`, the first non-pre-release of the 0.17 line; consolidates rc.1…rc.5). It closes the two gravity issues this suite filed — **#324** (9.8× over-drive → spec scale) and **#326** (0.x `gravityPower=0` now respected; the `0→1.0` substitution removed) — plus #321 hand/arm colliders, #313 swept CCD, #316/#318 dtSub, #322 render-order, #197 opt-in DQS. Ran the committed single-frame corpus through VMK 0.17.0 and diffed each test against the UniVRM golden (UniVRM unchanged → a true conformance comparison).
