@@ -2,6 +2,32 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-07 (VMK 0.17.2 VRM 1.0 expressions #333 — suite coverage landed + before/after verified) — **blink/visemes/emotions go frozen → deforming on the real VRoid avatar; the synthetic corpus was silently passing on frozen output.**
+
+VMK 0.17.2 (`3737e76`, closes upstream #333) restores VRM 1.0 facial expressions. The bug: a VRM 1.0 expression `morphTargetBind.node` is a glTF **node** index, but the renderer and `VRMExpressionController` key morph weights by **mesh** index (0.x binds already carry the mesh index). The 1.0 loader stored the raw node index, so on any model whose face node index ≠ mesh index, **every** morph bind matched no primitive and the morph compute pass skipped it — blink, the five visemes, and every emotion preset silently produced **no mesh deformation**. Bone-driven look-at was unaffected (different path), which is why only *expressions* looked dead; VRM 0.x never hit it.
+
+Same blind-spot pattern as the 0.17.1 lookAt work (see entry below). Confirmed empirically: `vroid_default_F_1_0` binds blink/happy/sad/aa/surprised all at **node 211 → mesh 0**; the **synthetic** humanoid avatar has **no blink/happy/sad morph binds at all** and its visemes are bound **node 19 → mesh 0** (so #333 froze them too, and they were never pixel-verified).
+
+**Coverage landed (this change):**
+- New `emit-expression-clips` subcommand → 11 preset VRMA clips (`expr_*.vrma`): blink + happy/angry/sad/relaxed/surprised + 5 visemes (aa/ih/ou/ee/oh), reusing the existing expression-weight channel primitive.
+- 11 manual plans `test-plans/manual/humanoid/vroid_default_F_expr_*.test.yaml` pairing the real VRoid avatar with each clip, whole-face camera (eyes + mouth in frame), `apply_at_time` at the weight peak.
+
+**Before/after verified locally (M-series Mac, macOS 26).** A/B through a **0.17.1** binary and the **0.17.2** binary, plus a neutral baseline (the same clip sampled at weight 0). On 0.17.1 **every** expression render is byte-identical to neutral (frozen face); on 0.17.2 each deforms (distinct PNG hash):
+
+```
+expr     neutral=8a98240b5666   0.17.1          0.17.2          verdict
+blink                           8a98240b5666    a1b301ab0eed    frozen → deforms (eyelids close)
+happy                           8a98240b5666    57b0a4defe59    frozen → deforms (smile/grin)
+sad                             8a98240b5666    a1cc44b7821b    frozen → deforms
+aa                              8a98240b5666    0975994d5efc    frozen → deforms (mouth opens)
+```
+
+Visual inspection confirms the *correct* deformation per preset (blink closes the eyelids, `aa` opens the mouth, happy is a broad smile). `dump_expression_weights` reports the controller weight as applied on **both** versions — it is upstream of the #333 keying and cannot see the frozen mesh, so (as with gaze) the **rendered face is the signal**; here the byte-identical-to-neutral check is a clean numeric proof of the freeze.
+
+**Synthetic viseme check.** The synthetic `aa` viseme (node 19 ≠ mesh 0) is also affected: 0.17.1 render `5d8cf1789282` is **byte-identical to the synthetic neutral** (`5d8cf1789282` — the long-standing frozen-face hash), and 0.17.2 deforms to `aac86e72fe59`. So the synthetic viseme corpus was silently passing on frozen output and now actually deforms.
+
+**Out-of-band follow-ups (tracked, not this change):** author synthetic blink/happy/sad morph targets for a fully-parametric expression sweep; a first-class "differs-from-neutral" deformation assertion in the diff engine so any morph-bearing plan fails loudly on frozen output rather than relying on a reference PNG. Spec/plan: `docs/superpowers/specs/2026-06-07-expression-0172-coverage-design.md`, `docs/superpowers/plans/2026-06-07-expression-0172-coverage.md`.
+
 ## 2026-06-07 (VMK 0.17.1 eye look-at #332 — suite coverage landed + before/after verified) — **both sub-bugs confirmed fixed on the real VRoid avatar; closes the long-deferred suite-side asset-coverage follow-up.**
 
 VMK 0.17.1 (`421232b`, closes upstream #332) corrects bone-driven eye look-at: **(A) head-local gaze resolution** (yaw/pitch was computed in world space but written as a *local* eye-bone rotation → a turned head drove the eyes off by the head's yaw) and **(B) eye-bone rest composition** (`applyToBones` discarded the authored eye rest; VRoid `J_Adj_*_FaceEye` rigs carry a mirrored ~±22° outward rest, so the eyes splayed **wall-eyed at center** and inverted gaze). 0.17.1 resolves through the head's inverse world matrix and composes `gaze * initialRotation`.

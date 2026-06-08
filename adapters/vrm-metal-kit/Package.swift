@@ -470,6 +470,28 @@ let package = Package(
         //   - #181 (non-skinned mesh dropped when skin present)
         //   - #182 (VRM 1.0 spring chain over-expansion)
         // All nine were first filed by this conformance suite.
+        // 0.17.2 (commit 3737e76, patch release 2026-06-08, closes #333) —
+        // restores VRM 1.0 facial expressions. Behaviour change (no shader/
+        // metallib change vs 0.17.1):
+        //   - **VRM 1.0 morph binds were keyed by node, not mesh.** A 1.0
+        //          expression `morphTargetBind.node` is a glTF *node* index,
+        //          but the renderer and `VRMExpressionController` key morph
+        //          weights by *mesh* index (0.x binds already carry the mesh
+        //          index). The 1.0 loader stored the raw node index, so on any
+        //          model whose face node index ≠ mesh index, every morph bind
+        //          matched no primitive and the morph compute pass skipped it —
+        //          blink, the five visemes, and every emotion preset silently
+        //          produced no mesh deformation. The loader now resolves
+        //          `node → nodes[node].mesh` into a resolved `meshIndex` while
+        //          preserving the authored `node` for round-trip.
+        //   Bone-driven look-at was unaffected (different path), which is why
+        //   only *expressions* looked dead; VRM 0.x never hit it. Repro:
+        //   `vroid_default_F_1_0` blink bind node=211 → mesh 0. This suite's
+        //   new `vroid_default_F_expr_*` corpus (this commit) is the verifier —
+        //   the synthetic humanoid corpus has no blink/happy/sad morphs and its
+        //   visemes were silently frozen (node 19 ≠ mesh 0). Also adds
+        //   `renderer.setExpression(_:weight:)` (additive). Rendering/
+        //   before-after verification is local-only (macOS 26 / Xcode 26).
         // 0.17.1 (commit 421232b, patch release 2026-06-08, closes #332) —
         // corrects bone-driven eye look-at. Two behaviour changes to rendered
         // eye direction (no shader/metallib change vs 0.17.0):
@@ -511,7 +533,7 @@ let package = Package(
         // conformance run that gates this as the 1.0 candidate.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "421232b75c77d65d8d2bd827a36159936b68db23"
+            revision: "3737e76b1635f9be604e4a8cb4272b5ddbedb58d"
         ),
     ],
     targets: [
