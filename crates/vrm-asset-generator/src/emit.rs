@@ -3037,8 +3037,8 @@ pub fn emit_gaze_clip(
 
     // Turned-head: spine yaw 0 -> body_yaw_deg over duration.
     if params.body_yaw_deg.abs() > f32::EPSILON {
-        let half = params.body_yaw_deg.to_radians() / 2.0;
-        let spine_quat = [0.0_f32, half.sin(), 0.0, half.cos()];
+        let half_rad = params.body_yaw_deg.to_radians() / 2.0;
+        let spine_quat = [0.0_f32, half_rad.sin(), 0.0, half_rad.cos()];
         let spine_kf = [
             (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
             (params.duration_s, spine_quat),
@@ -3053,8 +3053,8 @@ pub fn emit_gaze_clip(
         nodes.push(serde_json::json!({ "name": "gaze_target" }));
         nodes.len() - 1
     };
-    let half = params.gaze_angle_deg.to_radians() / 2.0;
-    let (sin_h, cos_h) = (half.sin(), half.cos());
+    let half_rad = params.gaze_angle_deg.to_radians() / 2.0;
+    let (sin_h, cos_h) = (half_rad.sin(), half_rad.cos());
     let gaze_quat = match params.gaze_axis {
         RotationAxis::X => [sin_h, 0.0, 0.0, cos_h],
         RotationAxis::Y => [0.0, sin_h, 0.0, cos_h],
@@ -3937,6 +3937,12 @@ mod gaze_emit_tests {
         assert!(ext["humanoid"]["humanBones"]["spine"]["node"].is_number());
         let channels = doc["animations"][0]["channels"].as_array().unwrap();
         assert_eq!(channels.len(), 1);
+        // The gaze_target node is appended last; pin its index against the extension.
+        let expected_lookat_node = (doc["nodes"].as_array().unwrap().len() - 1) as u64;
+        assert_eq!(
+            ext["lookAt"]["node"].as_u64().unwrap(),
+            expected_lookat_node
+        );
     }
 
     #[test]
@@ -3962,5 +3968,33 @@ mod gaze_emit_tests {
             .iter()
             .any(|c| c["target"]["node"].as_u64() == Some(spine_node)
                 && c["target"]["path"] == "rotation"));
+    }
+
+    #[test]
+    fn side_gaze_clip_emits_pitch_axis_lookat() {
+        // Exercises the RotationAxis::X (pitch) code path with a non-zero
+        // angle, which was never hit by the Y-axis / 0.0-degree tests above.
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        let p = GazeParams {
+            id: "gaze_up".into(),
+            gaze_axis: RotationAxis::X,
+            gaze_angle_deg: 20.0,
+            body_yaw_deg: 0.0,
+            duration_s: 1.0,
+        };
+        emit_gaze_clip(dir, &p).unwrap();
+        let doc = doc_of(&dir.join("gaze_up.vrma"));
+        let ext = &doc["extensions"]["VRMC_vrm_animation"];
+        // lookAt node is registered.
+        assert!(ext["lookAt"]["node"].is_number());
+        // Neutral body → only the gaze channel is produced.
+        let channels = doc["animations"][0]["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 1);
+        // The single channel's sampler index must point to a valid entry.
+        let samplers = doc["animations"][0]["samplers"].as_array().unwrap();
+        assert!(!samplers.is_empty());
+        let sampler_idx = channels[0]["sampler"].as_u64().unwrap() as usize;
+        assert!(sampler_idx < samplers.len());
     }
 }
