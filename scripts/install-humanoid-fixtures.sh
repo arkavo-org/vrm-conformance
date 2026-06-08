@@ -61,6 +61,10 @@ install_one "vroid_default_F_1_0.vrm" "vroid_default_F_1_0.vrm" || true
 echo "Emitting gaze VRMA clips (VMK #332 coverage)..."
 cargo run -q -p vrm-asset-generator -- emit-gaze-sweep --output-dir "$DEST"
 
+# Expression VRMA clips for the VMK #333 facial-expression corpus (vroid_default_F_expr_*).
+echo "Emitting expression VRMA clips (VMK #333 coverage)..."
+cargo run -q -p vrm-asset-generator -- emit-expression-clips --output-dir "$DEST"
+
 echo
 echo "==> Done. Run humanoid plans with:"
 echo "    scripts/render-humanoid.sh           # all available adapters"
