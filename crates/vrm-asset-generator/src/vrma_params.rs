@@ -51,6 +51,24 @@ pub enum AvatarLookAtType {
     Expression,
 }
 
+/// Real-avatar gaze sweep variant. Drives a single-axis gaze direction
+/// (yaw OR pitch) plus an optional spine yaw (the turned-head case). The
+/// .vrma is avatar-agnostic; manual plans pair it with `vroid_default_F_1_0.vrm`.
+/// Covers VMK 0.17.1 #332: `body_yaw_deg != 0` exercises head-local gaze
+/// resolution; `gaze_angle_deg == 0` at body 0 exercises eye-rest composition
+/// (wall-eye at center).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GazeParams {
+    pub id: String,
+    /// Gaze rotation axis: `Y` = yaw (left/right), `X` = pitch (up/down).
+    pub gaze_axis: RotationAxis,
+    /// Gaze angle in degrees about `gaze_axis`. 0 = straight ahead.
+    pub gaze_angle_deg: f32,
+    /// Spine yaw (about Y) in degrees. 0 = upright. Non-zero turns the head.
+    pub body_yaw_deg: f32,
+    pub duration_s: f32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +115,21 @@ mod tests {
         let back: VrmaLookAtParams = serde_json::from_str(&s).unwrap();
         assert_eq!(back.avatar_lookat_type, AvatarLookAtType::Bone);
         assert!((back.angle_deg - (-60.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn gaze_params_roundtrips() {
+        let p = GazeParams {
+            id: "gaze_center_bodyL".into(),
+            gaze_axis: RotationAxis::Y,
+            gaze_angle_deg: 0.0,
+            body_yaw_deg: 35.0,
+            duration_s: 1.0,
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let back: GazeParams = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.id, "gaze_center_bodyL");
+        assert_eq!(back.body_yaw_deg, 35.0);
+        assert!(matches!(back.gaze_axis, RotationAxis::Y));
     }
 }

@@ -3009,6 +3009,73 @@ pub fn emit_vrma_lookat_triplet(
     Ok(())
 }
 
+/// Emit a single VRMA gaze clip (`{id}.vrma`) for the real-avatar gaze corpus.
+///
+/// Unlike the sweep triplets, this emits ONLY the .vrma — the avatar is the real
+/// `vroid_default_F_1_0.vrm` fixture and the test plan is committed manual YAML.
+/// The clip always registers the canonical humanoid skeleton (UniVRM importer
+/// invariant), adds a spine yaw channel when `body_yaw_deg` is non-zero (turned
+/// head), and always adds the gaze lookAt channel on an appended target node.
+pub fn emit_gaze_clip(
+    output_dir: &Utf8Path,
+    params: &crate::vrma_params::GazeParams,
+) -> Result<()> {
+    use crate::vrma_emit::{
+        add_humanoid_bone_rotation_channel, add_look_at_channel, build_empty_vrma,
+        finalize_vrma_scenes, register_all_humanoid_bones, write_vrma_glb,
+    };
+    use crate::vrma_params::RotationAxis;
+
+    std::fs::create_dir_all(output_dir)?;
+
+    let skel = crate::humanoid::minimal_skeleton();
+    let mut doc = build_empty_vrma();
+    doc["nodes"] = skel.nodes_json.clone();
+    register_all_humanoid_bones(&mut doc, &skel.bone_to_node);
+
+    let mut buffer = Vec::<u8>::new();
+
+    // Turned-head: spine yaw 0 -> body_yaw_deg over duration.
+    if params.body_yaw_deg.abs() > f32::EPSILON {
+        let half_rad = params.body_yaw_deg.to_radians() / 2.0;
+        let spine_quat = [0.0_f32, half_rad.sin(), 0.0, half_rad.cos()];
+        let spine_kf = [
+            (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
+            (params.duration_s, spine_quat),
+        ];
+        let spine_node = skel.bone_to_node["spine"];
+        add_humanoid_bone_rotation_channel(&mut doc, &mut buffer, spine_node, "spine", &spine_kf);
+    }
+
+    // Gaze: append a lookAt target node, ramp identity -> gaze over duration.
+    let gaze_node = {
+        let nodes = doc["nodes"].as_array_mut().unwrap();
+        nodes.push(serde_json::json!({ "name": "gaze_target" }));
+        nodes.len() - 1
+    };
+    let half_rad = params.gaze_angle_deg.to_radians() / 2.0;
+    let (sin_h, cos_h) = (half_rad.sin(), half_rad.cos());
+    let gaze_quat = match params.gaze_axis {
+        RotationAxis::X => [sin_h, 0.0, 0.0, cos_h], // pitch (up/down)
+        RotationAxis::Y => [0.0, sin_h, 0.0, cos_h], // yaw (left/right)
+        // Z is roll — not a gaze axis; `gaze_sweep` never emits it, but the
+        // shared `RotationAxis` enum requires the arm for completeness.
+        RotationAxis::Z => [0.0, 0.0, sin_h, cos_h],
+    };
+    let gaze_kf = [
+        (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
+        (params.duration_s, gaze_quat),
+    ];
+    add_look_at_channel(&mut doc, &mut buffer, gaze_node, [0.0, 0.06, 0.0], &gaze_kf);
+
+    finalize_vrma_scenes(&mut doc);
+
+    let vrma_path = output_dir.join(format!("{}.vrma", params.id));
+    let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
+    std::fs::write(&vrma_path, &vrma_bytes)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod multichain_emit_integration_tests {
     use super::*;
@@ -3837,5 +3904,99 @@ mod byte_identity_guard {
             DEFAULT_MULTICHAIN_V1_BLAKE3,
             "multichain V1 default -Y output drifted"
         );
+    }
+}
+
+#[cfg(test)]
+mod gaze_emit_tests {
+    use super::*;
+    use crate::vrma_params::{GazeParams, RotationAxis};
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    fn doc_of(path: &Utf8Path) -> serde_json::Value {
+        let bytes = std::fs::read(path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        serde_json::from_slice(&json_chunk).unwrap()
+    }
+
+    #[test]
+    fn neutral_gaze_clip_has_lookat_and_registered_bones_no_spine_channel() {
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        let p = GazeParams {
+            id: "gaze_center".into(),
+            gaze_axis: RotationAxis::Y,
+            gaze_angle_deg: 0.0,
+            body_yaw_deg: 0.0,
+            duration_s: 1.0,
+        };
+        emit_gaze_clip(dir, &p).unwrap();
+        let doc = doc_of(&dir.join("gaze_center.vrma"));
+        let ext = &doc["extensions"]["VRMC_vrm_animation"];
+        assert!(ext["lookAt"]["node"].is_number());
+        assert!(ext["humanoid"]["humanBones"]["hips"]["node"].is_number());
+        assert!(ext["humanoid"]["humanBones"]["spine"]["node"].is_number());
+        let channels = doc["animations"][0]["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 1);
+        // The gaze_target node is appended last; pin its index against the extension.
+        let expected_lookat_node = (doc["nodes"].as_array().unwrap().len() - 1) as u64;
+        assert_eq!(
+            ext["lookAt"]["node"].as_u64().unwrap(),
+            expected_lookat_node
+        );
+    }
+
+    #[test]
+    fn turned_head_clip_adds_spine_rotation_channel() {
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        let p = GazeParams {
+            id: "gaze_center_bodyL".into(),
+            gaze_axis: RotationAxis::Y,
+            gaze_angle_deg: 0.0,
+            body_yaw_deg: 35.0,
+            duration_s: 1.0,
+        };
+        emit_gaze_clip(dir, &p).unwrap();
+        let doc = doc_of(&dir.join("gaze_center_bodyL.vrma"));
+        let channels = doc["animations"][0]["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 2);
+        let spine_node = doc["extensions"]["VRMC_vrm_animation"]["humanoid"]["humanBones"]["spine"]
+            ["node"]
+            .as_u64()
+            .unwrap();
+        assert!(channels
+            .iter()
+            .any(|c| c["target"]["node"].as_u64() == Some(spine_node)
+                && c["target"]["path"] == "rotation"));
+    }
+
+    #[test]
+    fn side_gaze_clip_emits_pitch_axis_lookat() {
+        // Exercises the RotationAxis::X (pitch) code path with a non-zero
+        // angle, which was never hit by the Y-axis / 0.0-degree tests above.
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        let p = GazeParams {
+            id: "gaze_up".into(),
+            gaze_axis: RotationAxis::X,
+            gaze_angle_deg: 20.0,
+            body_yaw_deg: 0.0,
+            duration_s: 1.0,
+        };
+        emit_gaze_clip(dir, &p).unwrap();
+        let doc = doc_of(&dir.join("gaze_up.vrma"));
+        let ext = &doc["extensions"]["VRMC_vrm_animation"];
+        // lookAt node is registered.
+        assert!(ext["lookAt"]["node"].is_number());
+        // Neutral body → only the gaze channel is produced.
+        let channels = doc["animations"][0]["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 1);
+        // The single channel's sampler index must point to a valid entry.
+        let samplers = doc["animations"][0]["samplers"].as_array().unwrap();
+        assert!(!samplers.is_empty());
+        let sampler_idx = channels[0]["sampler"].as_u64().unwrap() as usize;
+        assert!(sampler_idx < samplers.len());
     }
 }

@@ -68,6 +68,8 @@ fastlane/test_output
 # (for .meta.json sidecars carrying suite-side provenance, license, and
 # topology summaries per RFC 0005); only the .vrm symlinks are ignored.
 assets/humanoid/*.vrm
+# Generated gaze VRMA clips (emitted by scripts/install-humanoid-fixtures.sh)
+assets/humanoid/gaze_*.vrma
 
 # Python bytecode cache (vrma-pose-consensus.py + future python helpers)
 __pycache__/

@@ -470,6 +470,29 @@ let package = Package(
         //   - #181 (non-skinned mesh dropped when skin present)
         //   - #182 (VRM 1.0 spring chain over-expansion)
         // All nine were first filed by this conformance suite.
+        // 0.17.1 (commit 421232b, patch release 2026-06-08, closes #332) —
+        // corrects bone-driven eye look-at. Two behaviour changes to rendered
+        // eye direction (no shader/metallib change vs 0.17.0):
+        //   - **Head-local gaze resolution**: `updateTargetAngles` computed
+        //          yaw/pitch in world space but wrote them as a *local*
+        //          eye-bone rotation, so any turned head (body yawed at the
+        //          root) drove the eyes off by the head's yaw. Targets now
+        //          resolve through the head's inverse world matrix
+        //          (`.headLocalPoint` was equally affected).
+        //   - **Eye-bone rest composition**: `applyToBones` /
+        //          `applyToAnimationState` overwrote the eye bones with a bare
+        //          gaze quaternion, discarding the authored rest. VRoid rigs
+        //          (`J_Adj_*_FaceEye`) carry a mirrored outward ~±22° eye rest;
+        //          discarding it splayed the eyes wall-eyed at center and
+        //          inverted gaze. Now composes `gaze * initialRotation`.
+        //   This closes the long-deferred suite-side asset-coverage follow-up
+        //   on `docs/upstream/VMK-vrma-lookat-renderer-propagation.md`: the new
+        //   `vroid_default_F_gaze_*` corpus (this commit) drives gaze on the
+        //   real VRoid avatar VMK names as the validation target — the
+        //   synthetic humanoid corpus has no eye bones, which is why the
+        //   `vrma_lookat_*` history could only ever verify the gaze *parse*.
+        //   Rendering/before-after verification is local-only (macOS 26 /
+        //   Xcode 26); CI build-validates the adapter but does not render.
         // 0.17.0 (commit 5cd0a95, **final** release 2026-06-07) — the
         // 1.0-candidate avatar-fidelity release. Consolidates rc.1…rc.5:
         //   - #324 spring-bone gravity at VRM spec scale (the 9.8× over-drive
@@ -488,7 +511,7 @@ let package = Package(
         // conformance run that gates this as the 1.0 candidate.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "5cd0a95c6f05fe8c7960d958781d201b36184369"
+            revision: "421232b75c77d65d8d2bd827a36159936b68db23"
         ),
     ],
     targets: [

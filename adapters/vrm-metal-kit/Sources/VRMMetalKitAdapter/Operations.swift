@@ -1197,16 +1197,22 @@ final class Operations: @unchecked Sendable {
     // MARK: - VRMA ops (Phase 7 — VMK 0.16.0-rc.2)
 
     /// Conformance-relevant humanoid-bone subset, matching the three-vrm
-    /// adapter's `HUMANOID_BONES` list (renderer-host.html). 19 bones cover
+    /// adapter's `HUMANOID_BONES` list (renderer-host.html). 21 bones cover
     /// the VRMA spec's required humanoid surface; finger and twist bones
     /// are not exercised by the cross-renderer pose diff.
+    /// leftEye/rightEye carry the gaze signal for bone-driven lookAt.
     private static let referenceHumanoidBones: [String] = [
         "hips", "spine", "chest", "neck", "head",
         "leftShoulder", "leftUpperArm", "leftLowerArm", "leftHand",
         "rightShoulder", "rightUpperArm", "rightLowerArm", "rightHand",
         "leftUpperLeg", "leftLowerLeg", "leftFoot",
         "rightUpperLeg", "rightLowerLeg", "rightFoot",
+        "leftEye", "rightEye",
     ]
+
+    #if DEBUG
+    static var referenceHumanoidBonesForTest: [String] { referenceHumanoidBones }
+    #endif
 
     /// VRMA spec preset list (14 entries) matching three-vrm. `lookUp`/
     /// `lookDown`/`lookLeft`/`lookRight` are intentionally omitted — they

@@ -56,6 +56,11 @@ install_one "AvatarSample_U_0.0.vrm.glb" "avatarU_0_0.vrm" || true
 # next to the symlink is committed to git (gitignore negation).
 install_one "vroid_default_F_1_0.vrm" "vroid_default_F_1_0.vrm" || true
 
+# Gaze VRMA clips for the VMK #332 eye look-at corpus (vroid_default_F_gaze_*).
+# Generated next to the avatar so the runner's --asset-dir finds both.
+echo "Emitting gaze VRMA clips (VMK #332 coverage)..."
+cargo run -q -p vrm-asset-generator -- emit-gaze-sweep --output-dir "$DEST"
+
 echo
 echo "==> Done. Run humanoid plans with:"
 echo "    scripts/render-humanoid.sh           # all available adapters"
