@@ -3076,6 +3076,57 @@ pub fn emit_gaze_clip(
     Ok(())
 }
 
+/// Emit a single VRMA preset-expression clip (`{id}.vrma`) for the real-avatar
+/// expression corpus (VMK 0.17.2 #333). Emits ONLY the .vrma — the avatar is the
+/// real `vroid_default_F_1_0.vrm` fixture and the plan is committed manual YAML.
+/// Registers the canonical humanoid skeleton (UniVRM importer invariant, matching
+/// `emit_gaze_clip`) and ramps the preset weight 0 → 1 → 0 over `duration_s`.
+pub fn emit_expression_clip(
+    output_dir: &Utf8Path,
+    params: &crate::vrma_params::VrmaExpressionParams,
+) -> Result<()> {
+    use crate::vrma_emit::{
+        add_expression_weight_channel, build_empty_vrma, finalize_vrma_scenes,
+        register_all_humanoid_bones, write_vrma_glb, ExpressionKind,
+    };
+
+    std::fs::create_dir_all(output_dir)?;
+
+    let skel = crate::humanoid::minimal_skeleton();
+    let mut doc = build_empty_vrma();
+    doc["nodes"] = skel.nodes_json.clone();
+    register_all_humanoid_bones(&mut doc, &skel.bone_to_node);
+
+    let node = {
+        let nodes = doc["nodes"].as_array_mut().unwrap();
+        nodes.push(serde_json::json!({
+            "name": format!("{}_expr_target", params.expression_name)
+        }));
+        nodes.len() - 1
+    };
+
+    let kind = if params.is_preset {
+        ExpressionKind::Preset(&params.expression_name)
+    } else {
+        ExpressionKind::Custom(&params.expression_name)
+    };
+    let keyframes = [
+        (0.0_f32, 0.0_f32),
+        (params.duration_s / 2.0, 1.0),
+        (params.duration_s, 0.0),
+    ];
+
+    let mut buffer = Vec::<u8>::new();
+    add_expression_weight_channel(&mut doc, &mut buffer, node, kind, &keyframes);
+
+    finalize_vrma_scenes(&mut doc);
+
+    let vrma_path = output_dir.join(format!("{}.vrma", params.id));
+    let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
+    std::fs::write(&vrma_path, &vrma_bytes)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod multichain_emit_integration_tests {
     use super::*;
@@ -3998,5 +4049,39 @@ mod gaze_emit_tests {
         assert!(!samplers.is_empty());
         let sampler_idx = channels[0]["sampler"].as_u64().unwrap() as usize;
         assert!(sampler_idx < samplers.len());
+    }
+}
+
+#[cfg(test)]
+mod expression_clip_emit_tests {
+    use super::*;
+    use crate::vrma_params::VrmaExpressionParams;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    fn doc_of(path: &Utf8Path) -> serde_json::Value {
+        let bytes = std::fs::read(path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        serde_json::from_slice(&json_chunk).unwrap()
+    }
+
+    #[test]
+    fn preset_expression_clip_wires_preset_node_and_registers_bones() {
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        let p = VrmaExpressionParams {
+            id: "expr_blink".into(),
+            expression_name: "blink".into(),
+            is_preset: true,
+            duration_s: 1.0,
+        };
+        emit_expression_clip(dir, &p).unwrap();
+        let doc = doc_of(&dir.join("expr_blink.vrma"));
+        let ext = &doc["extensions"]["VRMC_vrm_animation"];
+        assert!(ext["expressions"]["preset"]["blink"]["node"].is_number());
+        assert!(ext["humanoid"]["humanBones"]["hips"]["node"].is_number());
+        let channels = doc["animations"][0]["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0]["target"]["path"], "translation");
     }
 }
