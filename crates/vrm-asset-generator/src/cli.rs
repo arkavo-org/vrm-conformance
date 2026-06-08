@@ -421,6 +421,14 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the real-avatar gaze sweep (8 .vrma clips) covering VMK #332.
+    EmitGazeSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the VRM 0.x MToon basic sweep (3 variants, slice 1 of the 0.x conformance corpus).
     ///
     /// Two Applicable variants produce `.vrm`, `.meta.json`, and `.test.yaml` triplets via
@@ -2073,6 +2081,39 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitGazeSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_gaze_clip;
+            use crate::sweep::gaze_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let sweep = gaze_sweep();
+            let total = sweep.len();
+            for (i, params) in sweep.iter().enumerate() {
+                emit_gaze_clip(&output_dir, params)?;
+                if emit_json {
+                    eprintln!(
+                        r#"{{"event":"progress","op":"emit-gaze-sweep","index":{i},"total":{total},"id":"{id}"}}"#,
+                        id = params.id,
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, params.id);
+                }
+            }
+            if emit_json {
+                let summary = serde_json::json!({
+                    "ok": true,
+                    "count": total,
+                    "output_dir": output_dir,
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!("emitted {total} gaze clips to {output_dir}");
+            }
+            Ok(())
+        }
         Cmd::EmitMtoonBasicV0Sweep {
             output_dir,
             json: emit_json,
@@ -2747,6 +2788,28 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-vrma-lookat-sweep": {
                         "summary": "VRMA lookAt sweep (10 plans = 5 directions x 2 avatar configs). Directions: yaw +-60deg, pitch +-30deg, neutral. Avatar configs: bone (VRMC_vrm.lookAt.type: bone) vs expression. Same .vrma gaze tested against both avatar rendering paths. Each plan emits a .vrm + .vrma + .test.yaml triplet.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" }
+                            }
+                        }
+                    },
+                    "emit-gaze-sweep": {
+                        "summary": "Real-avatar gaze sweep (8 .vrma clips) covering VMK 0.17.1 #332 bone-driven eye look-at. 5 neutral-body gaze directions (center/left/right/up/down) exercise eye-rest composition (wall-eye); 3 turned-head variants (spine yaw +-35deg) exercise head-local gaze resolution. Emits .vrma only — pair with vroid_default_F_1_0.vrm via the committed test-plans/manual/humanoid/vroid_default_F_gaze_*.test.yaml plans.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],
