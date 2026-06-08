@@ -429,6 +429,14 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the real-avatar expression clips (11 preset .vrma) covering VMK #333.
+    EmitExpressionClips {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the VRM 0.x MToon basic sweep (3 variants, slice 1 of the 0.x conformance corpus).
     ///
     /// Two Applicable variants produce `.vrm`, `.meta.json`, and `.test.yaml` triplets via
@@ -2114,6 +2122,39 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitExpressionClips {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_expression_clip;
+            use crate::sweep::expression_clip_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let sweep = expression_clip_sweep();
+            let total = sweep.len();
+            for (i, params) in sweep.iter().enumerate() {
+                emit_expression_clip(&output_dir, params)?;
+                if emit_json {
+                    eprintln!(
+                        r#"{{"event":"progress","op":"emit-expression-clips","index":{i},"total":{total},"id":"{id}"}}"#,
+                        id = params.id,
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, params.id);
+                }
+            }
+            if emit_json {
+                let summary = serde_json::json!({
+                    "ok": true,
+                    "count": total,
+                    "output_dir": output_dir,
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!("emitted {total} expression clips to {output_dir}");
+            }
+            Ok(())
+        }
         Cmd::EmitMtoonBasicV0Sweep {
             output_dir,
             json: emit_json,
@@ -2810,6 +2851,28 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-gaze-sweep": {
                         "summary": "Real-avatar gaze sweep (8 .vrma clips) covering VMK 0.17.1 #332 bone-driven eye look-at. 5 neutral-body gaze directions (center/left/right/up/down) exercise eye-rest composition (wall-eye); 3 turned-head variants (spine yaw +-35deg) exercise head-local gaze resolution. Emits .vrma only — pair with vroid_default_F_1_0.vrm via the committed test-plans/manual/humanoid/vroid_default_F_gaze_*.test.yaml plans.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" }
+                            }
+                        }
+                    },
+                    "emit-expression-clips": {
+                        "summary": "Real-avatar expression clips (11 preset .vrma) covering VMK 0.17.2 #333 (VRM 1.0 morph binds keyed by node not mesh -> frozen faces). Presets: blink + happy/angry/sad/relaxed/surprised + 5 visemes (aa/ih/ou/ee/oh). Emits .vrma only — pair with vroid_default_F_1_0.vrm via the committed test-plans/manual/humanoid/vroid_default_F_expr_*.test.yaml plans.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],
