@@ -2,6 +2,25 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-07 (VMK 0.17.1 eye look-at #332 — suite coverage landed + before/after verified) — **both sub-bugs confirmed fixed on the real VRoid avatar; closes the long-deferred suite-side asset-coverage follow-up.**
+
+VMK 0.17.1 (`421232b`, closes upstream #332) corrects bone-driven eye look-at: **(A) head-local gaze resolution** (yaw/pitch was computed in world space but written as a *local* eye-bone rotation → a turned head drove the eyes off by the head's yaw) and **(B) eye-bone rest composition** (`applyToBones` discarded the authored eye rest; VRoid `J_Adj_*_FaceEye` rigs carry a mirrored ~±22° outward rest, so the eyes splayed **wall-eyed at center** and inverted gaze). 0.17.1 resolves through the head's inverse world matrix and composes `gaze * initialRotation`.
+
+This was the suite's blind spot: the **synthetic humanoid corpus has no eye bones**, so the entire `vrma_lookat_*` history (VMK#286 → #294 → #297) could only ever verify the gaze *parse*, never the rendered eye direction. The fix's own release notes name `vroid_default_F_1_0.vrm` as the validation avatar.
+
+**Coverage landed (this change):**
+- New `emit-gaze-sweep` asset-generator subcommand → 8 VRMA gaze clips (`gaze_*.vrma`): 5 neutral-body gaze directions (center/L/R/U/D, exercising bug B) + 3 turned-head variants (spine yaw ±35° + gaze, exercising bug A via a VRMA hips/spine rotation channel — the plan schema's `root_transform` is translation-only and cannot turn the head).
+- 8 manual plans `test-plans/manual/humanoid/vroid_default_F_gaze_*.test.yaml` pairing the real VRoid avatar with each clip, framed eye-tight (eyes at **y≈1.304**, the `J_Adj_*_FaceEye` bones — extracted from the rig; the initial nominal y=1.40 framed the forehead and was retuned).
+- `leftEye`/`rightEye` added to the pose-dump reference bone list in **both** the VMK adapter and the three-vrm host, so the cross-renderer pose diff now carries a numeric eye-bone signal (absent eye bones on synthetic rigs are skipped — existing corpora unaffected).
+
+**Before/after verified locally (M-series Mac, macOS 26).** A/B rendered `gaze_center` and `gaze_center_bodyL` through a **0.17.0** adapter binary (pre-bump) and a **0.17.1** binary:
+- **`gaze_center` (bug B):** 0.17.0 renders the eyes **wall-eyed** — the avatar's right iris splayed to the outer corner, eyes divergent. 0.17.1 renders both irises **centered, parallel, straight-ahead** at the camera. Textbook match to the release-note "parallel tracking, exact straight-ahead at center."
+- **`gaze_center_bodyL` (bug A):** with the head yawed +35°, 0.17.0 leaves the eyes divergent/off; 0.17.1 tracks them **head-relative parallel**.
+- **Pose signal (0.17.1):** at `gaze_center` (`look_at.yaw_deg=0`, `pitch_deg=0`) the dumped `leftEye`/`rightEye` local rotations are **non-identity** — the authored rest is preserved (`gaze * rest`), the exact behaviour 0.17.0 discarded. (The 0.17.0 binary predates the 21-bone pose list, so it doesn't *dump* eyes — the cross-version signal there is the rendered image; the pose dump is the within-0.17.1 confirmation.)
+- All **8/8** gaze plans render cleanly through VMK 0.17.1.
+
+**Closes** the "suite-side asset coverage needs extending" follow-up tracked in `docs/upstream/VMK-vrma-lookat-renderer-propagation.md` (VMK#294). Out-of-band follow-ups (tracked, not this change): parametric synthetic eye bones with mirrored rest for a fully-parametric gaze×rest sweep; cross-renderer gaze consensus vs three-vrm/UniVRM once the real-1.0 `execute-test-batch` oracle tooling lands. Spec/plan: `docs/superpowers/specs/2026-06-07-lookat-0171-coverage-design.md`, `docs/superpowers/plans/2026-06-07-lookat-0171-coverage.md`.
+
 ## 2026-06-07 (1.0-readiness gap run: VRM 0.x + real avatars + exclusions) — **0.x: no regression; VMK renders all real avatars cleanly.** Real-1.0 oracle comparison blocked by a suite-tooling limitation (not VMK). matcap/shadetex now formally excluded.
 
 Ran the three readiness gaps flagged before marking 0.17.0 a 1.0 general release.
