@@ -116,4 +116,20 @@ mod tests {
         assert_eq!(back.avatar_lookat_type, AvatarLookAtType::Bone);
         assert!((back.angle_deg - (-60.0)).abs() < 1e-5);
     }
+
+    #[test]
+    fn gaze_params_roundtrips() {
+        let p = GazeParams {
+            id: "gaze_center_bodyL".into(),
+            gaze_axis: RotationAxis::Y,
+            gaze_angle_deg: 0.0,
+            body_yaw_deg: 35.0,
+            duration_s: 1.0,
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let back: GazeParams = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.id, "gaze_center_bodyL");
+        assert_eq!(back.body_yaw_deg, 35.0);
+        assert!(matches!(back.gaze_axis, RotationAxis::Y));
+    }
 }

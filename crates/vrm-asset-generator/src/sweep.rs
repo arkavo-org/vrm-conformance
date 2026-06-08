@@ -2536,6 +2536,7 @@ mod material_name_classification_tests {
 #[cfg(test)]
 mod gaze_sweep_tests {
     use super::*;
+    use crate::vrma_params::RotationAxis;
 
     #[test]
     fn gaze_sweep_covers_both_bugs() {
@@ -2558,6 +2559,23 @@ mod gaze_sweep_tests {
         assert_eq!(center.body_yaw_deg, 0.0);
         let body_l = sweep.iter().find(|p| p.id == "gaze_center_bodyL").unwrap();
         assert_eq!(body_l.body_yaw_deg, 35.0);
+        // Axis assertions: up/down use X (pitch); left/right use Y (yaw).
+        let gaze_up = sweep.iter().find(|p| p.id == "gaze_up").unwrap();
+        assert!(matches!(gaze_up.gaze_axis, RotationAxis::X));
+        assert_eq!(gaze_up.gaze_angle_deg, 20.0);
+        let gaze_down = sweep.iter().find(|p| p.id == "gaze_down").unwrap();
+        assert!(matches!(gaze_down.gaze_axis, RotationAxis::X));
+        assert_eq!(gaze_down.gaze_angle_deg, -20.0);
+        let gaze_left = sweep.iter().find(|p| p.id == "gaze_left").unwrap();
+        assert!(matches!(gaze_left.gaze_axis, RotationAxis::Y));
+        assert_eq!(gaze_left.gaze_angle_deg, 30.0);
+        let gaze_right_body_l = sweep.iter().find(|p| p.id == "gaze_right_bodyL").unwrap();
+        assert!(matches!(gaze_right_body_l.gaze_axis, RotationAxis::Y));
+        assert_eq!(gaze_right_body_l.gaze_angle_deg, -30.0);
+        assert_eq!(gaze_right_body_l.body_yaw_deg, 35.0);
+        // All ids must be unique.
+        let unique_ids: std::collections::HashSet<_> = sweep.iter().map(|p| p.id.clone()).collect();
+        assert_eq!(unique_ids.len(), 8);
     }
 }
 
