@@ -1,5 +1,5 @@
 id: vroid_default_F_gaze_up
-spec_section: VRMC_vrm lookAt (bone-driven eye gaze, pitch up)
+spec_section: 'VRMC_vrm lookAt (bone-driven eye gaze, pitch up; VMK 0.17.1 #332)'
 asset: vroid_default_F_1_0.vrm
 animation:
   vrma:

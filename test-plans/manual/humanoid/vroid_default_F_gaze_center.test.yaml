@@ -1,5 +1,5 @@
 id: vroid_default_F_gaze_center
-spec_section: VRMC_vrm lookAt (bone-driven eye gaze — VMK 0.17.1 #332 eye-rest composition; center should render parallel, not wall-eyed)
+spec_section: 'VRMC_vrm lookAt (bone-driven eye gaze — VMK 0.17.1 #332 eye-rest composition; center should render parallel, not wall-eyed)'
 asset: vroid_default_F_1_0.vrm
 animation:
   vrma:

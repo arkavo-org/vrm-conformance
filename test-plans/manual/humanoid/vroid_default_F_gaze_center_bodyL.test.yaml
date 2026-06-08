@@ -1,5 +1,5 @@
 id: vroid_default_F_gaze_center_bodyL
-spec_section: VRMC_vrm lookAt (VMK #332 head-local resolution — body yawed +35, eyes must stay parallel & head-relative)
+spec_section: 'VRMC_vrm lookAt (VMK 0.17.1 #332 head-local resolution — body yawed +35, eyes must stay parallel & head-relative)'
 asset: vroid_default_F_1_0.vrm
 animation:
   vrma:
