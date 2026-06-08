@@ -1,0 +1,63 @@
+id: vroid_default_F_expr_oh
+spec_section: 'VRMC_vrm expressions (VRM 1.0 morph bind — VMK 0.17.2 #333; oh viseme / lip-sync)'
+asset: vroid_default_F_1_0.vrm
+animation:
+  vrma:
+    path: expr_oh.vrma
+    apply_at_time: 0.5
+camera:
+  position:
+  - 0.0
+  - 1.27
+  - 0.55
+  target:
+  - 0.0
+  - 1.27
+  - 0.02
+  up:
+  - 0.0
+  - 1.0
+  - 0.0
+  fov_degrees: 24.0
+lighting:
+  directional:
+    dir:
+    - -0.3
+    - -0.6
+    - -0.7
+    color:
+    - 1.0
+    - 1.0
+    - 1.0
+    intensity: 1.0
+  ambient:
+    color:
+    - 0.5
+    - 0.5
+    - 0.5
+    intensity: 0.3
+  cast_shadows: false
+  receive_shadows: false
+post_processing:
+  tone_mapping: none
+  exposure: 1.0
+output:
+  width: 1024
+  height: 1024
+  color_space: srgb
+  msaa: 4
+diff:
+  mode: ssim
+  threshold: 0.90
+  reference_renderer: three-vrm
+  pose_tolerance:
+    per_bone_quaternion_radians: 0.010
+    hips_translation_m: 0.005
+    per_preset_expression: 0.005
+    per_custom_expression: 0.005
+    look_at_yaw_pitch_degrees: 1.0
+    offset_from_head_bone_m: 0.001
+  conformance_status:
+    kind: included
+ignore_renderers: []
+properties: []
