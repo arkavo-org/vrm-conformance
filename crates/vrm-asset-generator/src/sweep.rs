@@ -1326,6 +1326,35 @@ pub fn vrma_lookat_sweep() -> Vec<crate::vrma_params::VrmaLookAtParams> {
     out
 }
 
+/// Real-avatar gaze sweep (8 clips) covering VMK 0.17.1 #332. Five neutral-body
+/// gaze directions exercise the eye-rest-composition bug (wall-eye at center,
+/// inverted side gaze); three turned-head variants exercise head-local gaze
+/// resolution. Sign convention follows `vrma_lookat_sweep` (gaze rotation vs
+/// world frame). Each entry emits one `.vrma` (the avatar is the real VRoid
+/// fixture, paired via a committed manual plan).
+pub fn gaze_sweep() -> Vec<crate::vrma_params::GazeParams> {
+    use crate::vrma_params::{GazeParams, RotationAxis};
+    let g = |id: &str, axis: RotationAxis, angle: f32, body: f32| GazeParams {
+        id: id.to_string(),
+        gaze_axis: axis,
+        gaze_angle_deg: angle,
+        body_yaw_deg: body,
+        duration_s: 1.0,
+    };
+    vec![
+        // Bug B: eye-rest composition (neutral body).
+        g("gaze_center", RotationAxis::Y, 0.0, 0.0),
+        g("gaze_left", RotationAxis::Y, 30.0, 0.0),
+        g("gaze_right", RotationAxis::Y, -30.0, 0.0),
+        g("gaze_up", RotationAxis::X, 20.0, 0.0),
+        g("gaze_down", RotationAxis::X, -20.0, 0.0),
+        // Bug A: head-local resolution (turned head).
+        g("gaze_center_bodyL", RotationAxis::Y, 0.0, 35.0),
+        g("gaze_center_bodyR", RotationAxis::Y, 0.0, -35.0),
+        g("gaze_right_bodyL", RotationAxis::Y, -30.0, 35.0),
+    ]
+}
+
 pub fn vrma_expression_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> {
     use crate::vrma_params::VrmaExpressionParams;
 
@@ -2501,6 +2530,34 @@ mod material_name_classification_tests {
                 p.id
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod gaze_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn gaze_sweep_covers_both_bugs() {
+        let sweep = gaze_sweep();
+        let ids: Vec<&str> = sweep.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(sweep.len(), 8);
+        // Bug B: gaze directions at neutral body.
+        assert!(ids.contains(&"gaze_center"));
+        assert!(ids.contains(&"gaze_left"));
+        assert!(ids.contains(&"gaze_right"));
+        assert!(ids.contains(&"gaze_up"));
+        assert!(ids.contains(&"gaze_down"));
+        // Bug A: turned-head variants.
+        assert!(ids.contains(&"gaze_center_bodyL"));
+        assert!(ids.contains(&"gaze_center_bodyR"));
+        assert!(ids.contains(&"gaze_right_bodyL"));
+        // center has zero gaze; bodyL turns +35.
+        let center = sweep.iter().find(|p| p.id == "gaze_center").unwrap();
+        assert_eq!(center.gaze_angle_deg, 0.0);
+        assert_eq!(center.body_yaw_deg, 0.0);
+        let body_l = sweep.iter().find(|p| p.id == "gaze_center_bodyL").unwrap();
+        assert_eq!(body_l.body_yaw_deg, 35.0);
     }
 }
 
