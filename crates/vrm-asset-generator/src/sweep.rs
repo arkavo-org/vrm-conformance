@@ -1390,6 +1390,36 @@ pub fn vrma_expression_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> 
         .collect()
 }
 
+/// Real-avatar expression clip sweep (11 preset clips) covering VMK 0.17.2 #333.
+/// Reuses `VrmaExpressionParams`; ids are `expr_<name>` so manual plans pair the
+/// real VRoid avatar with `expr_<name>.vrma`. Presets only — #333 is about preset
+/// morph binds (blink, the five visemes, and the emotion presets); custom
+/// expressions are out of scope.
+pub fn expression_clip_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> {
+    use crate::vrma_params::VrmaExpressionParams;
+    [
+        "blink",
+        "happy",
+        "angry",
+        "sad",
+        "relaxed",
+        "surprised",
+        "aa",
+        "ih",
+        "ou",
+        "ee",
+        "oh",
+    ]
+    .iter()
+    .map(|n| VrmaExpressionParams {
+        id: format!("expr_{n}"),
+        expression_name: (*n).into(),
+        is_preset: true,
+        duration_s: 1.0,
+    })
+    .collect()
+}
+
 pub fn vrma_humanoid_sweep() -> Vec<crate::vrma_params::VrmaHumanoidParams> {
     use crate::vrma_params::{RotationAxis, VrmaHumanoidParams};
 
@@ -2753,5 +2783,40 @@ mod ccd_sweep_tests {
             tail,
             expected_tail,
         );
+    }
+}
+
+#[cfg(test)]
+mod expression_clip_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn expression_clip_sweep_has_11_presets_with_expr_ids() {
+        let sweep = expression_clip_sweep();
+        assert_eq!(sweep.len(), 11);
+        let ids: Vec<&str> = sweep.iter().map(|p| p.id.as_str()).collect();
+        for name in [
+            "blink",
+            "happy",
+            "angry",
+            "sad",
+            "relaxed",
+            "surprised",
+            "aa",
+            "ih",
+            "ou",
+            "ee",
+            "oh",
+        ] {
+            assert!(
+                ids.contains(&format!("expr_{name}").as_str()),
+                "missing expr_{name}"
+            );
+        }
+        for p in &sweep {
+            assert!(p.is_preset, "{} should be preset", p.id);
+            assert_eq!(p.duration_s, 1.0);
+            assert_eq!(p.id, format!("expr_{}", p.expression_name));
+        }
     }
 }
