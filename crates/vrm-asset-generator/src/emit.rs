@@ -3056,8 +3056,10 @@ pub fn emit_gaze_clip(
     let half_rad = params.gaze_angle_deg.to_radians() / 2.0;
     let (sin_h, cos_h) = (half_rad.sin(), half_rad.cos());
     let gaze_quat = match params.gaze_axis {
-        RotationAxis::X => [sin_h, 0.0, 0.0, cos_h],
-        RotationAxis::Y => [0.0, sin_h, 0.0, cos_h],
+        RotationAxis::X => [sin_h, 0.0, 0.0, cos_h], // pitch (up/down)
+        RotationAxis::Y => [0.0, sin_h, 0.0, cos_h], // yaw (left/right)
+        // Z is roll — not a gaze axis; `gaze_sweep` never emits it, but the
+        // shared `RotationAxis` enum requires the arm for completeness.
         RotationAxis::Z => [0.0, 0.0, sin_h, cos_h],
     };
     let gaze_kf = [
