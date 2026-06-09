@@ -628,6 +628,8 @@ mod tests {
         let anim = &doc["animations"][0];
         let channels = anim["channels"].as_array().unwrap();
         assert_eq!(channels.len(), 1);
+        let samplers = anim["samplers"].as_array().unwrap();
+        assert_eq!(samplers.len(), 1);
         assert_eq!(channels[0]["target"]["path"], "translation");
         assert_eq!(channels[0]["target"]["node"], 0);
 
