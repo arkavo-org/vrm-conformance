@@ -124,6 +124,37 @@ pub fn add_humanoid_bone_rotation_channel(
     human_bones.insert(bone_name.to_string(), json!({ "node": node_index }));
 }
 
+/// Add a hips translation animation channel.
+///
+/// Per the VRMA spec, hips is the ONLY humanoid bone allowed a
+/// translation channel (root motion); all other bones are rotation-only.
+///
+/// `keyframes` is `[(time_seconds, [x, y, z])]`. Values are absolute
+/// node-local translations — a glTF translation channel REPLACES
+/// `node.translation`, so the first keyframe should equal the hips rest
+/// translation, not zero.
+///
+/// Side effects mirror [`add_humanoid_bone_rotation_channel`]: appends a
+/// sampler + channel, accessors, bufferViews, buffer bytes, and registers
+/// `humanoid.humanBones.hips.node = node_index`.
+pub fn add_hips_translation_channel(
+    doc: &mut Value,
+    buffer: &mut Vec<u8>,
+    node_index: usize,
+    keyframes: &[(f32, [f32; 3])],
+) {
+    add_node_translation_channel(doc, buffer, node_index, keyframes);
+
+    let ext = doc["extensions"]["VRMC_vrm_animation"]
+        .as_object_mut()
+        .unwrap();
+    let humanoid = ext
+        .entry("humanoid")
+        .or_insert_with(|| json!({ "humanBones": {} }));
+    let human_bones = humanoid["humanBones"].as_object_mut().unwrap();
+    human_bones.insert("hips".to_string(), json!({ "node": node_index }));
+}
+
 /// Add a lookAt gaze direction animation channel to the document.
 ///
 /// `node_index` is the glTF node index whose rotation encodes the gaze quaternion.
@@ -569,5 +600,39 @@ mod tests {
             has_rotation_for_node_0,
             "expected rotation channel on node 0 for lookAt"
         );
+    }
+
+    #[test]
+    fn hips_translation_emits_translation_channel_and_registers_bone() {
+        let mut doc = build_empty_vrma();
+        let mut buffer = Vec::<u8>::new();
+        doc["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "name": "hips" }));
+
+        add_hips_translation_channel(
+            &mut doc,
+            &mut buffer,
+            0,
+            &[(0.0_f32, [0.0_f32, 0.86, 0.0]), (1.0, [0.0, 0.86, 0.3])],
+        );
+
+        // hips must be registered in humanBones (the spec ties the
+        // translation channel to the hips humanoid bone).
+        assert_eq!(
+            doc["extensions"]["VRMC_vrm_animation"]["humanoid"]["humanBones"]["hips"]["node"],
+            0
+        );
+
+        let anim = &doc["animations"][0];
+        let channels = anim["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0]["target"]["path"], "translation");
+        assert_eq!(channels[0]["target"]["node"], 0);
+
+        // 2 f32 timestamps (8 B) + 2 VEC3 values (24 B), 4-aligned.
+        assert!(buffer.len() >= 32, "buffer too small: {}", buffer.len());
+        assert_eq!(buffer.len() % 4, 0, "buffer not 4-aligned");
     }
 }
