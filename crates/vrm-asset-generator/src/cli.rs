@@ -2039,7 +2039,16 @@ pub fn run(cli: Cli) -> Result<()> {
                     eprintln!("[{:3}/{}] {}", i + 1, total, params.id);
                 }
             }
-            println!("emitted {total} VRMA humanoid sweep plans to {output_dir}");
+            if emit_json {
+                let summary = serde_json::json!({
+                    "ok": true,
+                    "count": total,
+                    "output_dir": output_dir,
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!("emitted {total} VRMA humanoid sweep plans to {output_dir}");
+            }
             Ok(())
         }
         Cmd::EmitVrmaExpressionSweep {
@@ -2877,7 +2886,7 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "output_dir": { "type": "string" },
                                 "json": {
                                     "type": "boolean",
-                                    "description": "Emit NDJSON progress on stderr"
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
                                 }
                             }
                         },
