@@ -72,6 +72,9 @@ assets/humanoid/*.vrm
 assets/humanoid/gaze_*.vrma
 # Generated expression VRMA clips (emitted by scripts/install-humanoid-fixtures.sh)
 assets/humanoid/expr_*.vrma
+# Third-party full-body idle clip (official VRM sample animation VRMA_01;
+# symlinked by scripts/install-humanoid-fixtures.sh, not redistributed)
+assets/humanoid/VRMA_01_idle.vrma
 
 # Python bytecode cache (vrma-pose-consensus.py + future python helpers)
 __pycache__/
