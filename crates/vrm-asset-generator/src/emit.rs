@@ -2806,6 +2806,10 @@ pub fn emit_vrma_humanoid_triplet(
     let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
     emit_vrm(&mtoon_defaults, &vrm_path)?;
 
+    // .meta.json — part of the paired-triplet contract; the mock renderer's load_vrm requires it.
+    let meta_path = output_dir.join(format!("{}.meta.json", params.id));
+    crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
+
     // 2. Emit the .vrma.
     let skel = crate::humanoid::minimal_skeleton();
     let node_idx = *skel
@@ -2853,10 +2857,6 @@ pub fn emit_vrma_humanoid_triplet(
     let vrma_path = output_dir.join(&vrma_relpath);
     let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
     std::fs::write(&vrma_path, &vrma_bytes)?;
-
-    // .meta.json — part of the paired-triplet contract; the mock renderer's load_vrm requires it.
-    let meta_path = output_dir.join(format!("{}.meta.json", params.id));
-    crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
 
     // 3. Emit the .test.yaml.
     let plan = crate::sidecar::build_vrma_humanoid_test_plan(params, &vrm_relpath, &vrma_relpath);
@@ -4189,6 +4189,7 @@ mod vrma_hips_translation_emit_tests {
         emit_vrma_hips_translation_triplet(dir, &params).unwrap();
 
         assert!(dir.join("hips_trans_test.vrm").exists());
+        assert!(dir.join("hips_trans_test.meta.json").exists());
         assert!(dir.join("hips_trans_test.test.yaml").exists());
 
         let vrma_bytes = std::fs::read(dir.join("hips_trans_test.vrma")).unwrap();
@@ -4252,5 +4253,48 @@ mod vrma_hips_translation_emit_tests {
             (kf1[2] - 0.3).abs() < 1e-6,
             "kf1 must be rest + 0.3 m Z offset, got {kf1:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod vrma_triplet_fileset_tests {
+    use super::*;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    fn assert_triplet_files(dir: &Utf8Path, id: &str) {
+        for ext in ["vrm", "meta.json", "vrma", "test.yaml"] {
+            assert!(
+                dir.join(format!("{id}.{ext}")).exists(),
+                "{id}.{ext} missing from triplet"
+            );
+        }
+    }
+
+    #[test]
+    fn vrma_triplet_emitters_write_the_full_paired_triplet() {
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+
+        let humanoid = crate::sweep::vrma_humanoid_sweep()
+            .into_iter()
+            .next()
+            .unwrap();
+        emit_vrma_humanoid_triplet(dir, &humanoid).unwrap();
+        assert_triplet_files(dir, &humanoid.id);
+
+        let expression = crate::sweep::vrma_expression_sweep()
+            .into_iter()
+            .next()
+            .unwrap();
+        emit_vrma_expression_triplet(dir, &expression).unwrap();
+        assert_triplet_files(dir, &expression.id);
+
+        let lookat = crate::sweep::vrma_lookat_sweep()
+            .into_iter()
+            .next()
+            .unwrap();
+        emit_vrma_lookat_triplet(dir, &lookat).unwrap();
+        assert_triplet_files(dir, &lookat.id);
     }
 }

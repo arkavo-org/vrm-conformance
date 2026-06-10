@@ -2935,7 +2935,7 @@ pub fn run(cli: Cli) -> Result<()> {
                         }
                     },
                     "emit-arkit-expression-sweep": {
-                        "summary": "ARKit custom-expression sweep (52 plans — one per ARKit ARFaceAnchor blendshape, custom-classified, matching Spatial iOS's VRMA export). Each variant ramps a single expressions.custom track 0 -> 1 -> 0 over 1 s against an avatar pre-registering that custom expression; plans sample at peak (t=0.5). Covers the producer surface Spatial iOS's VRMA export emits (all 52 blendshapes, lossless camelCase names, custom-classified). Each plan emits a .vrm + .vrma + .test.yaml triplet.",
+                        "summary": "ARKit custom-expression sweep (52 plans — one per ARKit ARFaceAnchor blendshape, e.g. jawOpen, browInnerUp). Each variant ramps a single expressions.custom track 0 → 1 → 0 over 1 s against an avatar pre-registering that custom expression; plans sample at peak (t=0.5). Covers the producer surface Spatial iOS's VRMA export emits (all 52 blendshapes, lossless camelCase names, custom-classified). Each plan emits a .vrm + .vrma + .test.yaml triplet.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],
