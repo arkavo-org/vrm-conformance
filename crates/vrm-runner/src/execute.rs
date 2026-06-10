@@ -474,6 +474,10 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
             )
             .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
         let output_png = Utf8PathBuf::from(render.output_path);
+        // Blank-frame gate: an adapter with unusable pipelines renders the
+        // bare clear color and still reports ok — never let that pass or
+        // reach a golden push (see crate::blank).
+        crate::blank::reject_blank_frame(&output_png, &plan.id)?;
         (output_png, render.actual_color_space, None)
     };
 
@@ -761,6 +765,12 @@ fn rehash_frames(result: &mut ops::RenderSequenceResult) -> Result<(), String> {
         let bytes = std::fs::read(&frame.path).map_err(|e| format!("read {}: {e}", frame.path))?;
         let hash = blake3::hash(&bytes);
         frame.blake3 = format!("blake3:{}", hash.to_hex());
+        // Blank-frame gate, sequence flavor: a wedged adapter emits a whole
+        // directory of clear-color frames; reject at the same chokepoint
+        // that already touches every frame byte (see crate::blank).
+        let frame_path = camino::Utf8Path::new(&frame.path);
+        crate::blank::reject_blank_frame(frame_path, "sequence frame")
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
