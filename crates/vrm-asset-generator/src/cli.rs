@@ -421,6 +421,15 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the ARKit custom-expression sweep (52 plans — one per ARKit
+    /// blendshape, custom-classified, matching Spatial iOS's VRMA export).
+    EmitArkitExpressionSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the real-avatar gaze sweep (8 .vrma clips) covering VMK #332.
     EmitGazeSweep {
         #[arg(long)]
@@ -2099,6 +2108,39 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitArkitExpressionSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_vrma_expression_triplet;
+            use crate::sweep::vrma_arkit_expression_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let sweep = vrma_arkit_expression_sweep();
+            let total = sweep.len();
+            for (i, params) in sweep.iter().enumerate() {
+                emit_vrma_expression_triplet(&output_dir, params)?;
+                if emit_json {
+                    eprintln!(
+                        r#"{{"event":"progress","op":"emit-arkit-expression-sweep","index":{i},"total":{total},"id":"{id}"}}"#,
+                        id = params.id,
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, params.id);
+                }
+            }
+            if emit_json {
+                let summary = serde_json::json!({
+                    "ok": true,
+                    "count": total,
+                    "output_dir": output_dir,
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!("emitted {total} ARKit expression sweep plans to {output_dir}");
+            }
+            Ok(())
+        }
         Cmd::EmitGazeSweep {
             output_dir,
             json: emit_json,
@@ -2872,6 +2914,28 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-vrma-lookat-sweep": {
                         "summary": "VRMA lookAt sweep (10 plans = 5 directions x 2 avatar configs). Directions: yaw +-60deg, pitch +-30deg, neutral. Avatar configs: bone (VRMC_vrm.lookAt.type: bone) vs expression. Same .vrma gaze tested against both avatar rendering paths. Each plan emits a .vrm + .vrma + .test.yaml triplet.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" }
+                            }
+                        }
+                    },
+                    "emit-arkit-expression-sweep": {
+                        "summary": "ARKit custom-expression sweep (52 plans — one per ARKit ARFaceAnchor blendshape, custom-classified, matching Spatial iOS's VRMA export). Each variant ramps a single expressions.custom track 0 -> 1 -> 0 over 1 s against an avatar pre-registering that custom expression; plans sample at peak (t=0.5). Covers the producer surface Spatial iOS's VRMA export emits (all 52 blendshapes, lossless camelCase names, custom-classified). Each plan emits a .vrm + .vrma + .test.yaml triplet.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],
