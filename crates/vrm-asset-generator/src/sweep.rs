@@ -1490,10 +1490,10 @@ pub fn arkit_blendshape_names() -> [&'static str; 52] {
 pub fn vrma_arkit_expression_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> {
     use crate::vrma_params::VrmaExpressionParams;
     arkit_blendshape_names()
-        .iter()
+        .into_iter()
         .map(|name| VrmaExpressionParams {
             id: format!("vrma_arkit_{name}"),
-            expression_name: (*name).to_string(),
+            expression_name: name.into(),
             is_preset: false,
             duration_s: 1.0,
         })
