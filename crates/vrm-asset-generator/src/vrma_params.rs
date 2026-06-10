@@ -76,7 +76,7 @@ pub struct GazeParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VrmaHipsTranslationParams {
     pub id: String,
-    /// Offset from the hips rest translation, metres, applied at t = duration_s.
+    /// Offset from the hips rest translation, metres; zero at t=0, fully applied at t = duration_s.
     pub offset_m: [f32; 3],
     pub duration_s: f32,
 }

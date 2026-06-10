@@ -1504,6 +1504,8 @@ pub fn vrma_humanoid_sweep() -> Vec<crate::vrma_params::VrmaHumanoidParams> {
 /// `vrma_humanoid_sweep` never exercises.
 pub fn vrma_hips_translation_sweep() -> Vec<crate::vrma_params::VrmaHipsTranslationParams> {
     use crate::vrma_params::VrmaHipsTranslationParams;
+    // Rise kept smaller than crouch so the avatar stays in-frame and
+    // crouch stays above the floor plane.
     let variants: [(&str, [f32; 3]); 5] = [
         ("vrma_hips_trans_forward", [0.0, 0.0, 0.3]),
         ("vrma_hips_trans_backward", [0.0, 0.0, -0.3]),
@@ -1512,10 +1514,10 @@ pub fn vrma_hips_translation_sweep() -> Vec<crate::vrma_params::VrmaHipsTranslat
         ("vrma_hips_trans_rise", [0.0, 0.10, 0.0]),
     ];
     variants
-        .iter()
+        .into_iter()
         .map(|(id, offset)| VrmaHipsTranslationParams {
-            id: (*id).into(),
-            offset_m: *offset,
+            id: id.into(),
+            offset_m: offset,
             duration_s: 1.0,
         })
         .collect()
