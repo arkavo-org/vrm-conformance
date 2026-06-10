@@ -3065,6 +3065,81 @@ mod vrma_arkit_expression_sweep_tests {
     }
 }
 
+/// Finger-bone sweep: one variant per VRM 1.0 optional finger bone
+/// (30 = 15 per hand). Fingers curl about Z (±45°, sign mirrored per
+/// side); thumbs rotate about Y (±30°, mirrored). Sign choices are for
+/// visual plausibility only — the conformance signal is the dumped
+/// quaternion matching across renderers, not anatomy. Reuses
+/// `VrmaHumanoidParams`; emission pairs with `skeleton_with_fingers()`.
+pub fn vrma_finger_sweep() -> Vec<crate::vrma_params::VrmaHumanoidParams> {
+    use crate::vrma_params::{RotationAxis, VrmaHumanoidParams};
+    const SEGMENTS: [(&str, &str); 15] = [
+        ("ThumbMetacarpal", "thumb_metacarpal"),
+        ("ThumbProximal", "thumb_proximal"),
+        ("ThumbDistal", "thumb_distal"),
+        ("IndexProximal", "index_proximal"),
+        ("IndexIntermediate", "index_intermediate"),
+        ("IndexDistal", "index_distal"),
+        ("MiddleProximal", "middle_proximal"),
+        ("MiddleIntermediate", "middle_intermediate"),
+        ("MiddleDistal", "middle_distal"),
+        ("RingProximal", "ring_proximal"),
+        ("RingIntermediate", "ring_intermediate"),
+        ("RingDistal", "ring_distal"),
+        ("LittleProximal", "little_proximal"),
+        ("LittleIntermediate", "little_intermediate"),
+        ("LittleDistal", "little_distal"),
+    ];
+    let mut out = Vec::with_capacity(30);
+    for (side, side_label, sign) in [("left", "l", 1.0_f32), ("right", "r", -1.0_f32)] {
+        for (seg, seg_label) in SEGMENTS {
+            let is_thumb = seg.starts_with("Thumb");
+            let (axis, angle_deg) = if is_thumb {
+                (RotationAxis::Y, 30.0 * sign)
+            } else {
+                (RotationAxis::Z, -45.0 * sign)
+            };
+            out.push(VrmaHumanoidParams {
+                id: format!("vrma_finger_{side_label}_{seg_label}"),
+                bone_name: format!("{side}{seg}"),
+                axis,
+                angle_deg,
+                duration_s: 1.0,
+            });
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod vrma_finger_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn thirty_variants_one_per_finger_bone() {
+        let variants = vrma_finger_sweep();
+        assert_eq!(variants.len(), 30);
+        let mut bones: Vec<&str> = variants.iter().map(|v| v.bone_name.as_str()).collect();
+        bones.sort_unstable();
+        bones.dedup();
+        assert_eq!(bones.len(), 30, "each finger bone exactly once");
+        assert!(variants.iter().any(|v| v.bone_name == "leftIndexProximal"));
+        assert!(variants.iter().any(|v| v.bone_name == "rightThumbDistal"));
+    }
+
+    #[test]
+    fn finger_bones_resolve_in_finger_skeleton() {
+        let sk = crate::humanoid::skeleton_with_fingers();
+        for v in vrma_finger_sweep() {
+            assert!(
+                sk.bone_to_node.contains_key(&v.bone_name),
+                "{} not in finger skeleton",
+                v.bone_name
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod vrma_multichannel_sweep_tests {
     use super::*;

@@ -3074,6 +3074,72 @@ pub fn emit_vrma_multichannel_triplet(
     Ok(())
 }
 
+/// Emit a VRMA finger sweep triplet: .vrm + .meta.json + .vrma + .test.yaml.
+///
+/// Identical flow to `emit_vrma_humanoid_triplet` except both the avatar
+/// and the clip are built from `skeleton_with_fingers()` so the animated
+/// finger bone exists in `VRMC_vrm.humanoid.humanBones` (avatar) and
+/// `VRMC_vrm_animation.humanoid.humanBones` (clip). Reuses the humanoid
+/// sidecar builder — a finger bone IS a humanoid bone.
+pub fn emit_vrma_finger_triplet(
+    output_dir: &Utf8Path,
+    params: &crate::vrma_params::VrmaHumanoidParams,
+) -> Result<()> {
+    use crate::vrma_emit::{
+        add_humanoid_bone_rotation_channel, build_empty_vrma, finalize_vrma_scenes,
+        register_all_humanoid_bones, write_vrma_glb,
+    };
+
+    std::fs::create_dir_all(output_dir)?;
+
+    let skel = crate::humanoid::skeleton_with_fingers();
+
+    // 1. .vrm with the finger skeleton.
+    let vrm_relpath = format!("{}.vrm", params.id);
+    let vrm_path = output_dir.join(&vrm_relpath);
+    let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
+    emit_vrm_with_skeleton(&mtoon_defaults, &vrm_path, &skel)?;
+
+    // .meta.json — part of the paired-triplet contract; the mock renderer's load_vrm requires it.
+    let meta_path = output_dir.join(format!("{}.meta.json", params.id));
+    crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
+
+    // 2. .vrma rotating the single finger bone.
+    let node_idx = *skel
+        .bone_to_node
+        .get(&params.bone_name)
+        .unwrap_or_else(|| panic!("bone {} not in finger skeleton", params.bone_name));
+
+    let mut doc = build_empty_vrma();
+    doc["nodes"] = skel.nodes_json.clone();
+    register_all_humanoid_bones(&mut doc, &skel.bone_to_node);
+
+    let mut buffer = Vec::<u8>::new();
+    let target_quat = axis_quat(params.axis, params.angle_deg);
+    let keyframes = [
+        (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
+        (params.duration_s, target_quat),
+    ];
+    add_humanoid_bone_rotation_channel(
+        &mut doc,
+        &mut buffer,
+        node_idx,
+        &params.bone_name,
+        &keyframes,
+    );
+
+    finalize_vrma_scenes(&mut doc);
+
+    let vrma_relpath = format!("{}.vrma", params.id);
+    let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
+    std::fs::write(output_dir.join(&vrma_relpath), &vrma_bytes)?;
+
+    // 3. .test.yaml — reuse the humanoid plan builder.
+    let plan = crate::sidecar::build_vrma_humanoid_test_plan(params, &vrm_relpath, &vrma_relpath);
+    crate::sidecar::write_test_yaml(&plan, &output_dir.join(format!("{}.test.yaml", params.id)))?;
+    Ok(())
+}
+
 /// Emit a VRMA expression sweep triplet: .vrm + .vrma + .test.yaml.
 ///
 /// The .vrm is the canonical minimal humanoid rig.
@@ -4485,6 +4551,51 @@ mod vrma_triplet_fileset_tests {
             .unwrap();
         emit_vrma_lookat_triplet(dir, &lookat).unwrap();
         assert_triplet_files(dir, &lookat.id);
+    }
+}
+
+#[cfg(test)]
+mod vrma_finger_emit_tests {
+    use super::*;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    #[test]
+    fn finger_triplet_animates_the_finger_bone() {
+        let params = crate::vrma_params::VrmaHumanoidParams {
+            id: "finger_test".into(),
+            bone_name: "leftIndexProximal".into(),
+            axis: crate::vrma_params::RotationAxis::Z,
+            angle_deg: -45.0,
+            duration_s: 1.0,
+        };
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        emit_vrma_finger_triplet(dir, &params).unwrap();
+
+        assert!(dir.join("finger_test.meta.json").exists());
+
+        let vrma_bytes = std::fs::read(dir.join("finger_test.vrma")).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&vrma_bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        let bone_node = doc["extensions"]["VRMC_vrm_animation"]["humanoid"]["humanBones"]
+            ["leftIndexProximal"]["node"]
+            .as_u64()
+            .unwrap();
+        let channels = doc["animations"][0]["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0]["target"]["node"].as_u64().unwrap(), bone_node);
+        assert_eq!(channels[0]["target"]["path"], "rotation");
+
+        // The paired .vrm must also know the finger bone, else no renderer
+        // can retarget the channel.
+        let vrm_bytes = std::fs::read(dir.join("finger_test.vrm")).unwrap();
+        let vrm_json = crate::glb::extract_json_chunk(&vrm_bytes).unwrap();
+        let vrm_doc: serde_json::Value = serde_json::from_slice(&vrm_json).unwrap();
+        assert!(
+            vrm_doc["extensions"]["VRMC_vrm"]["humanoid"]["humanBones"]["leftIndexProximal"]
+                .is_object()
+        );
     }
 }
 
