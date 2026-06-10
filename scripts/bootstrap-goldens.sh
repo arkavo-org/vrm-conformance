@@ -270,6 +270,50 @@ else
         VRMA_LOOKAT_DIR=""
     fi
 
+    if [ "$SPEC_VERSION" != "0.x" ]; then
+        echo "==> Emitting VRMA hips-translation sweep (producer coverage: 5 plans)"
+        VRMA_HIPS_DIR="$GOLDENS_DIR/_assets_vrma_hips"
+        rm -rf "$VRMA_HIPS_DIR"; mkdir -p "$VRMA_HIPS_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-vrma-hips-translation-sweep \
+            --output-dir "$VRMA_HIPS_DIR" --json >/dev/null
+    else
+        echo "    SKIP emit-vrma-hips-translation-sweep: VRM 1.0-era VRMA; no 0.x form"
+        VRMA_HIPS_DIR=""
+    fi
+
+    if [ "$SPEC_VERSION" != "0.x" ]; then
+        echo "==> Emitting ARKit custom-expression sweep (producer coverage: 52 plans)"
+        VRMA_ARKIT_DIR="$GOLDENS_DIR/_assets_vrma_arkit"
+        rm -rf "$VRMA_ARKIT_DIR"; mkdir -p "$VRMA_ARKIT_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-arkit-expression-sweep \
+            --output-dir "$VRMA_ARKIT_DIR" --json >/dev/null
+    else
+        echo "    SKIP emit-arkit-expression-sweep: VRM 1.0-era VRMA; no 0.x form"
+        VRMA_ARKIT_DIR=""
+    fi
+
+    if [ "$SPEC_VERSION" != "0.x" ]; then
+        echo "==> Emitting multi-channel VRMA sweep (producer coverage: 6 plans)"
+        VRMA_MULTI_DIR="$GOLDENS_DIR/_assets_vrma_multichannel"
+        rm -rf "$VRMA_MULTI_DIR"; mkdir -p "$VRMA_MULTI_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-vrma-multichannel-sweep \
+            --output-dir "$VRMA_MULTI_DIR" --json >/dev/null
+    else
+        echo "    SKIP emit-vrma-multichannel-sweep: VRM 1.0-era VRMA; no 0.x form"
+        VRMA_MULTI_DIR=""
+    fi
+
+    if [ "$SPEC_VERSION" != "0.x" ]; then
+        echo "==> Emitting VRMA finger sweep (producer coverage: 30 plans)"
+        VRMA_FINGER_DIR="$GOLDENS_DIR/_assets_vrma_finger"
+        rm -rf "$VRMA_FINGER_DIR"; mkdir -p "$VRMA_FINGER_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-vrma-finger-sweep \
+            --output-dir "$VRMA_FINGER_DIR" --json >/dev/null
+    else
+        echo "    SKIP emit-vrma-finger-sweep: VRM 1.0-era VRMA; no 0.x form"
+        VRMA_FINGER_DIR=""
+    fi
+
     echo "==> Emitting VMK#162 coupling sweep (4 variants × settle + swing = 8 plans)"
     VMK162_DIR="$GOLDENS_DIR/_assets_vmk162"
     rm -rf "$VMK162_DIR"; mkdir -p "$VMK162_DIR"
@@ -433,6 +477,10 @@ if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
             "${VRMA_HUMANOID_DIR:-}" \
             "${VRMA_EXPRESSION_DIR:-}" \
             "${VRMA_LOOKAT_DIR:-}" \
+            "${VRMA_HIPS_DIR:-}" \
+            "${VRMA_ARKIT_DIR:-}" \
+            "${VRMA_MULTI_DIR:-}" \
+            "${VRMA_FINGER_DIR:-}" \
             "${EMISSIVE_DIR:-}" \
             "${FIRSTPERSON_DIR:-}" \
             "${UVXFORM_DIR:-}" \
