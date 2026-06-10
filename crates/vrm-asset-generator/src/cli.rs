@@ -441,6 +441,16 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the VRMA finger-bone sweep (30 plans — one per VRM 1.0
+    /// optional finger bone, 15 per hand). Avatar and clip share the
+    /// finger-extended skeleton.
+    EmitVrmaFingerSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the real-avatar gaze sweep (8 .vrma clips) covering VMK #332.
     EmitGazeSweep {
         #[arg(long)]
@@ -2194,6 +2204,39 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitVrmaFingerSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_vrma_finger_triplet;
+            use crate::sweep::vrma_finger_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let sweep = vrma_finger_sweep();
+            let total = sweep.len();
+            for (i, params) in sweep.iter().enumerate() {
+                emit_vrma_finger_triplet(&output_dir, params)?;
+                if emit_json {
+                    eprintln!(
+                        r#"{{"event":"progress","op":"emit-vrma-finger-sweep","index":{i},"total":{total},"id":"{id}"}}"#,
+                        id = params.id,
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, params.id);
+                }
+            }
+            if emit_json {
+                let summary = serde_json::json!({
+                    "ok": true,
+                    "count": total,
+                    "output_dir": output_dir,
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!("emitted {total} VRMA finger sweep plans to {output_dir}");
+            }
+            Ok(())
+        }
         Cmd::EmitGazeSweep {
             output_dir,
             json: emit_json,
@@ -3011,6 +3054,28 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-vrma-multichannel-sweep": {
                         "summary": "Multi-channel VRMA sweep (6 plans). Channel-coexistence coverage: humanoid rotations + hips root motion + expression weights + lookAt sharing one timeline, the merged body+face shape real producers (Spatial iOS) export. Includes a preset+custom double-drive variant and an all-four-channels variant. Every channel peaks at t = duration/2; plans sample once there. Deliberate one-axis-at-a-time exception. Each plan emits a .vrm + .vrma + .test.yaml triplet.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" }
+                            }
+                        }
+                    },
+                    "emit-vrma-finger-sweep": {
+                        "summary": "VRMA finger-bone sweep (30 plans — one per VRM 1.0 optional finger bone, 15 per hand: thumb metacarpal/proximal/distal + index/middle/ring/little proximal/intermediate/distal). Fingers curl about Z (+-45 deg, mirrored per side); thumbs rotate about Y (+-30 deg). Avatar and clip share a finger-extended skeleton (49 bones). Covers the optional-bone surface producers (Spatial iOS hand retargeting) emit. Each plan emits a .vrm + .vrma + .test.yaml triplet.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],
