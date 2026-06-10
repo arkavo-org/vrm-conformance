@@ -510,6 +510,50 @@ pub fn build_vrma_hips_translation_test_plan(
     plan
 }
 
+/// Build a test plan for a multi-channel VRMA triplet. `apply_at_time` is
+/// duration/2 — every channel in the clip peaks there (bones/hips hold,
+/// expressions ramp back down), so one sample hits all peaks.
+pub fn build_vrma_multichannel_test_plan(
+    params: &crate::vrma_params::VrmaMultiChannelParams,
+    vrm_relpath: &str,
+    vrma_relpath: &str,
+) -> TestPlan {
+    let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
+    let mut plan = build_default_test_plan(&mtoon_defaults, vrm_relpath);
+    plan.spec_section = format!(
+        "VRMC_vrm_animation (multi-channel coexistence — deliberate one-axis exception: \
+         {} bone(s), hips {}, {} expression(s), lookAt {})",
+        params.bones.len(),
+        if params.hips_offset_m.is_some() {
+            "yes"
+        } else {
+            "no"
+        },
+        params.expressions.len(),
+        if params.look_at.is_some() {
+            "yes"
+        } else {
+            "no"
+        },
+    );
+    plan.animation = Some(AnimationConfig {
+        root_transform: None,
+        vrma: Some(VrmaAnimation {
+            path: vrma_relpath.into(),
+            apply_at_time: params.duration_s / 2.0,
+        }),
+    });
+    plan.diff.pose_tolerance = Some(vrm_test_plan::PoseTolerance {
+        per_bone_quaternion_radians: 0.010,
+        hips_translation_m: 0.005,
+        per_preset_expression: 0.005,
+        per_custom_expression: 0.005,
+        look_at_yaw_pitch_degrees: 1.0,
+        offset_from_head_bone_m: 0.001,
+    });
+    plan
+}
+
 fn default_properties(_params: &MToonParams) -> Vec<PropertyAssertion> {
     // v0.1 default: one general-purpose lower-quad average-luminance check.
     // Test-specific assertions get added per parameter combination later.

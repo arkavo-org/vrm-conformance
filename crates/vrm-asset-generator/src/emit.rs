@@ -2939,6 +2939,126 @@ pub fn emit_vrma_hips_translation_triplet(
     Ok(())
 }
 
+/// Emit a multi-channel VRMA triplet: .vrm + .meta.json + .vrma + .test.yaml.
+///
+/// All channels share one timeline and peak at t = duration/2: bone and
+/// hips channels ramp identity→peak then HOLD to the end; expression
+/// channels ramp 0→peak→0; the lookAt channel ramps identity→gaze then
+/// holds. The plan samples once at duration/2, catching every channel at
+/// peak. Custom expression names are pre-registered on the avatar (the
+/// same invariant as `emit_vrma_expression_triplet`).
+pub fn emit_vrma_multichannel_triplet(
+    output_dir: &Utf8Path,
+    params: &crate::vrma_params::VrmaMultiChannelParams,
+) -> Result<()> {
+    use crate::vrma_emit::{
+        add_expression_weight_channel, add_hips_translation_channel,
+        add_humanoid_bone_rotation_channel, add_look_at_channel, build_empty_vrma,
+        finalize_vrma_scenes, register_all_humanoid_bones, write_vrma_glb, ExpressionKind,
+    };
+    use crate::vrma_params::RotationAxis;
+
+    fn axis_quat(axis: RotationAxis, angle_deg: f32) -> [f32; 4] {
+        let half = angle_deg.to_radians() / 2.0;
+        let (s, c) = (half.sin(), half.cos());
+        match axis {
+            RotationAxis::X => [s, 0.0, 0.0, c],
+            RotationAxis::Y => [0.0, s, 0.0, c],
+            RotationAxis::Z => [0.0, 0.0, s, c],
+        }
+    }
+
+    std::fs::create_dir_all(output_dir)?;
+
+    // 1. .vrm — pre-register any custom expression names.
+    let vrm_relpath = format!("{}.vrm", params.id);
+    let vrm_path = output_dir.join(&vrm_relpath);
+    let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
+    let custom_names: Vec<&str> = params
+        .expressions
+        .iter()
+        .filter(|e| !e.is_preset)
+        .map(|e| e.name.as_str())
+        .collect();
+    emit_vrm_with_custom_expressions(&mtoon_defaults, &vrm_path, &custom_names)?;
+
+    // .meta.json — part of the paired-triplet contract; the mock renderer's load_vrm requires it.
+    let meta_path = output_dir.join(format!("{}.meta.json", params.id));
+    crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
+
+    // 2. .vrma — every requested channel on one shared timeline.
+    let skel = crate::humanoid::minimal_skeleton();
+    let mut doc = build_empty_vrma();
+    doc["nodes"] = skel.nodes_json.clone();
+    register_all_humanoid_bones(&mut doc, &skel.bone_to_node);
+
+    let d = params.duration_s;
+    let identity = [0.0_f32, 0.0, 0.0, 1.0];
+    let mut buffer = Vec::<u8>::new();
+
+    for spec in &params.bones {
+        let node_idx = *skel
+            .bone_to_node
+            .get(&spec.bone_name)
+            .unwrap_or_else(|| panic!("bone {} not in canonical skeleton", spec.bone_name));
+        let q = axis_quat(spec.axis, spec.angle_deg);
+        let kf = [(0.0_f32, identity), (d / 2.0, q), (d, q)];
+        add_humanoid_bone_rotation_channel(&mut doc, &mut buffer, node_idx, &spec.bone_name, &kf);
+    }
+
+    if let Some(offset) = params.hips_offset_m {
+        let hips_node = skel.bone_to_node["hips"];
+        let rest = hips_rest_translation(&skel);
+        let target = [
+            rest[0] + offset[0],
+            rest[1] + offset[1],
+            rest[2] + offset[2],
+        ];
+        let kf = [(0.0_f32, rest), (d / 2.0, target), (d, target)];
+        add_hips_translation_channel(&mut doc, &mut buffer, hips_node, &kf);
+    }
+
+    for espec in &params.expressions {
+        let node_idx = {
+            let nodes = doc["nodes"].as_array_mut().unwrap();
+            nodes.push(serde_json::json!({
+                "name": format!("{}_expr_target", espec.name)
+            }));
+            nodes.len() - 1
+        };
+        let kind = if espec.is_preset {
+            ExpressionKind::Preset(&espec.name)
+        } else {
+            ExpressionKind::Custom(&espec.name)
+        };
+        let kf = [(0.0_f32, 0.0_f32), (d / 2.0, espec.peak_weight), (d, 0.0)];
+        add_expression_weight_channel(&mut doc, &mut buffer, node_idx, kind, &kf);
+    }
+
+    if let Some(gaze) = &params.look_at {
+        let node_idx = {
+            let nodes = doc["nodes"].as_array_mut().unwrap();
+            nodes.push(serde_json::json!({ "name": "gaze_target" }));
+            nodes.len() - 1
+        };
+        let q = axis_quat(gaze.axis, gaze.angle_deg);
+        let kf = [(0.0_f32, identity), (d / 2.0, q), (d, q)];
+        add_look_at_channel(&mut doc, &mut buffer, node_idx, [0.0, 0.06, 0.0], &kf);
+    }
+
+    finalize_vrma_scenes(&mut doc);
+
+    let vrma_relpath = format!("{}.vrma", params.id);
+    let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
+    std::fs::write(output_dir.join(&vrma_relpath), &vrma_bytes)?;
+
+    // 3. .test.yaml.
+    let plan =
+        crate::sidecar::build_vrma_multichannel_test_plan(params, &vrm_relpath, &vrma_relpath);
+    crate::sidecar::write_test_yaml(&plan, &output_dir.join(format!("{}.test.yaml", params.id)))?;
+    Ok(())
+}
+
 /// Emit a VRMA expression sweep triplet: .vrm + .vrma + .test.yaml.
 ///
 /// The .vrm is the canonical minimal humanoid rig.
@@ -4252,6 +4372,60 @@ mod vrma_hips_translation_emit_tests {
         assert!(
             (kf1[2] - 0.3).abs() < 1e-6,
             "kf1 must be rest + 0.3 m Z offset, got {kf1:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod vrma_multichannel_emit_tests {
+    use super::*;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    #[test]
+    fn all_channels_variant_emits_every_extension_block() {
+        let sweep = crate::sweep::vrma_multichannel_sweep();
+        let params = sweep
+            .iter()
+            .find(|v| v.id == "vrma_multi_all_channels")
+            .unwrap();
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        emit_vrma_multichannel_triplet(dir, params).unwrap();
+
+        assert!(dir.join("vrma_multi_all_channels.meta.json").exists());
+
+        let vrma_bytes = std::fs::read(dir.join("vrma_multi_all_channels.vrma")).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&vrma_bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        let ext = &doc["extensions"]["VRMC_vrm_animation"];
+
+        assert!(ext["humanoid"]["humanBones"]["head"].is_object());
+        assert!(ext["expressions"]["preset"]["happy"].is_object());
+        assert!(ext["lookAt"]["node"].is_number());
+
+        // head rotation + hips translation + expression translation + gaze rotation
+        let channels = doc["animations"][0]["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 4, "{channels:?}");
+    }
+
+    #[test]
+    fn double_drive_variant_registers_custom_on_avatar() {
+        let sweep = crate::sweep::vrma_multichannel_sweep();
+        let params = sweep
+            .iter()
+            .find(|v| v.id == "vrma_multi_double_drive")
+            .unwrap();
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        emit_vrma_multichannel_triplet(dir, params).unwrap();
+
+        let vrm_bytes = std::fs::read(dir.join("vrma_multi_double_drive.vrm")).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&vrm_bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        assert!(
+            doc["extensions"]["VRMC_vrm"]["expressions"]["custom"]["mouthSmileLeft"].is_object(),
+            "avatar must pre-register the custom expression"
         );
     }
 }
