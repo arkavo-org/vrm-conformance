@@ -69,6 +69,18 @@ pub struct GazeParams {
     pub duration_s: f32,
 }
 
+/// Hips root-motion sweep. Translates hips from rest to rest + `offset_m`
+/// over `duration_s`, linear. Covers the one humanoid translation channel
+/// the VRMA spec allows — producers (e.g. Spatial iOS's VRMA export) emit
+/// it for locomotion; all other humanoid bones are rotation-only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VrmaHipsTranslationParams {
+    pub id: String,
+    /// Offset from the hips rest translation, metres, applied at t = duration_s.
+    pub offset_m: [f32; 3],
+    pub duration_s: f32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +143,18 @@ mod tests {
         assert_eq!(back.id, "gaze_center_bodyL");
         assert_eq!(back.body_yaw_deg, 35.0);
         assert!(matches!(back.gaze_axis, RotationAxis::Y));
+    }
+
+    #[test]
+    fn hips_translation_params_roundtrips() {
+        let p = VrmaHipsTranslationParams {
+            id: "vrma_hips_trans_forward".into(),
+            offset_m: [0.0, 0.0, 0.3],
+            duration_s: 1.0,
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let back: VrmaHipsTranslationParams = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.id, "vrma_hips_trans_forward");
+        assert!((back.offset_m[2] - 0.3).abs() < 1e-6);
     }
 }

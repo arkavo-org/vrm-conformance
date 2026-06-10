@@ -1498,6 +1498,29 @@ pub fn vrma_humanoid_sweep() -> Vec<crate::vrma_params::VrmaHumanoidParams> {
         .collect()
 }
 
+/// Hips root-motion sweep (5 variants). One-axis-at-a-time: each variant
+/// translates hips along a single world axis. Covers the VRMA spec's only
+/// humanoid translation channel (root motion), which the rotation-only
+/// `vrma_humanoid_sweep` never exercises.
+pub fn vrma_hips_translation_sweep() -> Vec<crate::vrma_params::VrmaHipsTranslationParams> {
+    use crate::vrma_params::VrmaHipsTranslationParams;
+    let variants: [(&str, [f32; 3]); 5] = [
+        ("vrma_hips_trans_forward", [0.0, 0.0, 0.3]),
+        ("vrma_hips_trans_backward", [0.0, 0.0, -0.3]),
+        ("vrma_hips_trans_lateral", [0.2, 0.0, 0.0]),
+        ("vrma_hips_trans_crouch", [0.0, -0.15, 0.0]),
+        ("vrma_hips_trans_rise", [0.0, 0.10, 0.0]),
+    ];
+    variants
+        .iter()
+        .map(|(id, offset)| VrmaHipsTranslationParams {
+            id: (*id).into(),
+            offset_m: *offset,
+            duration_s: 1.0,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod vrma_expression_sweep_tests {
     use super::*;
@@ -1549,6 +1572,26 @@ mod vrma_expression_sweep_tests {
                 "{}: duration should be 1.0",
                 v.id
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod vrma_hips_translation_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn five_single_direction_variants_with_unique_ids() {
+        let variants = vrma_hips_translation_sweep();
+        assert_eq!(variants.len(), 5);
+        let mut ids: Vec<&str> = variants.iter().map(|v| v.id.as_str()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 5, "duplicate sweep ids");
+        for v in &variants {
+            let nonzero = v.offset_m.iter().filter(|c| c.abs() > f32::EPSILON).count();
+            assert_eq!(nonzero, 1, "{}: one-axis-at-a-time violated", v.id);
+            assert!(v.duration_s > 0.0);
         }
     }
 }
