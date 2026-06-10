@@ -437,6 +437,16 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the VRMA hips-translation sweep (5 plans). The only humanoid
+    /// translation channel the VRMA spec allows (root motion). One axis
+    /// per variant: forward/backward (Z), lateral (X), crouch/rise (Y).
+    EmitVrmaHipsTranslationSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the VRM 0.x MToon basic sweep (3 variants, slice 1 of the 0.x conformance corpus).
     ///
     /// Two Applicable variants produce `.vrm`, `.meta.json`, and `.test.yaml` triplets via
@@ -2155,6 +2165,39 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitVrmaHipsTranslationSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::emit_vrma_hips_translation_triplet;
+            use crate::sweep::vrma_hips_translation_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let sweep = vrma_hips_translation_sweep();
+            let total = sweep.len();
+            for (i, params) in sweep.iter().enumerate() {
+                emit_vrma_hips_translation_triplet(&output_dir, params)?;
+                if emit_json {
+                    eprintln!(
+                        r#"{{"event":"progress","op":"emit-vrma-hips-translation-sweep","index":{i},"total":{total},"id":"{id}"}}"#,
+                        id = params.id,
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, params.id);
+                }
+            }
+            if emit_json {
+                let summary = serde_json::json!({
+                    "ok": true,
+                    "count": total,
+                    "output_dir": output_dir,
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!("emitted {total} VRMA hips-translation sweep plans to {output_dir}");
+            }
+            Ok(())
+        }
         Cmd::EmitMtoonBasicV0Sweep {
             output_dir,
             json: emit_json,
@@ -2873,6 +2916,28 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-expression-clips": {
                         "summary": "Real-avatar expression clips (11 preset .vrma) covering VMK 0.17.2 #333 (VRM 1.0 morph binds keyed by node not mesh -> frozen faces). Presets: blink + happy/angry/sad/relaxed/surprised + 5 visemes (aa/ih/ou/ee/oh). Emits .vrma only — pair with vroid_default_F_1_0.vrm via the committed test-plans/manual/humanoid/vroid_default_F_expr_*.test.yaml plans.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" }
+                            }
+                        }
+                    },
+                    "emit-vrma-hips-translation-sweep": {
+                        "summary": "VRMA hips-translation sweep (5 plans). The only humanoid translation channel the VRMA spec allows (root motion). One axis per variant: forward/backward (+-0.3 m Z), lateral (0.2 m X), crouch/rise (-0.15/+0.10 m Y). Each plan emits a .vrm + .vrma + .test.yaml triplet; plans sample at full offset (t = 1.0 s).",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],

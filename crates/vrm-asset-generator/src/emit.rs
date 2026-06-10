@@ -2862,6 +2862,79 @@ pub fn emit_vrma_humanoid_triplet(
     Ok(())
 }
 
+/// Hips rest translation read back from the canonical skeleton's node
+/// JSON (single source of truth — `humanoid.rs::bones()`).
+fn hips_rest_translation(skel: &crate::humanoid::Skeleton) -> [f32; 3] {
+    let hips_node = skel.bone_to_node["hips"];
+    let t = skel.nodes_json[hips_node]["translation"]
+        .as_array()
+        .unwrap();
+    [
+        t[0].as_f64().unwrap() as f32,
+        t[1].as_f64().unwrap() as f32,
+        t[2].as_f64().unwrap() as f32,
+    ]
+}
+
+/// Emit a VRMA hips-translation sweep triplet: .vrm + .vrma + .test.yaml.
+///
+/// The .vrm is the canonical default avatar. The .vrma carries a single
+/// hips translation channel from rest to rest + offset over `duration_s`
+/// (the only humanoid translation channel the VRMA spec allows). Keyframe
+/// values are absolute node translations because glTF translation channels
+/// replace `node.translation`. The plan samples at t = duration_s.
+pub fn emit_vrma_hips_translation_triplet(
+    output_dir: &Utf8Path,
+    params: &crate::vrma_params::VrmaHipsTranslationParams,
+) -> Result<()> {
+    use crate::vrma_emit::{
+        add_hips_translation_channel, build_empty_vrma, finalize_vrma_scenes,
+        register_all_humanoid_bones, write_vrma_glb,
+    };
+
+    std::fs::create_dir_all(output_dir)?;
+
+    // 1. .vrm — canonical default avatar; the .vrma carries the test signal.
+    let vrm_relpath = format!("{}.vrm", params.id);
+    let vrm_path = output_dir.join(&vrm_relpath);
+    let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
+    emit_vrm(&mtoon_defaults, &vrm_path)?;
+
+    // .meta.json — required by the mock renderer to load the .vrm.
+    let meta_path = output_dir.join(format!("{}.meta.json", params.id));
+    crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
+
+    // 2. .vrma — one hips translation channel, rest → rest + offset.
+    let skel = crate::humanoid::minimal_skeleton();
+    let hips_node = skel.bone_to_node["hips"];
+    let rest = hips_rest_translation(&skel);
+
+    let mut doc = build_empty_vrma();
+    doc["nodes"] = skel.nodes_json.clone();
+    register_all_humanoid_bones(&mut doc, &skel.bone_to_node);
+
+    let target = [
+        rest[0] + params.offset_m[0],
+        rest[1] + params.offset_m[1],
+        rest[2] + params.offset_m[2],
+    ];
+    let keyframes = [(0.0_f32, rest), (params.duration_s, target)];
+    let mut buffer = Vec::<u8>::new();
+    add_hips_translation_channel(&mut doc, &mut buffer, hips_node, &keyframes);
+
+    finalize_vrma_scenes(&mut doc);
+
+    let vrma_relpath = format!("{}.vrma", params.id);
+    let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
+    std::fs::write(output_dir.join(&vrma_relpath), &vrma_bytes)?;
+
+    // 3. .test.yaml.
+    let plan =
+        crate::sidecar::build_vrma_hips_translation_test_plan(params, &vrm_relpath, &vrma_relpath);
+    crate::sidecar::write_test_yaml(&plan, &output_dir.join(format!("{}.test.yaml", params.id)))?;
+    Ok(())
+}
+
 /// Emit a VRMA expression sweep triplet: .vrm + .vrma + .test.yaml.
 ///
 /// The .vrm is the canonical minimal humanoid rig.
@@ -4083,5 +4156,46 @@ mod expression_clip_emit_tests {
         let channels = doc["animations"][0]["channels"].as_array().unwrap();
         assert_eq!(channels.len(), 1);
         assert_eq!(channels[0]["target"]["path"], "translation");
+    }
+}
+
+#[cfg(test)]
+mod vrma_hips_translation_emit_tests {
+    use super::*;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    #[test]
+    fn hips_triplet_emits_vrm_vrma_and_plan_with_translation_channel() {
+        let params = crate::vrma_params::VrmaHipsTranslationParams {
+            id: "hips_trans_test".into(),
+            offset_m: [0.0, 0.0, 0.3],
+            duration_s: 1.0,
+        };
+        let tmp = tempdir().unwrap();
+        let dir = Utf8Path::from_path(tmp.path()).unwrap();
+        emit_vrma_hips_translation_triplet(dir, &params).unwrap();
+
+        assert!(dir.join("hips_trans_test.vrm").exists());
+        assert!(dir.join("hips_trans_test.test.yaml").exists());
+
+        let vrma_bytes = std::fs::read(dir.join("hips_trans_test.vrma")).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&vrma_bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+
+        // Exactly one channel: hips translation.
+        let channels = doc["animations"][0]["channels"].as_array().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0]["target"]["path"], "translation");
+        let hips_node = doc["extensions"]["VRMC_vrm_animation"]["humanoid"]["humanBones"]["hips"]
+            ["node"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(channels[0]["target"]["node"].as_u64().unwrap(), hips_node);
+
+        // The plan samples at full offset.
+        let plan_yaml = std::fs::read_to_string(dir.join("hips_trans_test.test.yaml")).unwrap();
+        assert!(plan_yaml.contains("apply_at_time: 1.0"), "{plan_yaml}");
+        assert!(plan_yaml.contains("hips_trans_test.vrma"), "{plan_yaml}");
     }
 }
