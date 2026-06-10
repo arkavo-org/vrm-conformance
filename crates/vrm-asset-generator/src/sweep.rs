@@ -1420,6 +1420,86 @@ pub fn expression_clip_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> 
     .collect()
 }
 
+/// The 52 ARKit `ARFaceAnchor.BlendShapeLocation` raw names in canonical
+/// lexicographic order. Mirrors Spatial's
+/// `MotionStreamSchema.canonicalBlendShapeOrder` — producers exporting
+/// VRMA from ARKit face capture (Spatial iOS) emit each of these as an
+/// `expressions.custom` track keyed by this exact camelCase name.
+pub fn arkit_blendshape_names() -> [&'static str; 52] {
+    [
+        "browDownLeft",
+        "browDownRight",
+        "browInnerUp",
+        "browOuterUpLeft",
+        "browOuterUpRight",
+        "cheekPuff",
+        "cheekSquintLeft",
+        "cheekSquintRight",
+        "eyeBlinkLeft",
+        "eyeBlinkRight",
+        "eyeLookDownLeft",
+        "eyeLookDownRight",
+        "eyeLookInLeft",
+        "eyeLookInRight",
+        "eyeLookOutLeft",
+        "eyeLookOutRight",
+        "eyeLookUpLeft",
+        "eyeLookUpRight",
+        "eyeSquintLeft",
+        "eyeSquintRight",
+        "eyeWideLeft",
+        "eyeWideRight",
+        "jawForward",
+        "jawLeft",
+        "jawOpen",
+        "jawRight",
+        "mouthClose",
+        "mouthDimpleLeft",
+        "mouthDimpleRight",
+        "mouthFrownLeft",
+        "mouthFrownRight",
+        "mouthFunnel",
+        "mouthLeft",
+        "mouthLowerDownLeft",
+        "mouthLowerDownRight",
+        "mouthPressLeft",
+        "mouthPressRight",
+        "mouthPucker",
+        "mouthRight",
+        "mouthRollLower",
+        "mouthRollUpper",
+        "mouthShrugLower",
+        "mouthShrugUpper",
+        "mouthSmileLeft",
+        "mouthSmileRight",
+        "mouthStretchLeft",
+        "mouthStretchRight",
+        "mouthUpperUpLeft",
+        "mouthUpperUpRight",
+        "noseSneerLeft",
+        "noseSneerRight",
+        "tongueOut",
+    ]
+}
+
+/// ARKit custom-expression sweep (52 variants — one per blendshape).
+/// Each variant is a 0 → 1 → 0 weight ramp on one `expressions.custom`
+/// track named with the raw ARKit camelCase name, paired with an avatar
+/// that pre-registers that custom expression. Covers the producer surface
+/// Spatial iOS exports (all 52 blendshapes, lossless, custom-classified).
+pub fn vrma_arkit_expression_sweep() -> Vec<crate::vrma_params::VrmaExpressionParams> {
+    use crate::vrma_params::VrmaExpressionParams;
+    arkit_blendshape_names()
+        .iter()
+        .map(|name| VrmaExpressionParams {
+            id: format!("vrma_arkit_{name}"),
+            expression_name: (*name).to_string(),
+            is_preset: false,
+            duration_s: 1.0,
+        })
+        .collect()
+}
+
 pub fn vrma_humanoid_sweep() -> Vec<crate::vrma_params::VrmaHumanoidParams> {
     use crate::vrma_params::{RotationAxis, VrmaHumanoidParams};
 
@@ -2863,5 +2943,38 @@ mod expression_clip_sweep_tests {
             assert_eq!(p.duration_s, 1.0);
             assert_eq!(p.id, format!("expr_{}", p.expression_name));
         }
+    }
+}
+
+#[cfg(test)]
+mod vrma_arkit_expression_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn exactly_52_names_lexicographic_and_unique() {
+        let names = arkit_blendshape_names();
+        assert_eq!(names.len(), 52);
+        let mut sorted = names.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(
+            names.to_vec(),
+            sorted,
+            "must stay in canonical lexicographic order"
+        );
+        sorted.dedup();
+        assert_eq!(sorted.len(), 52, "duplicate blendshape names");
+    }
+
+    #[test]
+    fn sweep_is_all_custom_with_arkit_ids() {
+        let variants = vrma_arkit_expression_sweep();
+        assert_eq!(variants.len(), 52);
+        for v in &variants {
+            assert!(!v.is_preset, "{}: ARKit tracks are custom-classified", v.id);
+            assert_eq!(v.id, format!("vrma_arkit_{}", v.expression_name));
+            assert!((v.duration_s - 1.0).abs() < 1e-6);
+        }
+        assert!(variants.iter().any(|v| v.expression_name == "jawOpen"));
+        assert!(variants.iter().any(|v| v.expression_name == "tongueOut"));
     }
 }
