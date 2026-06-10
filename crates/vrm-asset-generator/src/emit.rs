@@ -2854,6 +2854,10 @@ pub fn emit_vrma_humanoid_triplet(
     let vrma_bytes = write_vrma_glb(&doc, &buffer)?;
     std::fs::write(&vrma_path, &vrma_bytes)?;
 
+    // .meta.json — part of the paired-triplet contract; the mock renderer's load_vrm requires it.
+    let meta_path = output_dir.join(format!("{}.meta.json", params.id));
+    crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
+
     // 3. Emit the .test.yaml.
     let plan = crate::sidecar::build_vrma_humanoid_test_plan(params, &vrm_relpath, &vrma_relpath);
     let yaml_path = output_dir.join(format!("{}.test.yaml", params.id));
@@ -2900,11 +2904,7 @@ pub fn emit_vrma_hips_translation_triplet(
     let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
     emit_vrm(&mtoon_defaults, &vrm_path)?;
 
-    // .meta.json — required by the mock renderer's load_vrm. The sibling
-    // VRMA triplets (humanoid/expression/lookat) omit it because their
-    // corpus runs through real adapters, which never read meta.json; this
-    // sweep is mock-smoke-verified per the producer-coverage plan, so the
-    // full triplet convention applies.
+    // .meta.json — part of the paired-triplet contract; the mock renderer's load_vrm requires it.
     let meta_path = output_dir.join(format!("{}.meta.json", params.id));
     crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
 
@@ -2976,6 +2976,10 @@ pub fn emit_vrma_expression_triplet(
         )?;
     }
 
+    // .meta.json — part of the paired-triplet contract; the mock renderer's load_vrm requires it.
+    let meta_path = output_dir.join(format!("{}.meta.json", params.id));
+    crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
+
     // 2. .vrma: one node for the expression target + a 0→1→0 ramp.
     let mut doc = build_empty_vrma();
     let nodes = doc["nodes"].as_array_mut().unwrap();
@@ -3039,6 +3043,10 @@ pub fn emit_vrma_lookat_triplet(
         AvatarLookAtType::Expression => LookAtType::Expression,
     };
     emit_vrm_with_lookat_type(&mtoon_defaults, avatar_lookat, &vrm_path)?;
+
+    // .meta.json — part of the paired-triplet contract; the mock renderer's load_vrm requires it.
+    let meta_path = output_dir.join(format!("{}.meta.json", params.id));
+    crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
 
     // 2. .vrma with a single lookAt gaze direction.
     let mut doc = build_empty_vrma();
