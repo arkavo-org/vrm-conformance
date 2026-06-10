@@ -19,6 +19,7 @@ pub struct Skeleton {
 }
 
 /// Bone definition: (name, parent_bone_or_None, translation_relative_to_parent).
+#[derive(Clone, Copy)]
 struct B {
     name: &'static str,
     parent: Option<&'static str>,
@@ -145,7 +146,19 @@ pub fn rest_pose_world_position(target_bone: &str) -> [f32; 3] {
 }
 
 pub fn minimal_skeleton() -> Skeleton {
-    let bones = bones();
+    build_skeleton(bones())
+}
+
+/// Canonical skeleton plus the 30 VRM 1.0 optional finger bones.
+/// Opt-in: used only by finger-sweep emission so node indices in the
+/// existing corpus stay stable.
+pub fn skeleton_with_fingers() -> Skeleton {
+    let mut all: Vec<B> = bones().to_vec();
+    all.extend_from_slice(finger_bones());
+    build_skeleton(&all)
+}
+
+fn build_skeleton(bones: &[B]) -> Skeleton {
     let mut bone_to_node = BTreeMap::new();
     for (i, b) in bones.iter().enumerate() {
         bone_to_node.insert(b.name.to_string(), i);
@@ -180,6 +193,175 @@ pub fn minimal_skeleton() -> Skeleton {
         root_node: bone_to_node["hips"],
         bone_to_node,
     }
+}
+
+/// VRM 1.0 optional finger bones (15 per hand). Rest translations are
+/// rough plausible defaults relative to the hand bone — the conformance
+/// signal is the dumped rotation quaternion, not anatomy. Left hand local
+/// +X is distal (toward fingertips); right hand mirrors X.
+fn finger_bones() -> &'static [B] {
+    &[
+        // Left thumb
+        B {
+            name: "leftThumbMetacarpal",
+            parent: Some("leftHand"),
+            t: [0.02, -0.01, 0.03],
+        },
+        B {
+            name: "leftThumbProximal",
+            parent: Some("leftThumbMetacarpal"),
+            t: [0.03, 0.0, 0.01],
+        },
+        B {
+            name: "leftThumbDistal",
+            parent: Some("leftThumbProximal"),
+            t: [0.03, 0.0, 0.01],
+        },
+        // Left index
+        B {
+            name: "leftIndexProximal",
+            parent: Some("leftHand"),
+            t: [0.08, 0.0, 0.02],
+        },
+        B {
+            name: "leftIndexIntermediate",
+            parent: Some("leftIndexProximal"),
+            t: [0.035, 0.0, 0.0],
+        },
+        B {
+            name: "leftIndexDistal",
+            parent: Some("leftIndexIntermediate"),
+            t: [0.025, 0.0, 0.0],
+        },
+        // Left middle
+        B {
+            name: "leftMiddleProximal",
+            parent: Some("leftHand"),
+            t: [0.085, 0.0, 0.0],
+        },
+        B {
+            name: "leftMiddleIntermediate",
+            parent: Some("leftMiddleProximal"),
+            t: [0.04, 0.0, 0.0],
+        },
+        B {
+            name: "leftMiddleDistal",
+            parent: Some("leftMiddleIntermediate"),
+            t: [0.027, 0.0, 0.0],
+        },
+        // Left ring
+        B {
+            name: "leftRingProximal",
+            parent: Some("leftHand"),
+            t: [0.08, 0.0, -0.018],
+        },
+        B {
+            name: "leftRingIntermediate",
+            parent: Some("leftRingProximal"),
+            t: [0.037, 0.0, 0.0],
+        },
+        B {
+            name: "leftRingDistal",
+            parent: Some("leftRingIntermediate"),
+            t: [0.025, 0.0, 0.0],
+        },
+        // Left little
+        B {
+            name: "leftLittleProximal",
+            parent: Some("leftHand"),
+            t: [0.07, 0.0, -0.034],
+        },
+        B {
+            name: "leftLittleIntermediate",
+            parent: Some("leftLittleProximal"),
+            t: [0.03, 0.0, 0.0],
+        },
+        B {
+            name: "leftLittleDistal",
+            parent: Some("leftLittleIntermediate"),
+            t: [0.02, 0.0, 0.0],
+        },
+        // Right thumb
+        B {
+            name: "rightThumbMetacarpal",
+            parent: Some("rightHand"),
+            t: [-0.02, -0.01, 0.03],
+        },
+        B {
+            name: "rightThumbProximal",
+            parent: Some("rightThumbMetacarpal"),
+            t: [-0.03, 0.0, 0.01],
+        },
+        B {
+            name: "rightThumbDistal",
+            parent: Some("rightThumbProximal"),
+            t: [-0.03, 0.0, 0.01],
+        },
+        // Right index
+        B {
+            name: "rightIndexProximal",
+            parent: Some("rightHand"),
+            t: [-0.08, 0.0, 0.02],
+        },
+        B {
+            name: "rightIndexIntermediate",
+            parent: Some("rightIndexProximal"),
+            t: [-0.035, 0.0, 0.0],
+        },
+        B {
+            name: "rightIndexDistal",
+            parent: Some("rightIndexIntermediate"),
+            t: [-0.025, 0.0, 0.0],
+        },
+        // Right middle
+        B {
+            name: "rightMiddleProximal",
+            parent: Some("rightHand"),
+            t: [-0.085, 0.0, 0.0],
+        },
+        B {
+            name: "rightMiddleIntermediate",
+            parent: Some("rightMiddleProximal"),
+            t: [-0.04, 0.0, 0.0],
+        },
+        B {
+            name: "rightMiddleDistal",
+            parent: Some("rightMiddleIntermediate"),
+            t: [-0.027, 0.0, 0.0],
+        },
+        // Right ring
+        B {
+            name: "rightRingProximal",
+            parent: Some("rightHand"),
+            t: [-0.08, 0.0, -0.018],
+        },
+        B {
+            name: "rightRingIntermediate",
+            parent: Some("rightRingProximal"),
+            t: [-0.037, 0.0, 0.0],
+        },
+        B {
+            name: "rightRingDistal",
+            parent: Some("rightRingIntermediate"),
+            t: [-0.025, 0.0, 0.0],
+        },
+        // Right little
+        B {
+            name: "rightLittleProximal",
+            parent: Some("rightHand"),
+            t: [-0.07, 0.0, -0.034],
+        },
+        B {
+            name: "rightLittleIntermediate",
+            parent: Some("rightLittleProximal"),
+            t: [-0.03, 0.0, 0.0],
+        },
+        B {
+            name: "rightLittleDistal",
+            parent: Some("rightLittleIntermediate"),
+            t: [-0.02, 0.0, 0.0],
+        },
+    ]
 }
 
 /// Append N child nodes to the parent at `parent_node_index`, forming a
@@ -298,5 +480,73 @@ mod chain_axis_tests {
         let nodes = sk.nodes_json.as_array().unwrap();
         let t = nodes[idxs[0]]["translation"].as_array().unwrap();
         assert!((t[1].as_f64().unwrap() - (-0.05)).abs() < 1e-6, "-Y");
+    }
+}
+
+#[cfg(test)]
+mod finger_skeleton_tests {
+    use super::*;
+
+    #[test]
+    fn minimal_skeleton_is_unchanged_at_19_bones() {
+        let sk = minimal_skeleton();
+        assert_eq!(sk.bone_to_node.len(), 19);
+        assert!(!sk.bone_to_node.contains_key("leftIndexProximal"));
+    }
+
+    #[test]
+    fn finger_skeleton_has_49_bones_with_all_finger_names() {
+        let sk = skeleton_with_fingers();
+        assert_eq!(sk.bone_to_node.len(), 49, "19 core + 30 finger bones");
+        for side in ["left", "right"] {
+            for seg in [
+                "ThumbMetacarpal",
+                "ThumbProximal",
+                "ThumbDistal",
+                "IndexProximal",
+                "IndexIntermediate",
+                "IndexDistal",
+                "MiddleProximal",
+                "MiddleIntermediate",
+                "MiddleDistal",
+                "RingProximal",
+                "RingIntermediate",
+                "RingDistal",
+                "LittleProximal",
+                "LittleIntermediate",
+                "LittleDistal",
+            ] {
+                assert!(
+                    sk.bone_to_node.contains_key(&format!("{side}{seg}")),
+                    "missing {side}{seg}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn finger_chains_are_parented_to_hands() {
+        let sk = skeleton_with_fingers();
+        let nodes = sk.nodes_json.as_array().unwrap();
+        let left_hand = sk.bone_to_node["leftHand"];
+        let left_index_prox = sk.bone_to_node["leftIndexProximal"];
+        let hand_children: Vec<u64> = nodes[left_hand]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c.as_u64().unwrap())
+            .collect();
+        assert!(hand_children.contains(&(left_index_prox as u64)));
+    }
+
+    #[test]
+    fn right_fingers_mirror_left_in_x() {
+        let sk = skeleton_with_fingers();
+        let nodes = sk.nodes_json.as_array().unwrap();
+        let l = sk.bone_to_node["leftIndexProximal"];
+        let r = sk.bone_to_node["rightIndexProximal"];
+        let lx = nodes[l]["translation"][0].as_f64().unwrap();
+        let rx = nodes[r]["translation"][0].as_f64().unwrap();
+        assert!((lx + rx).abs() < 1e-6, "X must mirror: {lx} vs {rx}");
     }
 }
