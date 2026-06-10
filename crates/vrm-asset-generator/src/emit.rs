@@ -29,6 +29,26 @@ pub fn emit_vrm_with_custom_expressions(
     output: &Utf8Path,
     custom_expression_names: &[&str],
 ) -> Result<()> {
+    emit_vrm_inner(params, output, custom_expression_names, &minimal_skeleton())
+}
+
+/// Like [`emit_vrm`] but with a caller-supplied humanoid skeleton (e.g.
+/// `skeleton_with_fingers()` for the VRMA finger sweep). The skeleton's
+/// full bone map is registered in `VRMC_vrm.humanoid.humanBones`.
+pub fn emit_vrm_with_skeleton(
+    params: &MToonParams,
+    output: &Utf8Path,
+    skeleton: &crate::humanoid::Skeleton,
+) -> Result<()> {
+    emit_vrm_inner(params, output, &[], skeleton)
+}
+
+fn emit_vrm_inner(
+    params: &MToonParams,
+    output: &Utf8Path,
+    custom_expression_names: &[&str],
+    skeleton: &crate::humanoid::Skeleton,
+) -> Result<()> {
     // 1) Mesh + buffer + five POSITION-only morph targets for visemes
     //    (aa, ih, ou, ee, oh). Each delta produces a visually distinct
     //    deformation pattern when the corresponding expression weight is
@@ -39,7 +59,6 @@ pub fn emit_vrm_with_custom_expressions(
     let (packed, morph_accessors) = pack_mesh_with_morphs(&mesh, &morphs);
 
     // 2) Humanoid skeleton
-    let skeleton = minimal_skeleton();
     let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
     let head_node = skeleton.bone_to_node["head"];
 
@@ -4466,5 +4485,31 @@ mod vrma_triplet_fileset_tests {
             .unwrap();
         emit_vrma_lookat_triplet(dir, &lookat).unwrap();
         assert_triplet_files(dir, &lookat.id);
+    }
+}
+
+#[cfg(test)]
+mod skeleton_param_emit_tests {
+    use super::*;
+    use crate::params::MToonParams;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    #[test]
+    fn emit_vrm_with_finger_skeleton_registers_finger_bones() {
+        let params = MToonParams::defaults("finger_avatar_test");
+        let tmp = tempdir().unwrap();
+        let vrm_path = Utf8Path::from_path(tmp.path()).unwrap().join("out.vrm");
+        let skeleton = crate::humanoid::skeleton_with_fingers();
+        emit_vrm_with_skeleton(&params, &vrm_path, &skeleton).unwrap();
+
+        let bytes = std::fs::read(&vrm_path).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        let human_bones = &doc["extensions"]["VRMC_vrm"]["humanoid"]["humanBones"];
+        assert!(human_bones["leftIndexProximal"]["node"].is_number());
+        assert!(human_bones["rightLittleDistal"]["node"].is_number());
+        // Core bones still present.
+        assert!(human_bones["hips"]["node"].is_number());
     }
 }
