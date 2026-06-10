@@ -2900,7 +2900,11 @@ pub fn emit_vrma_hips_translation_triplet(
     let mtoon_defaults = crate::params::MToonParams::defaults(&params.id);
     emit_vrm(&mtoon_defaults, &vrm_path)?;
 
-    // .meta.json — required by the mock renderer to load the .vrm.
+    // .meta.json — required by the mock renderer's load_vrm. The sibling
+    // VRMA triplets (humanoid/expression/lookat) omit it because their
+    // corpus runs through real adapters, which never read meta.json; this
+    // sweep is mock-smoke-verified per the producer-coverage plan, so the
+    // full triplet convention applies.
     let meta_path = output_dir.join(format!("{}.meta.json", params.id));
     crate::sidecar::write_meta_json(&mtoon_defaults, None, &vrm_path, &meta_path)?;
 
@@ -4197,5 +4201,48 @@ mod vrma_hips_translation_emit_tests {
         let plan_yaml = std::fs::read_to_string(dir.join("hips_trans_test.test.yaml")).unwrap();
         assert!(plan_yaml.contains("apply_at_time: 1.0"), "{plan_yaml}");
         assert!(plan_yaml.contains("hips_trans_test.vrma"), "{plan_yaml}");
+
+        // Decode the BIN chunk and pin the absolute keyframe values:
+        // kf0 = hips rest, kf1 = rest + offset (translation channels
+        // REPLACE node.translation, so values must be absolute).
+        let json_len = u32::from_le_bytes(vrma_bytes[12..16].try_into().unwrap()) as usize;
+        let bin_payload_start = 12 + 8 + json_len + 8;
+        let bin = &vrma_bytes[bin_payload_start..];
+
+        let values_acc_idx = doc["animations"][0]["samplers"][0]["output"]
+            .as_u64()
+            .unwrap() as usize;
+        let values_bv_idx = doc["accessors"][values_acc_idx]["bufferView"]
+            .as_u64()
+            .unwrap() as usize;
+        let values_offset = doc["bufferViews"][values_bv_idx]["byteOffset"]
+            .as_u64()
+            .unwrap() as usize;
+
+        let f32_at =
+            |off: usize| -> f32 { f32::from_le_bytes(bin[off..off + 4].try_into().unwrap()) };
+        let kf0 = [
+            f32_at(values_offset),
+            f32_at(values_offset + 4),
+            f32_at(values_offset + 8),
+        ];
+        let kf1 = [
+            f32_at(values_offset + 12),
+            f32_at(values_offset + 16),
+            f32_at(values_offset + 20),
+        ];
+        assert!(
+            (kf0[1] - 0.86).abs() < 1e-6,
+            "kf0 must be hips rest, got {kf0:?}"
+        );
+        assert!((kf0[2]).abs() < 1e-6, "kf0 Z must be rest (0), got {kf0:?}");
+        assert!(
+            (kf1[1] - 0.86).abs() < 1e-6,
+            "kf1 Y must stay at rest, got {kf1:?}"
+        );
+        assert!(
+            (kf1[2] - 0.3).abs() < 1e-6,
+            "kf1 must be rest + 0.3 m Z offset, got {kf1:?}"
+        );
     }
 }
