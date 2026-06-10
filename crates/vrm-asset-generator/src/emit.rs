@@ -2796,7 +2796,6 @@ pub fn emit_vrma_humanoid_triplet(
         add_humanoid_bone_rotation_channel, build_empty_vrma, finalize_vrma_scenes,
         register_all_humanoid_bones, write_vrma_glb,
     };
-    use crate::vrma_params::RotationAxis;
 
     std::fs::create_dir_all(output_dir)?;
 
@@ -2829,13 +2828,7 @@ pub fn emit_vrma_humanoid_triplet(
     register_all_humanoid_bones(&mut doc, &skel.bone_to_node);
 
     let mut buffer = Vec::<u8>::new();
-    let half_rad = params.angle_deg.to_radians() / 2.0;
-    let sin_h = half_rad.sin();
-    let target_quat = match params.axis {
-        RotationAxis::X => [sin_h, 0.0, 0.0, half_rad.cos()],
-        RotationAxis::Y => [0.0, sin_h, 0.0, half_rad.cos()],
-        RotationAxis::Z => [0.0, 0.0, sin_h, half_rad.cos()],
-    };
+    let target_quat = axis_quat(params.axis, params.angle_deg);
     let keyframes = [
         (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
         (params.duration_s, target_quat),
@@ -2864,6 +2857,20 @@ pub fn emit_vrma_humanoid_triplet(
     crate::sidecar::write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
+}
+
+/// Quaternion for a single-axis rotation of `angle_deg` about `axis`,
+/// as `[x, y, z, w]`. Shared by every VRMA channel emitter — keep the
+/// half-angle math in exactly one place.
+pub(crate) fn axis_quat(axis: crate::vrma_params::RotationAxis, angle_deg: f32) -> [f32; 4] {
+    use crate::vrma_params::RotationAxis;
+    let half = angle_deg.to_radians() / 2.0;
+    let (s, c) = (half.sin(), half.cos());
+    match axis {
+        RotationAxis::X => [s, 0.0, 0.0, c],
+        RotationAxis::Y => [0.0, s, 0.0, c],
+        RotationAxis::Z => [0.0, 0.0, s, c],
+    }
 }
 
 /// Hips rest translation read back from the canonical skeleton's node
@@ -2956,17 +2963,6 @@ pub fn emit_vrma_multichannel_triplet(
         add_humanoid_bone_rotation_channel, add_look_at_channel, build_empty_vrma,
         finalize_vrma_scenes, register_all_humanoid_bones, write_vrma_glb, ExpressionKind,
     };
-    use crate::vrma_params::RotationAxis;
-
-    fn axis_quat(axis: RotationAxis, angle_deg: f32) -> [f32; 4] {
-        let half = angle_deg.to_radians() / 2.0;
-        let (s, c) = (half.sin(), half.cos());
-        match axis {
-            RotationAxis::X => [s, 0.0, 0.0, c],
-            RotationAxis::Y => [0.0, s, 0.0, c],
-            RotationAxis::Z => [0.0, 0.0, s, c],
-        }
-    }
 
     std::fs::create_dir_all(output_dir)?;
 
@@ -3150,7 +3146,7 @@ pub fn emit_vrma_lookat_triplet(
     use crate::vrma_emit::{
         add_look_at_channel, build_empty_vrma, finalize_vrma_scenes, write_vrma_glb,
     };
-    use crate::vrma_params::{AvatarLookAtType, RotationAxis};
+    use crate::vrma_params::AvatarLookAtType;
 
     std::fs::create_dir_all(output_dir)?;
 
@@ -3178,14 +3174,7 @@ pub fn emit_vrma_lookat_triplet(
         }));
     let node_idx: usize = 0; // first (and only) node
 
-    let half_rad = (params.angle_deg.to_radians()) / 2.0;
-    let sin_h = half_rad.sin();
-    let cos_h = half_rad.cos();
-    let target_quat = match params.axis {
-        RotationAxis::X => [sin_h, 0.0, 0.0, cos_h],
-        RotationAxis::Y => [0.0, sin_h, 0.0, cos_h],
-        RotationAxis::Z => [0.0, 0.0, sin_h, cos_h],
-    };
+    let target_quat = axis_quat(params.axis, params.angle_deg);
     let keyframes: [(f32, [f32; 4]); 2] = [
         (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
         (params.duration_s, target_quat),
@@ -3242,8 +3231,7 @@ pub fn emit_gaze_clip(
 
     // Turned-head: spine yaw 0 -> body_yaw_deg over duration.
     if params.body_yaw_deg.abs() > f32::EPSILON {
-        let half_rad = params.body_yaw_deg.to_radians() / 2.0;
-        let spine_quat = [0.0_f32, half_rad.sin(), 0.0, half_rad.cos()];
+        let spine_quat = axis_quat(RotationAxis::Y, params.body_yaw_deg);
         let spine_kf = [
             (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
             (params.duration_s, spine_quat),
@@ -3258,15 +3246,9 @@ pub fn emit_gaze_clip(
         nodes.push(serde_json::json!({ "name": "gaze_target" }));
         nodes.len() - 1
     };
-    let half_rad = params.gaze_angle_deg.to_radians() / 2.0;
-    let (sin_h, cos_h) = (half_rad.sin(), half_rad.cos());
-    let gaze_quat = match params.gaze_axis {
-        RotationAxis::X => [sin_h, 0.0, 0.0, cos_h], // pitch (up/down)
-        RotationAxis::Y => [0.0, sin_h, 0.0, cos_h], // yaw (left/right)
-        // Z is roll — not a gaze axis; `gaze_sweep` never emits it, but the
-        // shared `RotationAxis` enum requires the arm for completeness.
-        RotationAxis::Z => [0.0, 0.0, sin_h, cos_h],
-    };
+    // pitch (X) / yaw (Y) / roll (Z — not a real gaze axis; `gaze_sweep` never
+    // emits it, but the shared `RotationAxis` enum requires completeness).
+    let gaze_quat = axis_quat(params.gaze_axis, params.gaze_angle_deg);
     let gaze_kf = [
         (0.0_f32, [0.0_f32, 0.0, 0.0, 1.0]),
         (params.duration_s, gaze_quat),
@@ -4407,6 +4389,20 @@ mod vrma_multichannel_emit_tests {
         // head rotation + hips translation + expression translation + gaze rotation
         let channels = doc["animations"][0]["channels"].as_array().unwrap();
         assert_eq!(channels.len(), 4, "{channels:?}");
+
+        // Channels must target four distinct nodes — an index-collision
+        // regression would still pass the count assertion.
+        let mut target_nodes: Vec<u64> = channels
+            .iter()
+            .map(|c| c["target"]["node"].as_u64().unwrap())
+            .collect();
+        target_nodes.sort_unstable();
+        target_nodes.dedup();
+        assert_eq!(
+            target_nodes.len(),
+            4,
+            "channel target nodes must be distinct"
+        );
     }
 
     #[test]
