@@ -1603,6 +1603,92 @@ pub fn vrma_hips_translation_sweep() -> Vec<crate::vrma_params::VrmaHipsTranslat
         .collect()
 }
 
+/// Multi-channel sweep (6 variants). Deliberate one-axis exception —
+/// documented in each plan's spec_section. Variant 3 is the "double-drive"
+/// surface (preset + ARKit-named custom coexisting, per Spatial's exporter
+/// and PerfectSync-style avatars); variant 6 has all four channel kinds.
+pub fn vrma_multichannel_sweep() -> Vec<crate::vrma_params::VrmaMultiChannelParams> {
+    use crate::vrma_params::{
+        BoneRotationSpec, ExpressionWeightSpec, GazeDirectionSpec, RotationAxis,
+        VrmaMultiChannelParams,
+    };
+
+    fn bone(name: &str, axis: RotationAxis, angle: f32) -> BoneRotationSpec {
+        BoneRotationSpec {
+            bone_name: name.into(),
+            axis,
+            angle_deg: angle,
+        }
+    }
+    fn expr(name: &str, is_preset: bool, peak: f32) -> ExpressionWeightSpec {
+        ExpressionWeightSpec {
+            name: name.into(),
+            is_preset,
+            peak_weight: peak,
+        }
+    }
+
+    vec![
+        VrmaMultiChannelParams {
+            id: "vrma_multi_bone_hips".into(),
+            bones: vec![bone("head", RotationAxis::Y, 30.0)],
+            hips_offset_m: Some([0.0, 0.0, 0.2]),
+            expressions: vec![],
+            look_at: None,
+            duration_s: 1.0,
+        },
+        VrmaMultiChannelParams {
+            id: "vrma_multi_bone_expr".into(),
+            bones: vec![bone("head", RotationAxis::Y, 30.0)],
+            hips_offset_m: None,
+            expressions: vec![expr("happy", true, 1.0)],
+            look_at: None,
+            duration_s: 1.0,
+        },
+        VrmaMultiChannelParams {
+            id: "vrma_multi_double_drive".into(),
+            bones: vec![],
+            hips_offset_m: Some([0.0, 0.0, 0.1]),
+            expressions: vec![expr("happy", true, 1.0), expr("mouthSmileLeft", false, 1.0)],
+            look_at: None,
+            duration_s: 1.0,
+        },
+        VrmaMultiChannelParams {
+            id: "vrma_multi_body_face".into(),
+            bones: vec![
+                bone("spine", RotationAxis::Y, 20.0),
+                bone("leftUpperArm", RotationAxis::X, 40.0),
+            ],
+            hips_offset_m: Some([0.0, 0.0, 0.2]),
+            expressions: vec![expr("aa", true, 1.0)],
+            look_at: None,
+            duration_s: 1.0,
+        },
+        VrmaMultiChannelParams {
+            id: "vrma_multi_two_bones_two_exprs".into(),
+            bones: vec![
+                bone("head", RotationAxis::X, 20.0),
+                bone("rightUpperArm", RotationAxis::Y, 30.0),
+            ],
+            hips_offset_m: None,
+            expressions: vec![expr("blink", true, 1.0), expr("ou", true, 0.6)],
+            look_at: None,
+            duration_s: 1.0,
+        },
+        VrmaMultiChannelParams {
+            id: "vrma_multi_all_channels".into(),
+            bones: vec![bone("head", RotationAxis::Y, 20.0)],
+            hips_offset_m: Some([0.1, 0.0, 0.0]),
+            expressions: vec![expr("happy", true, 0.8)],
+            look_at: Some(GazeDirectionSpec {
+                axis: RotationAxis::Y,
+                angle_deg: 30.0,
+            }),
+            duration_s: 1.0,
+        },
+    ]
+}
+
 #[cfg(test)]
 mod vrma_expression_sweep_tests {
     use super::*;
@@ -2976,5 +3062,43 @@ mod vrma_arkit_expression_sweep_tests {
         }
         assert!(variants.iter().any(|v| v.expression_name == "jawOpen"));
         assert!(variants.iter().any(|v| v.expression_name == "tongueOut"));
+    }
+}
+
+#[cfg(test)]
+mod vrma_multichannel_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn six_variants_each_combining_at_least_two_channels() {
+        let variants = vrma_multichannel_sweep();
+        assert_eq!(variants.len(), 6);
+        let mut ids: Vec<&str> = variants.iter().map(|v| v.id.as_str()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 6, "duplicate ids");
+        for v in &variants {
+            let channel_kinds = [
+                !v.bones.is_empty(),
+                v.hips_offset_m.is_some(),
+                !v.expressions.is_empty(),
+                v.look_at.is_some(),
+            ]
+            .iter()
+            .filter(|b| **b)
+            .count();
+            assert!(channel_kinds >= 2, "{}: not multi-channel", v.id);
+        }
+    }
+
+    #[test]
+    fn double_drive_variant_pairs_preset_with_custom() {
+        let variants = vrma_multichannel_sweep();
+        let dd = variants
+            .iter()
+            .find(|v| v.id == "vrma_multi_double_drive")
+            .expect("double-drive variant");
+        assert!(dd.expressions.iter().any(|e| e.is_preset));
+        assert!(dd.expressions.iter().any(|e| !e.is_preset));
     }
 }

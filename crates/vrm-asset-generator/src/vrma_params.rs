@@ -81,6 +81,46 @@ pub struct VrmaHipsTranslationParams {
     pub duration_s: f32,
 }
 
+/// One bone-rotation channel inside a multi-channel clip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoneRotationSpec {
+    pub bone_name: String,
+    pub axis: RotationAxis,
+    pub angle_deg: f32,
+}
+
+/// One expression-weight channel inside a multi-channel clip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpressionWeightSpec {
+    pub name: String,
+    pub is_preset: bool,
+    pub peak_weight: f32,
+}
+
+/// LookAt gaze direction inside a multi-channel clip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GazeDirectionSpec {
+    pub axis: RotationAxis,
+    pub angle_deg: f32,
+}
+
+/// Multi-channel clip: humanoid rotations + optional hips root motion +
+/// expression weights + optional lookAt, all sharing one timeline — the
+/// shape real producers (Spatial iOS merged body+face export) emit.
+/// Deliberate one-axis-at-a-time exception: the test signal is channel
+/// coexistence (does channel B still apply when channel A is present?).
+/// Every channel peaks at t = duration_s / 2 so a single `apply_at_time`
+/// samples all of them at peak.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VrmaMultiChannelParams {
+    pub id: String,
+    pub bones: Vec<BoneRotationSpec>,
+    pub hips_offset_m: Option<[f32; 3]>,
+    pub expressions: Vec<ExpressionWeightSpec>,
+    pub look_at: Option<GazeDirectionSpec>,
+    pub duration_s: f32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +196,34 @@ mod tests {
         let back: VrmaHipsTranslationParams = serde_json::from_str(&s).unwrap();
         assert_eq!(back.id, "vrma_hips_trans_forward");
         assert!((back.offset_m[2] - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn multichannel_params_roundtrips() {
+        let p = VrmaMultiChannelParams {
+            id: "vrma_multi_bone_hips".into(),
+            bones: vec![BoneRotationSpec {
+                bone_name: "head".into(),
+                axis: RotationAxis::Y,
+                angle_deg: 30.0,
+            }],
+            hips_offset_m: Some([0.0, 0.0, 0.2]),
+            expressions: vec![ExpressionWeightSpec {
+                name: "happy".into(),
+                is_preset: true,
+                peak_weight: 1.0,
+            }],
+            look_at: Some(GazeDirectionSpec {
+                axis: RotationAxis::Y,
+                angle_deg: 30.0,
+            }),
+            duration_s: 1.0,
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let back: VrmaMultiChannelParams = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.bones[0].bone_name, "head");
+        assert_eq!(back.expressions[0].name, "happy");
+        assert!(back.hips_offset_m.is_some());
+        assert!(back.look_at.is_some());
     }
 }
