@@ -470,6 +470,35 @@ let package = Package(
         //   - #181 (non-skinned mesh dropped when skin present)
         //   - #182 (VRM 1.0 spring chain over-expansion)
         // All nine were first filed by this conformance suite.
+        // 0.18.0-rc.1 (commit aafc172, pre-released 2026-06-10, cut from
+        // PR #334 "advanced concurrency + Metal") — perf + determinism RC:
+        //   - **FP16 MToon shading on macOS** (−5.8% encoder time, fragment
+        //          occupancy 21%→71% at 2048px; supersedes the FP32 macOS
+        //          safe-default from #279). Fragment textures sample as
+        //          `texture2d<half>`. Upstream claims pixel-clean against
+        //          their MToon battery; this suite independently confirmed:
+        //          370/370 A/B renders byte-identical to 0.17.2 with the
+        //          changed FP16 metallib confirmed loaded (half4 returns
+        //          are lossless for 8-bit content; math stays float).
+        //   - **Spring-bone warmup determinism**: fixes an uninitialized
+        //          `centerDeltaBuffer` read (could also write GPU memory out
+        //          of bounds via a garbage bone range) and a CPU/GPU race
+        //          where warmup rewrote shared buffers while steps were in
+        //          flight. Independent loads of the same model now render
+        //          bitwise-identically (`LoadDeterminismTests`). Same defect
+        //          class as VMK#283 (rc-era swing non-determinism). Suite
+        //          verification: joints_16 reproducer 5× byte-identical;
+        //          170-plan spring-bone subset repeat byte-identical within
+        //          BOTH versions (0.17.2 already stable on our render path;
+        //          the fixed race lives on the load path the upstream
+        //          `LoadDeterminismTests` witnesses).
+        //   - On-disk `MTLBinaryArchive` pipeline persistence (opt-in via
+        //          `RendererConfig.enablePipelineArchive`; default off — our
+        //          adapter does not enable it). Known issue on macOS 27 beta
+        //          (append-to-preloaded-archive), worked around upstream.
+        //   - SIGSEGV fix for `%s` format specifiers fed Swift Strings.
+        //   Regression verification for this pin: see docs/findings.md
+        //   "VMK 0.18.0-rc.1 verification" (2026-06-09).
         // 0.17.2 (commit 3737e76, patch release 2026-06-08, closes #333) —
         // restores VRM 1.0 facial expressions. Behaviour change (no shader/
         // metallib change vs 0.17.1):
@@ -533,7 +562,20 @@ let package = Package(
         // conformance run that gates this as the 1.0 candidate.
         .package(
             url: "https://github.com/arkavo-org/VRMMetalKit",
-            revision: "3737e76b1635f9be604e4a8cb4272b5ddbedb58d"
+            // 0.20.1 (merge 39e65f0, released 2026-06-11, closes VMK#301
+            // via PR #343) — skinned cull volume follows the skeleton
+            // (hips-anchored) instead of an identity-matrix rest box pinned at
+            // the load position. Corpus impact: NONE — 428/428 images render
+            // byte-identical to 0.20.0 (the fix only changes cull decisions
+            // for characters displaced from spawn, which no corpus frame
+            // exercises). vs the previous 0.18.1 pin this also picks up the
+            // 0.19/0.20 locomotion + vrmaprocess line; observed drift:
+            // mtoon_pbrtex_occlusion_* (SSIM 0.905-0.964),
+            // vrma_expression_preset_{oh,ih,aa,ee,ou} (0.907-0.946),
+            // swing_springbone_* (~0.98) — pre-existing 0.18.1→0.20.0
+            // changes, not the cull fix; goldens need re-baselining when
+            // this pin lands.
+            revision: "39e65f041a9786c79080f4afc6e4911f4bf4481b"
         ),
     ],
     targets: [
