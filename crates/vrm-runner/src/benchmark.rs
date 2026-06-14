@@ -63,6 +63,15 @@ pub fn report_path(output_dir: &Utf8Path, test_id: &str, renderer_name: &str) ->
     output_dir.join(format!("{test_id}_{renderer_name}.perf.json"))
 }
 
+/// Extract the `phase` string from a `-32000 Unimplemented` error envelope.
+fn unimplemented_phase(e: &vrm_ops::RpcError) -> Option<String> {
+    e.data
+        .as_ref()
+        .and_then(|d| d.get("phase"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
 pub fn run_benchmark(plan: &TestPlan, opts: &BenchmarkOptions) -> Result<BenchmarkOutcome> {
     let asset_path = opts.asset_dir.join(&plan.asset);
     if !asset_path.exists() {
@@ -105,31 +114,35 @@ pub fn run_benchmark(plan: &TestPlan, opts: &BenchmarkOptions) -> Result<Benchma
         opts.animate,
     );
 
-    // Cost preview - surfaced for logging, not a gate.
-    let _preview: ops::BenchmarkPlanResult = adapter
-        .call("benchmark_plan", bench_params.clone())
-        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+    // Cost preview. A -32000 here means the adapter cannot benchmark at all
+    // (the contract requires -32000 on both benchmark ops) — route it to the
+    // same Unimplemented outcome rather than a hard error.
+    let preview: std::result::Result<ops::BenchmarkPlanResult, AdapterError> =
+        adapter.call("benchmark_plan", bench_params.clone());
 
-    let measured: std::result::Result<ops::PerfMeasurement, AdapterError> =
-        adapter.call("benchmark_execute", bench_params);
-
-    let outcome = match measured {
-        Ok(m) => BenchmarkOutcome::Report(Box::new(compose_report(
-            &plan.id,
-            &opts.renderer_name,
-            &asset_hash,
-            m,
-        ))),
-        Err(AdapterError::Rpc(ref e)) if e.code == -32000 => {
-            let phase = e
-                .data
-                .as_ref()
-                .and_then(|d| d.get("phase"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            BenchmarkOutcome::Unimplemented { phase }
-        }
+    let outcome = match preview {
+        Err(AdapterError::Rpc(ref e)) if e.code == -32000 => BenchmarkOutcome::Unimplemented {
+            phase: unimplemented_phase(e),
+        },
         Err(e) => return Err(anyhow::anyhow!("adapter error: {e}")),
+        Ok(_preview) => {
+            let measured: std::result::Result<ops::PerfMeasurement, AdapterError> =
+                adapter.call("benchmark_execute", bench_params);
+            match measured {
+                Ok(m) => BenchmarkOutcome::Report(Box::new(compose_report(
+                    &plan.id,
+                    &opts.renderer_name,
+                    &asset_hash,
+                    m,
+                ))),
+                Err(AdapterError::Rpc(ref e)) if e.code == -32000 => {
+                    BenchmarkOutcome::Unimplemented {
+                        phase: unimplemented_phase(e),
+                    }
+                }
+                Err(e) => return Err(anyhow::anyhow!("adapter error: {e}")),
+            }
+        }
     };
 
     let _: ops::UnitResult = adapter
@@ -137,7 +150,7 @@ pub fn run_benchmark(plan: &TestPlan, opts: &BenchmarkOptions) -> Result<Benchma
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
     adapter
         .shutdown()
-        .map_err(|e| anyhow::anyhow!("adapter shutdown: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
 
     if let BenchmarkOutcome::Report(ref report) = outcome {
         std::fs::create_dir_all(&opts.output_dir)?;
@@ -193,6 +206,12 @@ mod tests {
         assert_eq!(report.renderer_name, "mock");
         assert_eq!(report.asset_blake3, "blake3:ab");
         assert_eq!(report.measurement.geometry.unwrap().triangles, 2);
+    }
+
+    #[test]
+    fn report_path_format() {
+        let p = report_path(Utf8Path::new("/out"), "mtoon_00", "mock");
+        assert_eq!(p.as_str(), "/out/mtoon_00_mock.perf.json");
     }
 
     #[test]
