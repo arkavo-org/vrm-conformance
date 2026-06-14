@@ -1347,21 +1347,24 @@ final class Operations: @unchecked Sendable {
         session.renderer.performanceTracker = PerformanceTracker()
         defer { session.renderer.performanceTracker = nil }
 
-        // Inner draw: builds a new RPD+commandBuffer per frame and blocks until done.
-        // Returns (wall-clock ms for the frame, GPU error string or nil).
-        func drawOneFrame(frameIndex: Int, totalFrames: Int) -> (ms: Double, gpuError: String?) {
-            // Update root translation for animated benchmarks (mirrors handleRenderSequence).
+        // Warmup frames: discard stats, capture the first frame's cold wall-time.
+        // Inlined rather than a nested func to satisfy the Swift 6 concurrency
+        // checker: nested functions that capture non-Sendable Metal objects and
+        // then pass them into MainActor.assumeIsolated generate
+        // SendingRisksDataRace errors, even though the execution is strictly
+        // serial on the main thread. Inlining removes that capture site.
+        var firstFrameMs = 0.0
+        var capturedFirstFrame = false
+        for i in 0..<warmup {
             if animated {
-                let t: Float = totalFrames > 1 ? Float(frameIndex) / Float(totalFrames - 1) : 0
+                let t: Float = (warmup + measured) > 1 ? Float(i) / Float(warmup + measured - 1) : 0
                 let offset = startV + (endV - startV) * t
                 for (idx, root) in rootNodes.enumerated() {
                     root.translation = originalTranslations[idx] + offset
                     root.updateWorldTransform()
                 }
             }
-
             let t0 = CACurrentMediaTime()
-
             let rpd = MTLRenderPassDescriptor()
             rpd.colorAttachments[0].texture = msColorTex
             rpd.colorAttachments[0].resolveTexture = resolveTex
@@ -1372,11 +1375,9 @@ final class Operations: @unchecked Sendable {
             rpd.depthAttachment.loadAction = .clear
             rpd.depthAttachment.storeAction = .dontCare
             rpd.depthAttachment.clearDepth = 1.0
-
             guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-                return ((CACurrentMediaTime() - t0) * 1000.0, "failed to make command buffer")
+                return renderFailed("benchmark warmup frame \(i): failed to make command buffer")
             }
-
             MainActor.assumeIsolated {
                 session.renderer.drawOffscreenHeadless(
                     to: msColorTex,
@@ -1390,18 +1391,7 @@ final class Operations: @unchecked Sendable {
             commandBuffer.commit()
             sem.wait()
             let ms = (CACurrentMediaTime() - t0) * 1000.0
-            if let err = commandBuffer.error {
-                return (ms, "GPU error: \(err)")
-            }
-            return (ms, nil)
-        }
-
-        // Warmup frames: discard stats, capture the first frame's cold wall-time.
-        var firstFrameMs = 0.0
-        var capturedFirstFrame = false
-        for i in 0..<warmup {
-            let (ms, gpuErr) = drawOneFrame(frameIndex: i, totalFrames: warmup + measured)
-            if let gpuErr { return renderFailed("benchmark frame \(i): \(gpuErr)") }
+            if let err = commandBuffer.error { return renderFailed("benchmark warmup frame \(i): GPU error: \(err)") }
             if !capturedFirstFrame { firstFrameMs = ms; capturedFirstFrame = true }
         }
         // Reset so the measured window excludes warmup frames.
@@ -1410,8 +1400,42 @@ final class Operations: @unchecked Sendable {
         // Measured frames: sample peak GPU memory each frame.
         var peakMem = 0
         for i in 0..<measured {
-            let (ms, gpuErr) = drawOneFrame(frameIndex: warmup + i, totalFrames: warmup + measured)
-            if let gpuErr { return renderFailed("benchmark frame \(warmup + i): \(gpuErr)") }
+            if animated {
+                let t: Float = (warmup + measured) > 1 ? Float(warmup + i) / Float(warmup + measured - 1) : 0
+                let offset = startV + (endV - startV) * t
+                for (idx, root) in rootNodes.enumerated() {
+                    root.translation = originalTranslations[idx] + offset
+                    root.updateWorldTransform()
+                }
+            }
+            let t0 = CACurrentMediaTime()
+            let rpd = MTLRenderPassDescriptor()
+            rpd.colorAttachments[0].texture = msColorTex
+            rpd.colorAttachments[0].resolveTexture = resolveTex
+            rpd.colorAttachments[0].loadAction = .clear
+            rpd.colorAttachments[0].storeAction = .multisampleResolve
+            rpd.colorAttachments[0].clearColor = MTLClearColor(red: 1.0, green: 0.0, blue: 1.0, alpha: 1.0)
+            rpd.depthAttachment.texture = msDepthTex
+            rpd.depthAttachment.loadAction = .clear
+            rpd.depthAttachment.storeAction = .dontCare
+            rpd.depthAttachment.clearDepth = 1.0
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                return renderFailed("benchmark measured frame \(i): failed to make command buffer")
+            }
+            MainActor.assumeIsolated {
+                session.renderer.drawOffscreenHeadless(
+                    to: msColorTex,
+                    depth: msDepthTex,
+                    commandBuffer: commandBuffer,
+                    renderPassDescriptor: rpd
+                )
+            }
+            let sem = DispatchSemaphore(value: 0)
+            commandBuffer.addCompletedHandler { _ in sem.signal() }
+            commandBuffer.commit()
+            sem.wait()
+            let ms = (CACurrentMediaTime() - t0) * 1000.0
+            if let err = commandBuffer.error { return renderFailed("benchmark measured frame \(i): GPU error: \(err)") }
             if !capturedFirstFrame { firstFrameMs = ms; capturedFirstFrame = true }
             peakMem = max(peakMem, device.currentAllocatedSize)
         }
