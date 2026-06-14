@@ -727,7 +727,7 @@ mod tests {
             animate_root_transform: None,
         };
         let err = benchmark_execute(&mut registry, params).unwrap_err();
-        assert_eq!(err.code, -32602);
+        assert_eq!(err.code, -32602, "expected InvalidParams, got {err:?}");
     }
 
     #[test]
@@ -746,5 +746,28 @@ mod tests {
         };
         let plan = benchmark_plan(&mut registry, params).unwrap();
         assert_eq!(plan.estimated_frames, 330);
+        assert!(
+            (plan.estimated_seconds - 5.5).abs() < 1e-4,
+            "expected ~5.5 s, got {}",
+            plan.estimated_seconds
+        );
+    }
+
+    #[test]
+    fn benchmark_plan_on_unknown_session_is_invalid_params() {
+        let mut registry = SessionRegistry::default();
+        let params = ops::BenchmarkParams {
+            session_id: "ghost".into(),
+            width: 8,
+            height: 8,
+            color_space: ops::ColorSpace::Linear,
+            msaa: 1,
+            output_type: ops::OutputType::Color,
+            warmup_frames: 1,
+            measured_frames: 1,
+            animate_root_transform: None,
+        };
+        let err = benchmark_plan(&mut registry, params).unwrap_err();
+        assert_eq!(err.code, -32602, "expected InvalidParams, got {err:?}");
     }
 }
