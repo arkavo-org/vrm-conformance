@@ -7,10 +7,21 @@
 
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
+use vrm_ops::tools as ops;
 use vrm_test_plan::{
     AnimationConfig, Camera, Lighting, Output, PhysicsConfig, PostProcessing, RenderSequenceBlock,
     TestPlan,
 };
+
+/// Per-entry benchmark request carried in the batch manifest. Present only when
+/// `execute-test-batch --benchmark` was used; Unity runs a warmup+measured
+/// render loop for the entry and returns a `measurement` block.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BatchBenchmarkParams {
+    pub warmup_frames: u32,
+    pub measured_frames: u32,
+    pub animate: bool,
+}
 
 /// Top-level JSON document the Rust runner writes for the adapter to
 /// consume. Schema version is pinned at the top so future changes can
@@ -39,6 +50,8 @@ pub struct BatchTestEntry {
     pub animation: Option<AnimationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub render_sequence: Option<RenderSequenceBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub benchmark: Option<BatchBenchmarkParams>,
 }
 
 /// Build the manifest from a slice of `(plan, vrm_path)` pairs.
@@ -48,6 +61,7 @@ pub fn build_manifest(
     pairs: &[(TestPlan, Utf8PathBuf)],
     output_dir: Utf8PathBuf,
     renderer_name: String,
+    benchmark: Option<BatchBenchmarkParams>,
 ) -> BatchManifest {
     let tests = pairs
         .iter()
@@ -69,6 +83,7 @@ pub fn build_manifest(
                 physics: plan.physics.clone(),
                 animation,
                 render_sequence: plan.render_sequence.clone(),
+                benchmark: benchmark.clone(),
             }
         })
         .collect();
@@ -197,6 +212,8 @@ pub struct ResultEntry {
     pub duration_seconds: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame_hz_achieved: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement: Option<ops::PerfMeasurement>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -327,6 +344,7 @@ pub struct RunOptions {
     pub adapter_bin: Utf8PathBuf,
     pub output_dir: Utf8PathBuf,
     pub renderer_name: String,
+    pub benchmark: Option<BatchBenchmarkParams>,
 }
 
 #[derive(Debug, Clone)]
@@ -353,7 +371,12 @@ pub fn run(opts: &RunOptions) -> anyhow::Result<RunSummary> {
 
     std::fs::create_dir_all(opts.output_dir.as_std_path())?;
 
-    let manifest = build_manifest(&pairs, opts.output_dir.clone(), opts.renderer_name.clone());
+    let manifest = build_manifest(
+        &pairs,
+        opts.output_dir.clone(),
+        opts.renderer_name.clone(),
+        opts.benchmark.clone(),
+    );
 
     // Write manifest + results paths into the output dir so they end up
     // in a stable location (helps debugging; not protocol-load-bearing).
@@ -410,6 +433,46 @@ pub fn run(opts: &RunOptions) -> anyhow::Result<RunSummary> {
                             frame.path
                         );
                     }
+                }
+            }
+        }
+    }
+
+    // Benchmark: write a PerfReport per entry that returned a measurement.
+    {
+        use std::collections::HashMap;
+        let vrm_by_id: HashMap<&str, &Utf8PathBuf> =
+            pairs.iter().map(|(p, v)| (p.id.as_str(), v)).collect();
+        for entry in parsed.entries.iter() {
+            if entry.status != ResultStatus::Ok {
+                continue;
+            }
+            let Some(measurement) = entry.measurement.clone() else {
+                continue;
+            };
+            let hash = vrm_by_id
+                .get(entry.test_id.as_str())
+                .and_then(|p| crate::benchmark::asset_blake3(p).ok())
+                .unwrap_or_else(|| "blake3:unknown".to_string());
+            let report = crate::benchmark::compose_report(
+                &entry.test_id,
+                &opts.renderer_name,
+                &hash,
+                measurement,
+            );
+            let path = crate::benchmark::report_path(
+                &opts.output_dir,
+                &entry.test_id,
+                &opts.renderer_name,
+            );
+            match serde_json::to_string_pretty(&report) {
+                Ok(json) => {
+                    if let Err(e) = std::fs::write(path.as_std_path(), json) {
+                        tracing::warn!("failed to write perf report {path}: {e}");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("failed to serialize perf report for {}: {e}", entry.test_id)
                 }
             }
         }
@@ -591,5 +654,124 @@ mod tests {
         let out = absolutize(&p);
         assert!(out.as_str().starts_with('/'));
         assert!(out.as_str().ends_with("relative/path"));
+    }
+
+    // ── Benchmark serialization tests ────────────────────────────────────────
+
+    /// A BatchTestEntry with benchmark params serializes with the `benchmark` key;
+    /// a None benchmark produces no `benchmark` key.
+    #[test]
+    fn batch_test_entry_benchmark_serialization() {
+        use vrm_test_plan::{
+            AmbientLight, Camera, ColorSpace, DirectionalLight, Lighting, Output, PostProcessing,
+        };
+
+        let make_entry = |benchmark: Option<BatchBenchmarkParams>| BatchTestEntry {
+            test_id: "smoke".to_string(),
+            vrm_path: Utf8PathBuf::from("/tmp/a.vrm"),
+            spec_section: "1.0".to_string(),
+            camera: Camera {
+                position: [0.0, 1.0, 3.0],
+                target: [0.0, 1.0, 0.0],
+                up: [0.0, 1.0, 0.0],
+                fov_degrees: 30.0,
+            },
+            lighting: Lighting {
+                directional: DirectionalLight {
+                    dir: [0.0, -1.0, 0.0],
+                    color: [1.0, 1.0, 1.0],
+                    intensity: 1.0,
+                },
+                ambient: AmbientLight {
+                    color: [1.0, 1.0, 1.0],
+                    intensity: 0.5,
+                },
+                cast_shadows: false,
+                receive_shadows: false,
+            },
+            post_processing: PostProcessing::default(),
+            output: Output {
+                width: 512,
+                height: 512,
+                color_space: ColorSpace::Srgb,
+                msaa: 1,
+            },
+            physics: None,
+            animation: None,
+            render_sequence: None,
+            benchmark,
+        };
+
+        // With benchmark params present
+        let with_bench = make_entry(Some(BatchBenchmarkParams {
+            warmup_frames: 5,
+            measured_frames: 10,
+            animate: false,
+        }));
+        let json_with = serde_json::to_string(&with_bench).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&json_with).unwrap();
+        let b = &val["benchmark"];
+        assert_eq!(b["warmup_frames"], 5);
+        assert_eq!(b["measured_frames"], 10);
+        assert_eq!(b["animate"], false);
+
+        // With no benchmark — key must be absent
+        let without_bench = make_entry(None);
+        let json_without = serde_json::to_string(&without_bench).unwrap();
+        let val_without: serde_json::Value = serde_json::from_str(&json_without).unwrap();
+        assert!(
+            val_without.get("benchmark").is_none() || val_without["benchmark"].is_null(),
+            "benchmark key should be absent when None"
+        );
+    }
+
+    /// ResultEntry deserializes measurement when present, and leaves it None
+    /// when absent. Confirms structural.state_changes is None (not declared
+    /// in a minimal UniVRM measurement block).
+    #[test]
+    fn result_entry_measurement_deserialization() {
+        // A line with a measurement block (minimal PerfMeasurement shape)
+        let with_measurement = r#"{
+            "test_id": "smoke",
+            "status": "ok",
+            "output_path": "/tmp/smoke.png",
+            "measurement": {
+                "protocol": { "warmup_frames": 3, "measured_frames": 10, "animated": false },
+                "host": {
+                    "os": "macOS", "os_version": "15.0",
+                    "gpu_vendor": "Apple", "gpu_model": "M1",
+                    "driver_version": "1.0", "build_flags": ""
+                },
+                "capabilities": ["timing", "structural", "geometry", "resources"],
+                "structural": { "draw_calls": 42.0 }
+            }
+        }"#;
+
+        let entry: ResultEntry = serde_json::from_str(with_measurement).unwrap();
+        let measurement = entry.measurement.expect("measurement should be Some");
+        // structural.draw_calls present
+        let structural = measurement.structural.expect("structural should be Some");
+        assert!((structural.draw_calls - 42.0).abs() < f32::EPSILON);
+        // state_changes and texture_bindings absent (None) — UniVRM doesn't emit them
+        assert!(
+            structural.state_changes.is_none(),
+            "state_changes should be None when absent from JSON"
+        );
+        assert!(
+            structural.texture_bindings.is_none(),
+            "texture_bindings should be None when absent from JSON"
+        );
+
+        // A line without a measurement block
+        let without_measurement = r#"{
+            "test_id": "smoke",
+            "status": "ok",
+            "output_path": "/tmp/smoke.png"
+        }"#;
+        let entry2: ResultEntry = serde_json::from_str(without_measurement).unwrap();
+        assert!(
+            entry2.measurement.is_none(),
+            "measurement should be None when absent"
+        );
     }
 }

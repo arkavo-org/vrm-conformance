@@ -179,6 +179,17 @@ pub enum Cmd {
         /// Renderer name recorded in the local manifest.
         #[arg(long, default_value = "univrm")]
         renderer_name: String,
+        /// Benchmark each plan instead of (or in addition to) a single render:
+        /// Unity runs warmup+measured frames per entry and the runner writes a
+        /// PerfReport JSON per test. Observational — no pass/fail.
+        #[arg(long)]
+        benchmark: bool,
+        #[arg(long, default_value_t = 30)]
+        warmup_frames: u32,
+        #[arg(long, default_value_t = 300)]
+        measured_frames: u32,
+        #[arg(long)]
+        animate: bool,
         /// Emit JSON summary to stdout.
         #[arg(long)]
         json: bool,
@@ -774,13 +785,27 @@ pub fn run(cli: Cli) -> Result<()> {
             adapter_bin,
             output_dir,
             renderer_name,
+            benchmark,
+            warmup_frames,
+            measured_frames,
+            animate,
             json: emit_json,
         } => {
+            let benchmark_opts = if benchmark {
+                Some(crate::execute_batch::BatchBenchmarkParams {
+                    warmup_frames,
+                    measured_frames,
+                    animate,
+                })
+            } else {
+                None
+            };
             let opts = crate::execute_batch::RunOptions {
                 plans_dir: plans,
                 adapter_bin,
                 output_dir,
                 renderer_name,
+                benchmark: benchmark_opts,
             };
             let summary = crate::execute_batch::run(&opts)?;
             if emit_json {

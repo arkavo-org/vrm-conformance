@@ -88,6 +88,7 @@ fn univrm_render_sequence_with_animate_root_transform_produces_frames() {
         adapter_bin: univrm_launcher(),
         output_dir: output_dir.clone(),
         renderer_name: "univrm".into(),
+        benchmark: None,
     };
 
     let summary = run(&opts).expect("run() against UniVRM PlayMode must succeed");

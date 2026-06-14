@@ -74,6 +74,7 @@ fn univrm_render_sequence_captures_moving_spring_positions() {
         adapter_bin: launcher,
         output_dir: output_dir.clone(),
         renderer_name: renderer.into(),
+        benchmark: None,
     };
     let summary = run_batch(&opts).expect("run univrm batch");
     assert_eq!(summary.ok_count, 1, "the sequence plan must render ok");

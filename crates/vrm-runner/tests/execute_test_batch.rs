@@ -127,6 +127,7 @@ fn manifest_carries_two_entries_with_absolute_paths() {
         ],
         Utf8PathBuf::from_path_buf(output_dir.clone()).unwrap(),
         "univrm".into(),
+        None,
     );
 
     assert_eq!(manifest.manifest_version, 2);
@@ -160,6 +161,7 @@ fn manifest_serializes_to_expected_json_shape() {
         )],
         Utf8PathBuf::from_path_buf(output_dir).unwrap(),
         "univrm".into(),
+        None,
     );
 
     let json = serde_json::to_value(&manifest).expect("serialize");
@@ -320,6 +322,7 @@ fn happy_path_writes_local_manifest_with_blake3() {
         adapter_bin: fixture("mock-univrm-ok.sh"),
         output_dir: Utf8PathBuf::from_path_buf(output_dir.clone()).unwrap(),
         renderer_name: "univrm".into(),
+        benchmark: None,
     };
 
     let summary = run_batch(&opts).expect("run");
@@ -359,6 +362,7 @@ fn partial_output_marks_missing_tests_as_errors() {
         adapter_bin: fixture("mock-univrm-partial.sh"),
         output_dir: Utf8PathBuf::from_path_buf(output_dir.clone()).unwrap(),
         renderer_name: "univrm".into(),
+        benchmark: None,
     };
 
     let summary = run_batch(&opts).expect("run");
@@ -400,6 +404,7 @@ fn malformed_meta_fails_with_clear_error() {
         adapter_bin: fixture("mock-univrm-bad-meta.sh"),
         output_dir: Utf8PathBuf::from_path_buf(output_dir).unwrap(),
         renderer_name: "univrm".into(),
+        benchmark: None,
     };
 
     let err = run_batch(&opts).expect_err("should fail on missing total_tests");
@@ -425,6 +430,7 @@ fn missing_meta_envelope_fails_with_clear_error() {
         adapter_bin: fixture("mock-univrm-missing-meta.sh"),
         output_dir: Utf8PathBuf::from_path_buf(output_dir).unwrap(),
         renderer_name: "univrm".into(),
+        benchmark: None,
     };
 
     let err = run_batch(&opts).expect_err("should fail without _meta envelope");
@@ -453,6 +459,7 @@ fn spawn_failure_reports_clear_error() {
         adapter_bin: Utf8PathBuf::from("/definitely/not/a/real/binary"),
         output_dir: Utf8PathBuf::from_path_buf(output_dir).unwrap(),
         renderer_name: "univrm".into(),
+        benchmark: None,
     };
 
     let err = run_batch(&opts).expect_err("should fail when adapter binary does not exist");
@@ -540,6 +547,7 @@ fn batch_capture_positions_writes_positions_json() {
         adapter_bin: fixture("mock-univrm-seq-positions.sh"),
         output_dir: Utf8PathBuf::from_path_buf(output_dir.clone()).unwrap(),
         renderer_name: "univrm".into(),
+        benchmark: None,
     };
 
     let summary = run_batch(&opts).expect("run");
