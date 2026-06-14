@@ -149,6 +149,74 @@ pub fn apply_vrma_at_time_params(
     }
 }
 
+/// Map a plan's output block to `BenchmarkParams`. Mirrors `render_params`'
+/// color-space mapping so the benchmarked scene matches the conformance
+/// render. `animate` selects a small vertical root excitation so spring-bone
+/// cost is exercised; otherwise the scene is static.
+pub fn benchmark_params(
+    session_id: &str,
+    p: &plan::Output,
+    warmup_frames: u32,
+    measured_frames: u32,
+    animate: bool,
+) -> ops::BenchmarkParams {
+    let color_space = match p.color_space {
+        plan::ColorSpace::Linear => ops::ColorSpace::Linear,
+        plan::ColorSpace::Srgb => ops::ColorSpace::Srgb,
+    };
+    ops::BenchmarkParams {
+        session_id: session_id.into(),
+        width: p.width,
+        height: p.height,
+        color_space,
+        msaa: p.msaa,
+        output_type: ops::OutputType::Color,
+        warmup_frames,
+        measured_frames,
+        animate_root_transform: if animate {
+            Some(ops::RootTransformAnimation {
+                translation_start: [0.0, 0.0, 0.0],
+                translation_end: [0.0, 0.1, 0.0],
+            })
+        } else {
+            None
+        },
+    }
+}
+
+#[cfg(test)]
+mod benchmark_params_tests {
+    use super::*;
+
+    fn sample_output() -> plan::Output {
+        plan::Output {
+            width: 256,
+            height: 256,
+            color_space: plan::ColorSpace::Linear,
+            msaa: 4,
+        }
+    }
+
+    #[test]
+    fn benchmark_params_maps_output_and_frames() {
+        let p = benchmark_params("sess-1", &sample_output(), 30, 300, false);
+        assert_eq!(p.session_id, "sess-1");
+        assert_eq!(p.width, 256);
+        assert_eq!(p.height, 256);
+        assert_eq!(p.msaa, 4);
+        assert_eq!(p.color_space, ops::ColorSpace::Linear);
+        assert_eq!(p.warmup_frames, 30);
+        assert_eq!(p.measured_frames, 300);
+        assert!(p.animate_root_transform.is_none());
+    }
+
+    #[test]
+    fn benchmark_params_sets_animation_when_requested() {
+        let p = benchmark_params("s", &sample_output(), 1, 1, true);
+        assert!(p.animate_root_transform.is_some());
+    }
+}
+
 #[cfg(test)]
 mod synthetic_collider_threading_tests {
     use super::*;
