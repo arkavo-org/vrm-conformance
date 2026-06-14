@@ -408,3 +408,25 @@ v1 is **observational**: collect and report (`scripts/perf-report.sh` ->
 — the first structural dimension; `state_changes`/`texture_bindings` deltas are
 a later addition). No pass/fail gate — budgets are a deliberate later phase
 informed by v1 data.
+
+### Structural-count comparability (per-renderer instrumentation caveats)
+
+`draw_calls` / `triangles` are deterministic and hardware-independent, but they
+are **not directly comparable across engines as raw numbers** — each renderer
+instruments differently. Established 2026-06-14 (see `docs/findings.md`), for an
+outlines-ON MToon avatar where all three genuinely render base + outline:
+
+- **three-vrm** — accurate: counts the draws it actually issues (base + outline = 2).
+- **VMK** — **under-counts the outline pass** (reports 1 instead of 2). The outline
+  is rendered on the GPU (pixel-confirmed) but `VRMMetalKit`'s `renderMToonOutlines`
+  omits `performanceTracker.recordDrawCall`. Pending an upstream VRMMetalKit fix +
+  pin bump; until then subtract nothing but expect VMK low by one outline pass per
+  outlined material.
+- **UniVRM** — **over-counts by a fixed `+1 draw / +2 tri` Built-in RP floor**:
+  `UnityStats` includes an always-submitted `FORWARD_BASE_OUTLINE` pass (clip-discarded
+  when outlines are off) and the fullscreen camera blit (2 triangles).
+
+Implication for Phase-2 budgets / "familiar band" thresholds: normalize per renderer
+(or compare each renderer against its own baseline) — do **not** threshold on raw
+cross-engine `draw_calls`/`triangles` deltas. Timing (host-bound) and these
+structural counts are both renderer-relative, not absolute conformance axes, in v1.
