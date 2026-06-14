@@ -529,6 +529,8 @@ fn default_measured_frames() -> u32 {
 ///
 /// Adapters that cannot benchmark MUST return `-32000 Unimplemented` with
 /// `data: { phase: "perf-v1" }`.
+///
+/// `output_type` follows `RenderParams` semantics — pass `Color` for a standard timed render.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkParams {
     pub session_id: String,
@@ -565,7 +567,7 @@ pub enum PerfCapability {
 }
 
 /// Benchmark protocol echoed back so the report is self-describing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PerfProtocol {
     pub warmup_frames: u32,
     pub measured_frames: u32,
@@ -581,6 +583,7 @@ pub enum PerfClock {
     Cpu,
 }
 
+/// Frame-time percentiles in milliseconds over the measured-frame window.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct FrameTimePercentiles {
     pub p50: f32,
@@ -612,6 +615,7 @@ pub struct PerfGeometry {
     pub vertices: u64,
 }
 
+/// Whether `peak_memory_bytes` in `PerfResources` is GPU or host RAM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PerfMemoryKind {
@@ -933,13 +937,25 @@ mod benchmark_tests {
         );
         assert_eq!(serde_json::to_value(PerfClock::GpuCpu).unwrap(), "gpu_cpu");
         assert_eq!(serde_json::to_value(PerfMemoryKind::Host).unwrap(), "host");
+        assert_eq!(
+            serde_json::from_value::<PerfCapability>(serde_json::json!("structural")).unwrap(),
+            PerfCapability::Structural
+        );
+        assert_eq!(
+            serde_json::from_value::<PerfClock>(serde_json::json!("gpu_cpu")).unwrap(),
+            PerfClock::GpuCpu
+        );
+        assert_eq!(
+            serde_json::from_value::<PerfMemoryKind>(serde_json::json!("host")).unwrap(),
+            PerfMemoryKind::Host
+        );
     }
 
     #[test]
     fn benchmark_plan_result_roundtrip() {
         let r = BenchmarkPlanResult {
             estimated_frames: 330,
-            estimated_seconds: 5.5,
+            estimated_seconds: 5.1,
             scene_summary: "static 64x64".into(),
         };
         let s = serde_json::to_string(&r).unwrap();
