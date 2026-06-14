@@ -920,6 +920,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 warmup_frames,
                 measured_frames,
                 animate,
+                emit_progress_ndjson: emit_json,
             };
             let outcome = crate::benchmark::run_benchmark(&plan_value, &opts)?;
             match outcome {

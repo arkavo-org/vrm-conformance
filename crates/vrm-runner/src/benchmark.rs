@@ -25,6 +25,7 @@ pub struct BenchmarkOptions {
     pub warmup_frames: u32,
     pub measured_frames: u32,
     pub animate: bool,
+    pub emit_progress_ndjson: bool,
 }
 
 /// Outcome of a benchmark run: a full report, or Unimplemented when the
@@ -72,6 +73,22 @@ fn unimplemented_phase(e: &vrm_ops::RpcError) -> Option<String> {
         .map(String::from)
 }
 
+/// Emit one NDJSON progress line to stderr when `opts.emit_progress_ndjson`
+/// is true. Shape matches the `execute_plan` progress lines from
+/// `execute.rs` (same `event`/`phase`/`test_id` keys) with `op` set to
+/// `"benchmark"` so downstream consumers can distinguish the two paths.
+fn progress(opts: &BenchmarkOptions, phase: &str, test_id: &str) {
+    if opts.emit_progress_ndjson {
+        let line = serde_json::json!({
+            "event": "progress",
+            "op": "benchmark",
+            "phase": phase,
+            "test_id": test_id,
+        });
+        eprintln!("{}", serde_json::to_string(&line).unwrap_or_default());
+    }
+}
+
 pub fn run_benchmark(plan: &TestPlan, opts: &BenchmarkOptions) -> Result<BenchmarkOutcome> {
     let asset_path = opts.asset_dir.join(&plan.asset);
     if !asset_path.exists() {
@@ -79,9 +96,11 @@ pub fn run_benchmark(plan: &TestPlan, opts: &BenchmarkOptions) -> Result<Benchma
     }
     let asset_hash = asset_blake3(&asset_path)?;
 
+    progress(opts, "spawn", &plan.id);
     let mut adapter = Adapter::spawn(&opts.adapter_bin, &opts.adapter_args)
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
 
+    progress(opts, "load_vrm", &plan.id);
     let load: ops::LoadVrmResult = adapter
         .call(
             "load_vrm",
@@ -93,12 +112,15 @@ pub fn run_benchmark(plan: &TestPlan, opts: &BenchmarkOptions) -> Result<Benchma
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
     let session_id = load.session_id;
 
+    progress(opts, "set_camera", &plan.id);
     let _: ops::UnitResult = adapter
         .call("set_camera", camera_params(&session_id, &plan.camera))
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+    progress(opts, "set_lighting", &plan.id);
     let _: ops::UnitResult = adapter
         .call("set_lighting", lighting_params(&session_id, &plan.lighting))
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
+    progress(opts, "set_post_processing", &plan.id);
     let _: ops::UnitResult = adapter
         .call(
             "set_post_processing",
@@ -117,6 +139,7 @@ pub fn run_benchmark(plan: &TestPlan, opts: &BenchmarkOptions) -> Result<Benchma
     // Cost preview. A -32000 here means the adapter cannot benchmark at all
     // (the contract requires -32000 on both benchmark ops) — route it to the
     // same Unimplemented outcome rather than a hard error.
+    progress(opts, "benchmark_plan", &plan.id);
     let preview: std::result::Result<ops::BenchmarkPlanResult, AdapterError> =
         adapter.call("benchmark_plan", bench_params.clone());
 
@@ -126,6 +149,7 @@ pub fn run_benchmark(plan: &TestPlan, opts: &BenchmarkOptions) -> Result<Benchma
         },
         Err(e) => return Err(anyhow::anyhow!("adapter error: {e}")),
         Ok(_preview) => {
+            progress(opts, "benchmark_execute", &plan.id);
             let measured: std::result::Result<ops::PerfMeasurement, AdapterError> =
                 adapter.call("benchmark_execute", bench_params);
             match measured {
@@ -145,6 +169,7 @@ pub fn run_benchmark(plan: &TestPlan, opts: &BenchmarkOptions) -> Result<Benchma
         }
     };
 
+    progress(opts, "dispose", &plan.id);
     let _: ops::UnitResult = adapter
         .call("dispose", ops::DisposeParams { session_id })
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
