@@ -2,6 +2,16 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-14 (VMK 0.21.0 promotion: rc.3 verified render-equivalent to rc.1) — **0.21.0 cut as stable from rc.3 (985bd7c). The rc.1→rc.3 delta — #352 (pose-aware SpringBone warmup) + #353 (outline-pass recordDrawCall) — is byte-identical across the spring-bone (settle+swing) + outline corpus (49/49) and deterministic. rc.1 was already verified vs 0.20.1 (no regression; 31 sub-perceptual MToon cells). Conformance pin bumped 0.20.1 → 0.21.0.**
+
+**What.** Promoted VRMMetalKit `0.21.0-rc.3` to stable `0.21.0` after a focused verification of the only unverified delta since the last-verified RC (rc.1 = `1ebe2ab`, verified 2026-06-13). The two commits past rc.1 are `#352` (`fix(renderer,vrmvideo): allow pose-aware SpringBone warmup`) and `#353` (outline `recordDrawCall`, metrics-only).
+
+**Method.** Built the adapter at rc.1 and rc.3; A/B-rendered the spring-bone settle + **swing** sweeps (the #352 risk — swing exercises `animate_root_transform` / pose-aware warmup) plus the MToon outline variants through each (49 plans); BLAKE3 byte-compared; and re-rendered a swing case 3× at rc.3 for determinism.
+
+**Result.** **49/49 byte-identical** rc.1 vs rc.3; swing case **3× byte-identical** (deterministic). So #352 changes nothing observable in the corpus and #353 is render-neutral. rc.3 therefore inherits rc.1's clean bill (the 2026-06-13 entry: 397/428 byte-identical to 0.20.1; 31 sub-perceptual MToon-feature cells, SSIM ≥ 0.9974, all pass the 0.85 gate). No render-output regression in promoting to stable.
+
+**Caveat.** Goldens still need a full re-baseline when this lands: the 31 rc.1 MToon cells **plus** the outlines-on default flip (outline now on every default-derived asset). The swift-tools 6.3 / CI-Xcode gap is unchanged (see CI notes). Verified locally on M4 Max / Xcode 26.5.
+
 ## 2026-06-14 (benchmark structural divergence: default asset draw-call + triangle count) — **RESOLVED: visual fidelity aligns (all three renderers DO render the MToon outline when enabled), but the structural *counts* diverge purely from per-renderer instrumentation — VMK under-counts the outline draw (upstream VRMMetalKit bug), UniVRM over-counts (always-submitted phantom outline pass + a 2-triangle Built-in RP camera blit). No renderer has an outline fidelity gap. `draw_calls`/`triangles` are therefore not directly cross-renderer comparable without per-renderer normalization.**
 
 **Context.** The suite default avatar (`emit-default`) was flipped to a representative typical-VRM config — `outlineWidthMode: worldCoordinates`, `outlineWidthFactor: 0.05` (was `none`/`0.0`) — because real VRM avatars (VRoid / VTubing) ship with the MToon toon outline enabled. Benchmarking the default across the three adapters then exposed a structural-count divergence, root-caused below.
