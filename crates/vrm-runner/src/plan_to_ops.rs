@@ -149,8 +149,8 @@ pub fn apply_vrma_at_time_params(
     }
 }
 
-/// Map a plan's output block to `BenchmarkParams`. Mirrors `render_params`'
-/// color-space mapping so the benchmarked scene matches the conformance
+/// Map a plan's output block to `BenchmarkParams`. Mirrors the color-space mapping in `render_params`
+/// so the benchmarked scene matches the conformance
 /// render. `animate` selects a small vertical root excitation so spring-bone
 /// cost is exercised; otherwise the scene is static.
 pub fn benchmark_params(
@@ -213,7 +213,19 @@ mod benchmark_params_tests {
     #[test]
     fn benchmark_params_sets_animation_when_requested() {
         let p = benchmark_params("s", &sample_output(), 1, 1, true);
-        assert!(p.animate_root_transform.is_some());
+        let anim = p
+            .animate_root_transform
+            .expect("animate=true must set animation");
+        assert_eq!(anim.translation_start, [0.0, 0.0, 0.0]);
+        assert_eq!(anim.translation_end, [0.0, 0.1, 0.0]);
+    }
+
+    #[test]
+    fn benchmark_params_maps_srgb_color_space() {
+        let mut out = sample_output();
+        out.color_space = plan::ColorSpace::Srgb;
+        let p = benchmark_params("s", &out, 1, 1, false);
+        assert_eq!(p.color_space, ops::ColorSpace::Srgb);
     }
 }
 
