@@ -212,8 +212,43 @@ pub struct ResultEntry {
     pub duration_seconds: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame_hz_achieved: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_lenient_measurement",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub measurement: Option<ops::PerfMeasurement>,
+}
+
+/// Tolerate UniVRM's JsonUtility serialization quirk: a null `measurement`
+/// field on a non-benchmark `EntryDto` is emitted not as `null`/omitted but as
+/// a fully default-constructed object (`clock:""`, empty `capabilities`, all
+/// zeros) — which is not a valid `PerfMeasurement` (the empty `clock` fails the
+/// `PerfClock` enum). Recognize that default object by its empty `capabilities`
+/// array and treat it as "no measurement" so the regular (non-benchmark) batch
+/// path parses cleanly. Real benchmark measurements always carry a non-empty
+/// `capabilities` list.
+fn deserialize_lenient_measurement<'de, D>(
+    deserializer: D,
+) -> Result<Option<ops::PerfMeasurement>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let has_capabilities = value
+        .get("capabilities")
+        .and_then(|c| c.as_array())
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false);
+    if !has_capabilities {
+        return Ok(None);
+    }
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -772,6 +807,30 @@ mod tests {
         assert!(
             entry2.measurement.is_none(),
             "measurement should be None when absent"
+        );
+
+        // UniVRM JsonUtility quirk: a null measurement on a non-benchmark entry
+        // serializes as a fully default-constructed object (clock:"", empty
+        // capabilities). This MUST parse as None, not error on the empty clock.
+        let junk_default = r#"{
+            "test_id": "regular_render",
+            "status": "ok",
+            "output_path": "/tmp/x.png",
+            "measurement": {
+                "protocol": { "warmup_frames": 0, "measured_frames": 0, "animated": false },
+                "timing": { "frame_time_ms": { "p50": 0.0, "p95": 0.0, "p99": 0.0 }, "fps_mean": 0.0, "clock": "" },
+                "structural": { "draw_calls": 0.0 },
+                "geometry": { "triangles": 0, "vertices": 0 },
+                "resources": { "peak_memory_bytes": 0, "memory_kind": "", "load_ms": 0.0, "first_frame_ms": 0.0 },
+                "host": { "os": "", "os_version": "", "gpu_vendor": "", "gpu_model": "", "driver_version": "", "build_flags": "" },
+                "capabilities": []
+            }
+        }"#;
+        let entry3: ResultEntry = serde_json::from_str(junk_default)
+            .expect("JsonUtility default measurement (clock:\"\", empty capabilities) must parse, not error");
+        assert!(
+            entry3.measurement.is_none(),
+            "a default/empty-capabilities measurement must be treated as None"
         );
     }
 }
