@@ -1,6 +1,7 @@
 //! Conformance runner: reads test plans, drives renderer adapters, runs diff engine.
 
 pub mod adapter;
+pub mod benchmark;
 pub mod blank;
 pub mod cli;
 pub mod diff;
