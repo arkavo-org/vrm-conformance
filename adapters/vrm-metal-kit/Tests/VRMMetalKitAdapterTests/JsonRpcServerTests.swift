@@ -399,4 +399,26 @@ final class JsonRpcServerTests: XCTestCase {
             "expected apply_vrma-deferred message, got: \(msg)"
         )
     }
+
+    // MARK: - benchmark_plan / benchmark_execute (error paths — no GPU)
+
+    func testBenchmarkPlanUnknownSessionInvalidParams() throws {
+        // benchmark_plan with an unknown session_id → -32602.
+        let request = #"{"jsonrpc":"2.0","id":71,"method":"benchmark_plan","params":{"session_id":"no-such","width":64,"height":64,"warmup_frames":5,"measured_frames":30}}"#
+        let writer = MemoryWriter()
+        JsonRpcServer(input: MemoryReader(frame(request)), output: writer, log: MemoryWriter()).run()
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+    }
+
+    func testBenchmarkExecuteUnknownSessionInvalidParams() throws {
+        // benchmark_execute with an unknown session_id → -32602.
+        let request = #"{"jsonrpc":"2.0","id":70,"method":"benchmark_execute","params":{"session_id":"no-such","width":64,"height":64,"color_space":"linear","msaa":1,"output_type":"Color","warmup_frames":1,"measured_frames":1}}"#
+        let writer = MemoryWriter()
+        JsonRpcServer(input: MemoryReader(frame(request)), output: writer, log: MemoryWriter()).run()
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+    }
 }

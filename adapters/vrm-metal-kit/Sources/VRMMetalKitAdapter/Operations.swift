@@ -17,6 +17,7 @@ import CoreGraphics
 import Foundation
 import ImageIO
 @preconcurrency import Metal
+import QuartzCore
 import simd
 import UniformTypeIdentifiers
 import VRMMetalKit
@@ -113,6 +114,11 @@ final class Operations: @unchecked Sendable {
         // internal state (which is zero before any render call).
         var lastLookAtHeadLocalPoint: SIMD3<Float>?
 
+        // Wall-clock milliseconds to load the VRMModel + build the VRMRenderer.
+        // Populated in handleLoadVrm and exposed via benchmark_execute's
+        // resources.load_ms field.
+        var loadMs: Double = 0
+
         init(renderer: VRMRenderer, model: VRMModel) {
             self.renderer = renderer
             self.model = model
@@ -180,6 +186,8 @@ final class Operations: @unchecked Sendable {
         case "reset_physics":           return handleResetPhysics(params: params)
         case "animate_root_transform":  return handleAnimateRootTransform(params: params)
         case "render_sequence":         return handleRenderSequence(params: params)
+        case "benchmark_plan":          return handleBenchmarkPlan(params: params)
+        case "benchmark_execute":       return handleBenchmarkExecute(params: params)
         case "dump_bone_positions":     return handleDumpBonePositions(params: params)
         case "load_vrma":               return handleLoadVrma(params: params)
         case "apply_vrma_at_time":      return handleApplyVrmaAtTime(params: params)
@@ -224,6 +232,7 @@ final class Operations: @unchecked Sendable {
         }()
 
         let url = URL(fileURLWithPath: path)
+        let loadStart = CACurrentMediaTime()
         switch blockingLoad(url: url, device: device, augmentColliders: augment) {
         case .failure(let err):
             return loadFailed("VRMModel.load failed: \(err)")
@@ -275,11 +284,14 @@ final class Operations: @unchecked Sendable {
             // populated the spring-bone GPU buffers + ran 30 warmup steps;
             // we just need to flip the runtime toggle.
             renderer.enableSpringBone = true
+            let loadMs = (CACurrentMediaTime() - loadStart) * 1000.0
 
             stateLock.lock()
             sessionCounter += 1
             let id = "vrm-metal-kit-\(sessionCounter)"
-            sessions[id] = Session(renderer: renderer, model: model)
+            let session = Session(renderer: renderer, model: model)
+            session.loadMs = loadMs
+            sessions[id] = session
             stateLock.unlock()
 
             // Surface spring-bone interop status on stderr so smoke tests
@@ -1192,6 +1204,259 @@ final class Operations: @unchecked Sendable {
         guard let v = v else { return false }
         if case .null = v { return false }
         return true
+    }
+
+    // MARK: - benchmark_plan / benchmark_execute
+
+    /// Extract an Int from a JSONValue.number field. Rounds to the nearest integer
+    /// before converting so f64 round-trip noise (e.g. 30.0000001) doesn't produce nil.
+    private func intField(_ v: JSONValue?) -> Int? {
+        if case .number(let d)? = v { return Int(d.rounded()) }
+        return nil
+    }
+
+    private func handleBenchmarkPlan(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else { return invalidParams("missing session_id") }
+        guard lookupSession(sessionId) != nil else {
+            return invalidParams("invalid session_id: \(sessionId)")
+        }
+        let warmup = intField(obj["warmup_frames"]) ?? 30
+        let measured = intField(obj["measured_frames"]) ?? 300
+        let width = intField(obj["width"]) ?? 0
+        let height = intField(obj["height"]) ?? 0
+        let total = warmup + measured
+        return .ok(.object([
+            "estimated_frames": .number(Double(total)),
+            "estimated_seconds": .number(Double(total) / 60.0),
+            "scene_summary": .string("VMK \(width)x\(height) msaa\(Operations.msaaSampleCount)"),
+        ]))
+    }
+
+    private func handleBenchmarkExecute(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else { return invalidParams("missing session_id") }
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("invalid session_id: \(sessionId)")
+        }
+        guard let device = self.device, let commandQueue = self.commandQueue else {
+            return .error(code: -32002, message: "RenderFailed", data: .object(["reason": .string("no Metal device")]))
+        }
+
+        let warmup = intField(obj["warmup_frames"]) ?? 30
+        let measured = intField(obj["measured_frames"]) ?? 300
+        let width = intField(obj["width"]) ?? 256
+        let height = intField(obj["height"]) ?? 256
+        var colorSpace = "linear"
+        if case .string(let cs)? = obj["color_space"] { colorSpace = cs.lowercased() }
+
+        // Detect animate_root_transform: present and non-null means animated.
+        let animated = isPresent(obj["animate_root_transform"])
+        var startV = SIMD3<Float>(0, 0, 0)
+        var endV = SIMD3<Float>(0, 0, 0)
+        if animated, case .object(let anim) = obj["animate_root_transform"] {
+            guard let s = parseVec3(anim["translation_start"]),
+                  let e = parseVec3(anim["translation_end"])
+            else {
+                return invalidParams("animate_root_transform: translation_start/end required as [f32; 3]")
+            }
+            startV = s
+            endV = e
+        }
+
+        // Snapshot root translations for restoration after the loop.
+        let rootNodes: [VRMNode] = session.model.nodes.filter { $0.parent == nil }
+        let originalTranslations: [SIMD3<Float>] = rootNodes.map { $0.translation }
+
+        // Scene setup: copy from handleRender.
+        let position = session.cameraPosition ?? SIMD3<Float>(0, 1.4, 1.5)
+        let target = session.cameraTarget ?? SIMD3<Float>(0, 1.4, 0)
+        let up = session.cameraUp ?? SIMD3<Float>(0, 1, 0)
+        let fov = session.cameraFovDegrees ?? 30.0
+        let aspect = Float(width) / Float(height)
+        session.renderer.projectionMatrix = perspective(
+            fovRadians: fov * .pi / 180.0,
+            aspect: aspect,
+            near: 0.01,
+            far: 100.0
+        )
+        session.renderer.viewMatrix = lookAt(eye: position, center: target, up: up)
+        if let dir = session.directionalDir,
+           let color = session.directionalColor,
+           let intensity = session.directionalIntensity {
+            session.renderer.setLight(0, direction: dir, color: color, intensity: intensity)
+            session.renderer.disableLight(1)
+            session.renderer.disableLight(2)
+        }
+        if let ambColor = session.ambientColor, let ambIntensity = session.ambientIntensity {
+            session.renderer.setAmbientColor(ambColor * ambIntensity)
+        }
+
+        // Allocate MSAA textures ONCE and reuse across all warmup + measured frames.
+        let colorPixelFormat: MTLPixelFormat = (colorSpace == "srgb") ? .rgba8Unorm_srgb : .rgba8Unorm
+        let sampleCount = Operations.msaaSampleCount
+
+        let msColorDesc = MTLTextureDescriptor()
+        msColorDesc.textureType = .type2DMultisample
+        msColorDesc.pixelFormat = colorPixelFormat
+        msColorDesc.width = width
+        msColorDesc.height = height
+        msColorDesc.sampleCount = sampleCount
+        msColorDesc.usage = [.renderTarget]
+        msColorDesc.storageMode = .private
+        guard let msColorTex = device.makeTexture(descriptor: msColorDesc) else {
+            return renderFailed("benchmark: failed to create multisample color texture (\(width)×\(height) @ \(sampleCount)x)")
+        }
+
+        let resolveDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: colorPixelFormat,
+            width: width, height: height, mipmapped: false
+        )
+        resolveDesc.usage = [.renderTarget, .shaderRead]
+        resolveDesc.storageMode = .shared
+        guard let resolveTex = device.makeTexture(descriptor: resolveDesc) else {
+            return renderFailed("benchmark: failed to create resolve color texture")
+        }
+
+        let depthDesc = MTLTextureDescriptor()
+        depthDesc.textureType = .type2DMultisample
+        depthDesc.pixelFormat = .depth32Float
+        depthDesc.width = width
+        depthDesc.height = height
+        depthDesc.sampleCount = sampleCount
+        depthDesc.usage = [.renderTarget]
+        depthDesc.storageMode = .private
+        guard let msDepthTex = device.makeTexture(descriptor: depthDesc) else {
+            return renderFailed("benchmark: failed to create multisample depth texture")
+        }
+
+        // Attach a fresh PerformanceTracker; detach on exit.
+        session.renderer.performanceTracker = PerformanceTracker()
+        defer { session.renderer.performanceTracker = nil }
+
+        // Inner draw: builds a new RPD+commandBuffer per frame and blocks until done.
+        // Returns wall-clock milliseconds for the frame.
+        func drawOneFrame(frameIndex: Int, totalFrames: Int) -> Double {
+            // Update root translation for animated benchmarks (mirrors handleRenderSequence).
+            if animated {
+                let t: Float = totalFrames > 1 ? Float(frameIndex) / Float(totalFrames - 1) : 0
+                let offset = startV + (endV - startV) * t
+                for (idx, root) in rootNodes.enumerated() {
+                    root.translation = originalTranslations[idx] + offset
+                    root.updateWorldTransform()
+                }
+            }
+
+            let t0 = CACurrentMediaTime()
+
+            let rpd = MTLRenderPassDescriptor()
+            rpd.colorAttachments[0].texture = msColorTex
+            rpd.colorAttachments[0].resolveTexture = resolveTex
+            rpd.colorAttachments[0].loadAction = .clear
+            rpd.colorAttachments[0].storeAction = .multisampleResolve
+            rpd.colorAttachments[0].clearColor = MTLClearColor(red: 1.0, green: 0.0, blue: 1.0, alpha: 1.0)
+            rpd.depthAttachment.texture = msDepthTex
+            rpd.depthAttachment.loadAction = .clear
+            rpd.depthAttachment.storeAction = .dontCare
+            rpd.depthAttachment.clearDepth = 1.0
+
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                return (CACurrentMediaTime() - t0) * 1000.0
+            }
+
+            MainActor.assumeIsolated {
+                session.renderer.drawOffscreenHeadless(
+                    to: msColorTex,
+                    depth: msDepthTex,
+                    commandBuffer: commandBuffer,
+                    renderPassDescriptor: rpd
+                )
+            }
+            let sem = DispatchSemaphore(value: 0)
+            commandBuffer.addCompletedHandler { _ in sem.signal() }
+            commandBuffer.commit()
+            sem.wait()
+            return (CACurrentMediaTime() - t0) * 1000.0
+        }
+
+        // Warmup frames: discard stats, capture the first frame's cold wall-time.
+        var firstFrameMs = 0.0
+        for i in 0..<warmup {
+            let ms = drawOneFrame(frameIndex: i, totalFrames: warmup + measured)
+            if i == 0 { firstFrameMs = ms }
+        }
+        // Reset so the measured window excludes warmup frames.
+        session.renderer.resetPerformanceMetrics()
+
+        // Measured frames: sample peak GPU memory each frame.
+        var peakMem = 0
+        for i in 0..<measured {
+            _ = drawOneFrame(frameIndex: warmup + i, totalFrames: warmup + measured)
+            peakMem = max(peakMem, device.currentAllocatedSize)
+        }
+
+        // Restore root translations so subsequent ops on this session see rest pose.
+        if animated {
+            for (idx, root) in rootNodes.enumerated() {
+                root.translation = originalTranslations[idx]
+                root.updateWorldTransform()
+            }
+        }
+
+        let metrics = session.renderer.getPerformanceMetrics()
+
+        // Build result JSON — no Codable, hand-built JSONValue.object to match contract.
+        var measurement: [String: JSONValue] = [
+            "protocol": .object([
+                "warmup_frames": .number(Double(warmup)),
+                "measured_frames": .number(Double(measured)),
+                "animated": .bool(animated),
+            ]),
+            "host": .object([
+                "os": .string("macOS"),
+                "os_version": .string(ProcessInfo.processInfo.operatingSystemVersionString),
+                "gpu_vendor": .string("Apple"),
+                "gpu_model": .string(device.name),
+                "driver_version": .string("0"),
+                "build_flags": .string(""),
+            ]),
+        ]
+        var capabilities: [JSONValue] = []
+        if let m = metrics {
+            measurement["timing"] = .object([
+                "frame_time_ms": .object([
+                    "p50": .number(m.frameTimeP50Ms),
+                    "p95": .number(m.frameTimeP95Ms),
+                    "p99": .number(m.frameTimeP99Ms),
+                ]),
+                "fps_mean": .number(m.fps),
+                "clock": .string("gpu_cpu"),
+            ])
+            capabilities.append(.string("timing"))
+            measurement["structural"] = .object([
+                "draw_calls": .number(Double(m.drawCalls)),
+                "state_changes": .number(Double(m.stateChanges)),
+                "texture_bindings": .number(Double(m.textureBindings)),
+            ])
+            capabilities.append(.string("structural"))
+            measurement["geometry"] = .object([
+                "triangles": .number(Double(m.triangleCount)),
+                "vertices": .number(Double(m.vertexCount)),
+            ])
+            capabilities.append(.string("geometry"))
+        }
+        measurement["resources"] = .object([
+            "peak_memory_bytes": .number(Double(peakMem)),
+            "memory_kind": .string("gpu"),
+            "load_ms": .number(session.loadMs),
+            "first_frame_ms": .number(firstFrameMs),
+        ])
+        capabilities.append(.string("resources"))
+        measurement["capabilities"] = .array(capabilities)
+
+        return .ok(.object(measurement))
     }
 
     // MARK: - VRMA ops (Phase 7 — VMK 0.16.0-rc.2)
