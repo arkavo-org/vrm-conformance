@@ -246,6 +246,36 @@ pub enum Cmd {
         #[arg(long, value_enum, default_value_t = DescribeFormat::Json)]
         format: DescribeFormat,
     },
+    /// Benchmark a plan's scene against one adapter and write a PerfReport
+    /// JSON to `<output_dir>/<test_id>_<renderer>.perf.json`. Observational —
+    /// no pass/fail. Adapters that don't support benchmarking report
+    /// Unimplemented and no file is written.
+    BenchmarkExecute {
+        #[arg(long)]
+        plan: Utf8PathBuf,
+        #[arg(long)]
+        adapter_bin: Utf8PathBuf,
+        #[arg(long, value_delimiter = ' ', num_args = 0..)]
+        adapter_args: Vec<String>,
+        #[arg(long)]
+        asset_dir: Utf8PathBuf,
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long, default_value = "vrm-metal-kit")]
+        renderer_name: String,
+        /// Discarded warm-up frames before measurement (cache/pipeline warm).
+        #[arg(long, default_value_t = 30)]
+        warmup_frames: u32,
+        /// Measured steady-state frames the metrics aggregate over.
+        #[arg(long, default_value_t = 300)]
+        measured_frames: u32,
+        /// Drive a small root-transform animation so spring-bone cost is
+        /// exercised (otherwise the scene is static).
+        #[arg(long)]
+        animate: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Load PNG frame paths from a directory in lexicographic order.
@@ -868,6 +898,59 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::BenchmarkExecute {
+            plan,
+            adapter_bin,
+            adapter_args,
+            asset_dir,
+            output_dir,
+            renderer_name,
+            warmup_frames,
+            measured_frames,
+            animate,
+            json: emit_json,
+        } => {
+            let plan_value = load_plan(&plan)?;
+            let opts = crate::benchmark::BenchmarkOptions {
+                adapter_bin,
+                adapter_args,
+                asset_dir,
+                output_dir,
+                renderer_name: renderer_name.clone(),
+                warmup_frames,
+                measured_frames,
+                animate,
+            };
+            let outcome = crate::benchmark::run_benchmark(&plan_value, &opts)?;
+            match outcome {
+                crate::benchmark::BenchmarkOutcome::Report(report) => {
+                    if emit_json {
+                        println!("{}", serde_json::to_string_pretty(&report)?);
+                    } else {
+                        let caps: Vec<String> = report
+                            .measurement
+                            .capabilities
+                            .iter()
+                            .map(|c| format!("{c:?}"))
+                            .collect();
+                        println!(
+                            "benchmark {} [{}]: captured {}",
+                            report.test_id,
+                            renderer_name,
+                            caps.join(", ")
+                        );
+                    }
+                }
+                crate::benchmark::BenchmarkOutcome::Unimplemented { phase } => {
+                    eprintln!(
+                        "benchmark: adapter '{}' does not implement benchmark_execute (phase: {})",
+                        renderer_name,
+                        phase.as_deref().unwrap_or("unknown")
+                    );
+                }
+            }
+            Ok(())
+        }
         Cmd::Describe { format } => {
             let catalog = json!({
                 "name": "vrm-runner",
@@ -1212,6 +1295,36 @@ pub fn run(cli: Cli) -> Result<()> {
                                 "overall_passed": { "type": "boolean" }
                             }
                         }
+                    },
+                    "benchmark-execute": {
+                        "summary": "Benchmark a plan's scene against one adapter; writes a PerfReport JSON (observational, no gate).",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["plan", "adapter_bin", "asset_dir", "output_dir"],
+                            "properties": {
+                                "plan": { "type": "string" },
+                                "adapter_bin": { "type": "string" },
+                                "adapter_args": {
+                                    "type": "array",
+                                    "items": { "type": "string" }
+                                },
+                                "asset_dir": { "type": "string" },
+                                "output_dir": { "type": "string" },
+                                "renderer_name": { "type": "string", "default": "vrm-metal-kit" },
+                                "warmup_frames": { "type": "integer", "default": 30 },
+                                "measured_frames": { "type": "integer", "default": 300 },
+                                "animate": { "type": "boolean", "default": false }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "test_id": { "type": "string" },
+                                "renderer_name": { "type": "string" },
+                                "asset_blake3": { "type": "string" },
+                                "measurement": { "type": "object" }
+                            }
+                        }
                     }
                 }
             });
@@ -1220,6 +1333,44 @@ pub fn run(cli: Cli) -> Result<()> {
                 DescribeFormat::Text => println!("{catalog:#?}"),
             }
             Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn benchmark_execute_subcommand_parses_with_defaults() {
+        let cli = Cli::try_parse_from([
+            "vrm-runner",
+            "benchmark-execute",
+            "--plan",
+            "p.yaml",
+            "--adapter-bin",
+            "mock",
+            "--asset-dir",
+            "assets",
+            "--output-dir",
+            "out",
+        ])
+        .expect("should parse");
+        match cli.command {
+            Cmd::BenchmarkExecute {
+                warmup_frames,
+                measured_frames,
+                animate,
+                renderer_name,
+                ..
+            } => {
+                assert_eq!(warmup_frames, 30);
+                assert_eq!(measured_frames, 300);
+                assert!(!animate);
+                assert_eq!(renderer_name, "vrm-metal-kit");
+            }
+            _ => panic!("expected BenchmarkExecute"),
         }
     }
 }
