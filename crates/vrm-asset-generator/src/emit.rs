@@ -4104,13 +4104,10 @@ mod byte_identity_guard {
     // chain_axis/explicit_tail feature preserved byte-identity vs pre-feature
     // commit 4639d35. If either fails, the default (-Y) geometry path drifted —
     // investigate the geometry change; do NOT update these hashes casually.
-    // Updated 2026-06-14: MToonParams::defaults() now emits outline_width_mode
-    // WorldCoordinates + outline_width_factor 0.05 (representative of typical VRM
-    // avatars that ship with the MToon toon outline enabled).
     const DEFAULT_V1_BLAKE3: &str =
-        "0eb3d6d93473e127c6512ef16bac53f62dff6857823cd2b40da56ee58a6af1fb";
+        "007ae2a770766a107fd94e900da396b71b8ab92af086b56b4b63fba9ba86572a";
     const DEFAULT_V0_BLAKE3: &str =
-        "67c97b7ea0492f1b2e09c1d0bd7712eecbf62a9a61fe4a699dcf7ca351413adb";
+        "769e9084089987369bc3899a727ee2dbced7ad7ebaa89b3f36e9a776605a80f2";
 
     fn emit_default_and_hash(v0: bool) -> String {
         let dir = tempdir().unwrap();
@@ -4149,13 +4146,10 @@ mod byte_identity_guard {
     // multichain = n2_sp0p02_share_all, SpringBoneParams::defaults per chain).
     // Captured after Task 4b conversion proved byte-identity vs 4639d35.
     // Do NOT update these hashes casually.
-    // Updated 2026-06-14: MToonParams::defaults() now emits outline_width_mode
-    // WorldCoordinates + outline_width_factor 0.05 (representative of typical VRM
-    // avatars that ship with the MToon toon outline enabled).
     const DEFAULT_COLLIDER_V1_BLAKE3: &str =
-        "c24941f4454c2edbaafc147101484f18b88f7edc2df7aa4bf8262e56e16f8e60";
+        "f85a7a55b80f170c7ad01d9832fa2f970ff4d9a5288b128320fcc4607b1ebdd1";
     const DEFAULT_MULTICHAIN_V1_BLAKE3: &str =
-        "758e4d59851a1cef5bc044d1cab1349bbc965e73bf85ebdc66190419bef286d6";
+        "a413cffa2aa6d3b0ac24f4d7e26cb7e593b84bf4b0b793a1d53924bfda70f190";
 
     fn emit_default_collider_v1_hash() -> String {
         use crate::spring_bone::{

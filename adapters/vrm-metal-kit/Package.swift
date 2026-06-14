@@ -585,9 +585,8 @@ let package = Package(
             // outline but under-counted it (1/2304 instead of 2/4608). Verified:
             // render-equivalent to 0.20.1 except 31 sub-perceptual MToon cells
             // (rc.1, all pass the gate); rc.1→rc.3 byte-identical across the
-            // spring-bone + outline corpus (49/49). Combined with the outlines-on
-            // default flip, goldens require a full re-baseline (the 31 cells +
-            // the now-present outline on every default-derived asset). See
+            // spring-bone + outline corpus (49/49). Goldens need a re-baseline
+            // for the 31 sub-perceptual MToon cells when this pin lands. See
             // docs/findings.md 2026-06-14. Prior pin: 0.20.1 (39e65f0).
             revision: "985bd7cbc560c967f979c460dcaf30675b15ba24"
         ),
