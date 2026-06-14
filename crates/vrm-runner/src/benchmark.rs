@@ -201,12 +201,12 @@ mod tests {
             timing: None,
             structural: Some(ops::PerfStructural {
                 draw_calls: 1.0,
-                state_changes: 0.0,
-                texture_bindings: 1.0,
+                state_changes: Some(0.0),
+                texture_bindings: Some(1.0),
             }),
             geometry: Some(ops::PerfGeometry {
                 triangles: 2,
-                vertices: 4,
+                vertices: Some(4),
             }),
             resources: None,
             host: ops::PerfHost {

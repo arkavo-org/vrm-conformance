@@ -600,19 +600,27 @@ pub struct PerfTiming {
 }
 
 /// Hardware-independent structural layer — per-frame means over the measured
-/// window. The cross-renderer "familiar" comparison axis.
+/// window. The cross-renderer "familiar" comparison axis. `draw_calls` is
+/// always present; `state_changes`/`texture_bindings` are optional because some
+/// renderers (e.g. three.js) do not instrument them — they are OMITTED, never
+/// reported as zero.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PerfStructural {
     pub draw_calls: f32,
-    pub state_changes: f32,
-    pub texture_bindings: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_changes: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture_bindings: Option<f32>,
 }
 
 /// Hardware-independent geometry layer — per-frame submission counts.
+/// `triangles` is always present; `vertices` is optional (three.js exposes no
+/// per-frame vertex counter, so it is omitted rather than faked).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PerfGeometry {
     pub triangles: u64,
-    pub vertices: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertices: Option<u64>,
 }
 
 /// Whether `peak_memory_bytes` in `PerfResources` is GPU or host RAM.
@@ -977,12 +985,12 @@ mod benchmark_tests {
                 timing: None,
                 structural: Some(PerfStructural {
                     draw_calls: 1.0,
-                    state_changes: 0.0,
-                    texture_bindings: 1.0,
+                    state_changes: Some(0.0),
+                    texture_bindings: Some(1.0),
                 }),
                 geometry: Some(PerfGeometry {
                     triangles: 2,
-                    vertices: 4,
+                    vertices: Some(4),
                 }),
                 resources: None,
                 host: PerfHost {
@@ -1013,5 +1021,25 @@ mod benchmark_tests {
         // round-trips
         let back: PerfReport = serde_json::from_value(v).unwrap();
         assert_eq!(back, report);
+    }
+
+    #[test]
+    fn perf_structural_omits_unmeasured_subfields() {
+        let s = PerfStructural {
+            draw_calls: 5.0,
+            state_changes: None,
+            texture_bindings: None,
+        };
+        let v: serde_json::Value = serde_json::to_value(s).unwrap();
+        assert_eq!(v["draw_calls"], 5.0);
+        assert!(v.get("state_changes").is_none());
+        assert!(v.get("texture_bindings").is_none());
+        let g = PerfGeometry {
+            triangles: 9,
+            vertices: None,
+        };
+        let gv: serde_json::Value = serde_json::to_value(g).unwrap();
+        assert_eq!(gv["triangles"], 9);
+        assert!(gv.get("vertices").is_none());
     }
 }

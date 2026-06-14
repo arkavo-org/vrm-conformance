@@ -172,11 +172,12 @@ fn vmk_benchmark_all_four_capabilities_sane_numbers() {
         "triangles must be > 0, got {}",
         geometry.triangles
     );
-    assert!(
-        geometry.vertices > 0,
-        "vertices must be > 0, got {}",
-        geometry.vertices
-    );
+    if let Some(vertices) = geometry.vertices {
+        assert!(
+            vertices > 0,
+            "vertices must be > 0 when reported, got {vertices}"
+        );
+    }
 
     // --- resources ---
     let resources = m
