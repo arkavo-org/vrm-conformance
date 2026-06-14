@@ -931,7 +931,11 @@ pub fn run(cli: Cli) -> Result<()> {
                             .measurement
                             .capabilities
                             .iter()
-                            .map(|c| format!("{c:?}"))
+                            .filter_map(|c| {
+                                serde_json::to_value(c)
+                                    .ok()
+                                    .and_then(|v| v.as_str().map(String::from))
+                            })
                             .collect();
                         println!(
                             "benchmark {} [{}]: captured {}",
@@ -1318,11 +1322,18 @@ pub fn run(cli: Cli) -> Result<()> {
                         },
                         "output_schema": {
                             "type": "object",
+                            "description": "PerfReport: runner identity + flattened PerfMeasurement (serde flatten promotes measurement fields to top level — there is no 'measurement' wrapper key).",
                             "properties": {
                                 "test_id": { "type": "string" },
                                 "renderer_name": { "type": "string" },
                                 "asset_blake3": { "type": "string" },
-                                "measurement": { "type": "object" }
+                                "protocol": { "type": "object" },
+                                "timing": { "type": ["object", "null"] },
+                                "structural": { "type": ["object", "null"] },
+                                "geometry": { "type": ["object", "null"] },
+                                "resources": { "type": ["object", "null"] },
+                                "host": { "type": "object" },
+                                "capabilities": { "type": "array", "items": { "type": "string", "enum": ["timing", "structural", "geometry", "resources"] } }
                             }
                         }
                     }
@@ -1369,6 +1380,45 @@ mod cli_tests {
                 assert_eq!(measured_frames, 300);
                 assert!(!animate);
                 assert_eq!(renderer_name, "vrm-metal-kit");
+            }
+            _ => panic!("expected BenchmarkExecute"),
+        }
+    }
+
+    #[test]
+    fn benchmark_execute_subcommand_parses_non_defaults() {
+        let cli = Cli::try_parse_from([
+            "vrm-runner",
+            "benchmark-execute",
+            "--plan",
+            "p.yaml",
+            "--adapter-bin",
+            "mock",
+            "--asset-dir",
+            "assets",
+            "--output-dir",
+            "out",
+            "--renderer-name",
+            "mock",
+            "--warmup-frames",
+            "5",
+            "--measured-frames",
+            "10",
+            "--animate",
+        ])
+        .expect("should parse");
+        match cli.command {
+            Cmd::BenchmarkExecute {
+                warmup_frames,
+                measured_frames,
+                animate,
+                renderer_name,
+                ..
+            } => {
+                assert_eq!(warmup_frames, 5);
+                assert_eq!(measured_frames, 10);
+                assert!(animate);
+                assert_eq!(renderer_name, "mock");
             }
             _ => panic!("expected BenchmarkExecute"),
         }
