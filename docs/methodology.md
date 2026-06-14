@@ -404,5 +404,7 @@ Timing numbers are interpreted same-host only; structural/geometry/count-based
 memory carry across renderers.
 
 v1 is **observational**: collect and report (`scripts/perf-report.sh` ->
-`goldens-cache/perf-report.json`, with a VMK-vs-golden-ref structural delta).
-No pass/fail gate — budgets are a deliberate later phase informed by v1 data.
+`goldens-cache/perf-report.json`, with a VMK-vs-golden-ref **draw-calls** delta
+— the first structural dimension; `state_changes`/`texture_bindings` deltas are
+a later addition). No pass/fail gate — budgets are a deliberate later phase
+informed by v1 data.
