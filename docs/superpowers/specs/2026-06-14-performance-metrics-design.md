@@ -113,7 +113,7 @@ PerfReport {
 
 | Adapter | timing | structural | geometry | resources | source |
 |---|---|---|---|---|---|
-| **VMK** (Swift/Metal) | ✅ | ✅ | ✅ | ✅ (gpu) | `PerformanceTracker` driven through the existing `drawOffscreenHeadless` loop; `CACurrentMediaTime` for load/first-frame; Metal allocation for peak memory |
+| **VMK** (Swift/Metal) | ✅ | ✅ | ✅ | ✅ (gpu) | `PerformanceTracker` driven through the existing `drawOffscreenHeadless` loop; `CACurrentMediaTime` for load/first-frame; Metal allocation for peak memory — **implemented 2026-06-14, verified on M4 Max** |
 | **three-vrm** (TS/Playwright) | ✅ (cpu) | ✅ | ✅ | host mem | `renderer.info.render.{calls,triangles}`, `renderer.info.memory`, `performance.now()`, `performance.memory.usedJSHeapSize` |
 | **UniVRM** (C#/Unity) | — | ✅ | ✅ | host mem | `ProfilerRecorder` ("Draw Calls Count", "SetPass Calls Count", "Triangles Count", "Vertices Count"), `Profiler.GetTotalAllocatedMemoryLong` |
 | **mock** (Rust/CPU) | — | ✅ (deterministic) | ✅ | — | CPU-rasterizer counts; provides a no-GPU end-to-end path for the op + schema round-trip |
