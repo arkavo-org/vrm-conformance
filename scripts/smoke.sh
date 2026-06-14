@@ -84,6 +84,26 @@ else
         --output-dir "$OUTPUTS" \
         --renderer-name vrm-mock \
         --json
+
+    echo "==> Benchmark (mock, observational)"
+    cargo run -q -p vrm-runner -- benchmark-execute \
+        --plan "$ASSETS/smoke_default.test.yaml" \
+        --adapter-bin "$ADAPTER" \
+        --asset-dir "$ASSETS" \
+        --output-dir "$OUTPUTS" \
+        --renderer-name mock \
+        --warmup-frames 2 \
+        --measured-frames 4 \
+        --json
+
+    PERF_JSON="$OUTPUTS/smoke_default_mock.perf.json"
+    if [ ! -f "$PERF_JSON" ]; then
+        echo "smoke: expected perf report at $PERF_JSON" >&2
+        exit 1
+    fi
+    grep -q '"structural"' "$PERF_JSON" || { echo "smoke: perf report missing structural block" >&2; exit 1; }
+    grep -q '"triangles"' "$PERF_JSON" || { echo "smoke: perf report missing geometry block" >&2; exit 1; }
+    echo "    perf report OK: $PERF_JSON"
 fi
 
 # ---- step 4: self-diff sanity ---------------------------------------------
