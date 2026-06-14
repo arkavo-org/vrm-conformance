@@ -552,9 +552,23 @@ namespace Conformance.Tests.Play
             float p95 = Percentile(frameTimesMs, 0.95f);
             float p99 = Percentile(frameTimesMs, 0.99f);
 
-            float avgDrawCalls = measuredFrames > 0 ? (float)drawSum / measuredFrames : 0f;
-            long  avgTriangles = measuredFrames > 0 ? triSum / measuredFrames : 0L;
-            long  avgVertices  = measuredFrames > 0 ? vertSum / measuredFrames : 0L;
+            var caps = new System.Collections.Generic.List<string> { "timing" };
+            Manifest.PerfStructuralDto structuralDto = null;
+            Manifest.PerfGeometryDto   geometryDto   = null;
+#if UNITY_EDITOR
+            structuralDto = new Manifest.PerfStructuralDto
+            {
+                draw_calls = measuredFrames > 0 ? (float)drawSum / measuredFrames : 0f,
+            };
+            geometryDto = new Manifest.PerfGeometryDto
+            {
+                triangles = measuredFrames > 0 ? triSum / measuredFrames : 0L,
+                vertices  = measuredFrames > 0 ? vertSum / measuredFrames : 0L,
+            };
+            caps.Add("structural");
+            caps.Add("geometry");
+#endif
+            caps.Add("resources");
 
             var measurement = new Manifest.PerfMeasurementDto
             {
@@ -575,15 +589,8 @@ namespace Conformance.Tests.Play
                     fps_mean = meanMs > 0f ? 1000f / meanMs : 0f,
                     clock    = "cpu",
                 },
-                structural = new Manifest.PerfStructuralDto
-                {
-                    draw_calls = avgDrawCalls,
-                },
-                geometry = new Manifest.PerfGeometryDto
-                {
-                    triangles = avgTriangles,
-                    vertices  = avgVertices,
-                },
+                structural = structuralDto,
+                geometry   = geometryDto,
                 resources = new Manifest.PerfResourcesDto
                 {
                     peak_memory_bytes = peakMem,
@@ -593,14 +600,14 @@ namespace Conformance.Tests.Play
                 },
                 host = new Manifest.PerfHostDto
                 {
-                    os             = "macOS",
+                    os             = Application.platform.ToString(),
                     os_version     = SystemInfo.operatingSystem,
                     gpu_vendor     = SystemInfo.graphicsDeviceVendor,
                     gpu_model      = SystemInfo.graphicsDeviceName,
                     driver_version = SystemInfo.graphicsDeviceVersion,
                     build_flags    = "",
                 },
-                capabilities = new string[] { "timing", "structural", "geometry", "resources" },
+                capabilities = caps.ToArray(),
             };
 
             setMeasurement(measurement);
