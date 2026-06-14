@@ -1220,7 +1220,7 @@ final class Operations: @unchecked Sendable {
               case .string(let sessionId) = obj["session_id"]
         else { return invalidParams("missing session_id") }
         guard lookupSession(sessionId) != nil else {
-            return invalidParams("invalid session_id: \(sessionId)")
+            return invalidParams("unknown session_id: \(sessionId)")
         }
         let warmup = intField(obj["warmup_frames"]) ?? 30
         let measured = intField(obj["measured_frames"]) ?? 300
@@ -1239,16 +1239,19 @@ final class Operations: @unchecked Sendable {
               case .string(let sessionId) = obj["session_id"]
         else { return invalidParams("missing session_id") }
         guard let session = lookupSession(sessionId) else {
-            return invalidParams("invalid session_id: \(sessionId)")
+            return invalidParams("unknown session_id: \(sessionId)")
         }
         guard let device = self.device, let commandQueue = self.commandQueue else {
-            return .error(code: -32002, message: "RenderFailed", data: .object(["reason": .string("no Metal device")]))
+            return renderFailed("no Metal device or command queue available")
         }
 
         let warmup = intField(obj["warmup_frames"]) ?? 30
         let measured = intField(obj["measured_frames"]) ?? 300
         let width = intField(obj["width"]) ?? 256
         let height = intField(obj["height"]) ?? 256
+        guard width > 0, height > 0 else {
+            return invalidParams("width and height must be positive integers")
+        }
         var colorSpace = "linear"
         if case .string(let cs)? = obj["color_space"] { colorSpace = cs.lowercased() }
 
@@ -1269,6 +1272,14 @@ final class Operations: @unchecked Sendable {
         // Snapshot root translations for restoration after the loop.
         let rootNodes: [VRMNode] = session.model.nodes.filter { $0.parent == nil }
         let originalTranslations: [SIMD3<Float>] = rootNodes.map { $0.translation }
+        defer {
+            if animated {
+                for (idx, root) in rootNodes.enumerated() {
+                    root.translation = originalTranslations[idx]
+                    root.updateWorldTransform()
+                }
+            }
+        }
 
         // Scene setup: copy from handleRender.
         let position = session.cameraPosition ?? SIMD3<Float>(0, 1.4, 1.5)
@@ -1337,8 +1348,8 @@ final class Operations: @unchecked Sendable {
         defer { session.renderer.performanceTracker = nil }
 
         // Inner draw: builds a new RPD+commandBuffer per frame and blocks until done.
-        // Returns wall-clock milliseconds for the frame.
-        func drawOneFrame(frameIndex: Int, totalFrames: Int) -> Double {
+        // Returns (wall-clock ms for the frame, GPU error string or nil).
+        func drawOneFrame(frameIndex: Int, totalFrames: Int) -> (ms: Double, gpuError: String?) {
             // Update root translation for animated benchmarks (mirrors handleRenderSequence).
             if animated {
                 let t: Float = totalFrames > 1 ? Float(frameIndex) / Float(totalFrames - 1) : 0
@@ -1363,7 +1374,7 @@ final class Operations: @unchecked Sendable {
             rpd.depthAttachment.clearDepth = 1.0
 
             guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-                return (CACurrentMediaTime() - t0) * 1000.0
+                return ((CACurrentMediaTime() - t0) * 1000.0, "failed to make command buffer")
             }
 
             MainActor.assumeIsolated {
@@ -1378,14 +1389,20 @@ final class Operations: @unchecked Sendable {
             commandBuffer.addCompletedHandler { _ in sem.signal() }
             commandBuffer.commit()
             sem.wait()
-            return (CACurrentMediaTime() - t0) * 1000.0
+            let ms = (CACurrentMediaTime() - t0) * 1000.0
+            if let err = commandBuffer.error {
+                return (ms, "GPU error: \(err)")
+            }
+            return (ms, nil)
         }
 
         // Warmup frames: discard stats, capture the first frame's cold wall-time.
         var firstFrameMs = 0.0
+        var capturedFirstFrame = false
         for i in 0..<warmup {
-            let ms = drawOneFrame(frameIndex: i, totalFrames: warmup + measured)
-            if i == 0 { firstFrameMs = ms }
+            let (ms, gpuErr) = drawOneFrame(frameIndex: i, totalFrames: warmup + measured)
+            if let gpuErr { return renderFailed("benchmark frame \(i): \(gpuErr)") }
+            if !capturedFirstFrame { firstFrameMs = ms; capturedFirstFrame = true }
         }
         // Reset so the measured window excludes warmup frames.
         session.renderer.resetPerformanceMetrics()
@@ -1393,16 +1410,10 @@ final class Operations: @unchecked Sendable {
         // Measured frames: sample peak GPU memory each frame.
         var peakMem = 0
         for i in 0..<measured {
-            _ = drawOneFrame(frameIndex: warmup + i, totalFrames: warmup + measured)
+            let (ms, gpuErr) = drawOneFrame(frameIndex: warmup + i, totalFrames: warmup + measured)
+            if let gpuErr { return renderFailed("benchmark frame \(warmup + i): \(gpuErr)") }
+            if !capturedFirstFrame { firstFrameMs = ms; capturedFirstFrame = true }
             peakMem = max(peakMem, device.currentAllocatedSize)
-        }
-
-        // Restore root translations so subsequent ops on this session see rest pose.
-        if animated {
-            for (idx, root) in rootNodes.enumerated() {
-                root.translation = originalTranslations[idx]
-                root.updateWorldTransform()
-            }
         }
 
         let metrics = session.renderer.getPerformanceMetrics()
