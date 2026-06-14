@@ -575,7 +575,18 @@ let package = Package(
             // swing_springbone_* (~0.98) — pre-existing 0.18.1→0.20.0
             // changes, not the cull fix; goldens need re-baselining when
             // this pin lands.
-            revision: "39e65f041a9786c79080f4afc6e4911f4bf4481b"
+            // 0.21.0-rc.3 (985bd7c, pre-released 2026-06-14) — bumps onto the
+            // 0.21.0 line (rc.1 MToon function-constants respecialization +
+            // rc.2) and adds the outline-pass PerformanceTracker fix
+            // (recordDrawCall in renderMToonOutlines, PR #353) so the benchmark
+            // draw_call/triangle metrics count the MToon outline pass — VMK
+            // previously rendered the outline but under-counted it (1/2304
+            // instead of 2/4608). Combined with the outlines-on default flip,
+            // goldens require a full re-baseline (the 31 MToon-feature cells
+            // from the rc.1 respecialization + the now-present outline on every
+            // default-derived asset). See docs/findings.md 2026-06-14. Prior
+            // pin: 0.20.1 (39e65f0).
+            revision: "985bd7cbc560c967f979c460dcaf30675b15ba24"
         ),
     ],
     targets: [
