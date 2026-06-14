@@ -501,6 +501,176 @@ pub struct RenderSequenceResult {
     pub muxed_path: Option<String>,
 }
 
+// ---- Benchmark op (performance metrics, observational v1) ----
+// Design: docs/superpowers/specs/2026-06-14-performance-metrics-design.md
+//
+// NAMING EXCEPTION: the contract's plan/execute convention is `plan_*` /
+// `execute_*`. The benchmark ops use noun_verb (`benchmark_plan` /
+// `benchmark_execute`) by maintainer directive so the pair groups under the
+// `benchmark` noun. Documented in docs/operation-contract.md.
+
+fn default_warmup_frames() -> u32 {
+    30
+}
+
+fn default_measured_frames() -> u32 {
+    300
+}
+
+/// Params for both `benchmark_plan` (cheap cost preview, no rendering) and
+/// `benchmark_execute` (the measured run). The adapter renders
+/// `warmup_frames` discarded frames to warm shader/pipeline caches, then
+/// `measured_frames` steady-state frames over which it aggregates
+/// timing/structural/geometry/resource metrics.
+///
+/// `animate_root_transform`, when present, drives a linear root translation
+/// across the measured window so spring-bone cost is exercised; absent means
+/// a static scene. See `docs/methodology.md`, "Benchmark protocol".
+///
+/// Adapters that cannot benchmark MUST return `-32000 Unimplemented` with
+/// `data: { phase: "perf-v1" }`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkParams {
+    pub session_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub color_space: ColorSpace,
+    pub msaa: u8,
+    pub output_type: OutputType,
+    #[serde(default = "default_warmup_frames")]
+    pub warmup_frames: u32,
+    #[serde(default = "default_measured_frames")]
+    pub measured_frames: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animate_root_transform: Option<RootTransformAnimation>,
+}
+
+/// Result of `benchmark_plan`: a cost preview, no rendering performed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BenchmarkPlanResult {
+    pub estimated_frames: u32,
+    pub estimated_seconds: f32,
+    pub scene_summary: String,
+}
+
+/// Which measurement blocks an adapter actually populated. Cleaner than a
+/// per-field Unimplemented for partial adapters (e.g. structural-only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PerfCapability {
+    Timing,
+    Structural,
+    Geometry,
+    Resources,
+}
+
+/// Benchmark protocol echoed back so the report is self-describing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PerfProtocol {
+    pub warmup_frames: u32,
+    pub measured_frames: u32,
+    pub animated: bool,
+}
+
+/// Which wall clock the timing layer used. `Cpu` is the documented fallback
+/// for runtimes that cannot measure GPU submit-to-complete (e.g. browser).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PerfClock {
+    GpuCpu,
+    Cpu,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FrameTimePercentiles {
+    pub p50: f32,
+    pub p95: f32,
+    pub p99: f32,
+}
+
+/// Hardware-dependent timing layer — only comparable on a matching host.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PerfTiming {
+    pub frame_time_ms: FrameTimePercentiles,
+    pub fps_mean: f32,
+    pub clock: PerfClock,
+}
+
+/// Hardware-independent structural layer — per-frame means over the measured
+/// window. The cross-renderer "familiar" comparison axis.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PerfStructural {
+    pub draw_calls: f32,
+    pub state_changes: f32,
+    pub texture_bindings: f32,
+}
+
+/// Hardware-independent geometry layer — per-frame submission counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerfGeometry {
+    pub triangles: u64,
+    pub vertices: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PerfMemoryKind {
+    Gpu,
+    Host,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PerfResources {
+    pub peak_memory_bytes: u64,
+    pub memory_kind: PerfMemoryKind,
+    pub load_ms: f32,
+    pub first_frame_ms: f32,
+}
+
+/// Host/hardware anchor. Mirrors the goldens manifest's `SubmissionMetadata`
+/// fields so timing numbers are interpretable and comparable only against a
+/// matching host.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PerfHost {
+    pub os: String,
+    pub os_version: String,
+    pub gpu_vendor: String,
+    pub gpu_model: String,
+    pub driver_version: String,
+    pub build_flags: String,
+}
+
+/// What `benchmark_execute` returns — the measurement plus host, minus the
+/// runner-owned identity (test_id / renderer_name / asset_blake3, which the
+/// runner adds when composing the on-disk `PerfReport`). This split mirrors
+/// the contract's "BLAKE3 centralized in the runner" decision.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PerfMeasurement {
+    pub protocol: PerfProtocol,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<PerfTiming>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structural: Option<PerfStructural>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<PerfGeometry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resources: Option<PerfResources>,
+    pub host: PerfHost,
+    pub capabilities: Vec<PerfCapability>,
+}
+
+/// The on-disk report the runner writes: runner-owned identity + the adapter's
+/// measurement flattened into a single JSON object (the schema in the design
+/// doc). Written to `<output_dir>/<test_id>_<renderer>.perf.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PerfReport {
+    pub test_id: String,
+    pub renderer_name: String,
+    pub asset_blake3: String,
+    #[serde(flatten)]
+    pub measurement: PerfMeasurement,
+}
+
 #[cfg(test)]
 mod ccd_capture_positions_tests {
     use super::*;
@@ -738,5 +908,94 @@ mod tests {
         let s = serde_json::to_string(&r).unwrap();
         let back: DumpBonePositionsResult = serde_json::from_str(&s).unwrap();
         assert_eq!(back, r);
+    }
+}
+
+#[cfg(test)]
+mod benchmark_tests {
+    use super::*;
+
+    #[test]
+    fn benchmark_params_defaults_frame_counts_and_omits_animation() {
+        let j = r#"{"session_id":"s","width":64,"height":64,
+            "color_space":"Linear","msaa":1,"output_type":"Color"}"#;
+        let p: BenchmarkParams = serde_json::from_str(j).unwrap();
+        assert_eq!(p.warmup_frames, 30);
+        assert_eq!(p.measured_frames, 300);
+        assert!(p.animate_root_transform.is_none());
+    }
+
+    #[test]
+    fn perf_enums_serialize_snake_case() {
+        assert_eq!(
+            serde_json::to_value(PerfCapability::Structural).unwrap(),
+            "structural"
+        );
+        assert_eq!(serde_json::to_value(PerfClock::GpuCpu).unwrap(), "gpu_cpu");
+        assert_eq!(serde_json::to_value(PerfMemoryKind::Host).unwrap(), "host");
+    }
+
+    #[test]
+    fn benchmark_plan_result_roundtrip() {
+        let r = BenchmarkPlanResult {
+            estimated_frames: 330,
+            estimated_seconds: 5.5,
+            scene_summary: "static 64x64".into(),
+        };
+        let s = serde_json::to_string(&r).unwrap();
+        assert_eq!(serde_json::from_str::<BenchmarkPlanResult>(&s).unwrap(), r);
+    }
+
+    #[test]
+    fn perf_report_flattens_identity_and_measurement_and_omits_empty_blocks() {
+        let report = PerfReport {
+            test_id: "mtoon_00".into(),
+            renderer_name: "mock".into(),
+            asset_blake3: "blake3:ab".into(),
+            measurement: PerfMeasurement {
+                protocol: PerfProtocol {
+                    warmup_frames: 30,
+                    measured_frames: 300,
+                    animated: false,
+                },
+                timing: None,
+                structural: Some(PerfStructural {
+                    draw_calls: 1.0,
+                    state_changes: 0.0,
+                    texture_bindings: 1.0,
+                }),
+                geometry: Some(PerfGeometry {
+                    triangles: 2,
+                    vertices: 4,
+                }),
+                resources: None,
+                host: PerfHost {
+                    os: "mock".into(),
+                    os_version: "0".into(),
+                    gpu_vendor: "none".into(),
+                    gpu_model: "cpu".into(),
+                    driver_version: "0".into(),
+                    build_flags: String::new(),
+                },
+                capabilities: vec![PerfCapability::Structural, PerfCapability::Geometry],
+            },
+        };
+        let v: serde_json::Value = serde_json::to_value(&report).unwrap();
+        // identity is flattened to the top level
+        assert_eq!(v["test_id"], "mtoon_00");
+        assert_eq!(v["renderer_name"], "mock");
+        assert_eq!(v["asset_blake3"], "blake3:ab");
+        // measurement merged at top level (no `measurement` wrapper key)
+        assert!(v.get("measurement").is_none());
+        assert_eq!(v["protocol"]["measured_frames"], 300);
+        assert_eq!(v["structural"]["draw_calls"], 1.0);
+        assert_eq!(v["geometry"]["triangles"], 2);
+        assert_eq!(v["capabilities"][0], "structural");
+        // unpopulated blocks are omitted entirely
+        assert!(v.get("timing").is_none());
+        assert!(v.get("resources").is_none());
+        // round-trips
+        let back: PerfReport = serde_json::from_value(v).unwrap();
+        assert_eq!(back, report);
     }
 }
