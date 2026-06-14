@@ -47,6 +47,27 @@ namespace Conformance
                 p.ambient.color[2] * p.ambient.intensity);
         }
 
+        /// Honor the plan's cast_shadows / receive_shadows on the loaded VRM's renderers.
+        /// When cast_shadows is false, set shadowCastingMode = Off so Unity does not
+        /// dispatch a ShadowCaster pass (which would otherwise inflate benchmark draw-call
+        /// counts with non-visible geometry). When receive_shadows is false, set
+        /// receiveShadows = false. Mirrors the light-level shadow setting already applied
+        /// in ConfigureLighting.
+        public static void ConfigureShadowCasting(GameObject vrmGo, Manifest.LightingDto p)
+        {
+            foreach (var r in vrmGo.GetComponentsInChildren<Renderer>(includeInactive: true))
+            {
+                if (!p.cast_shadows)
+                {
+                    r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                }
+                if (!p.receive_shadows)
+                {
+                    r.receiveShadows = false;
+                }
+            }
+        }
+
         public class UnsupportedFeatureException : System.Exception
         {
             public string Feature { get; }
