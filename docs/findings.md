@@ -2,6 +2,28 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-06-14 (benchmark structural divergence: default asset draw-call + triangle count — outline-pass hypothesis) — **OPEN: UniVRM (golden reference) reports 3 draw calls / 4610 triangles/frame for the default avatar; VMK and three-vrm both report 1 draw call / 2304 triangles. Hypothesis: MToon outline pass in UniVRM. Triage as "VMK/three-vrm differ from UniVRM."**
+
+**Observation.** Benchmarking the default avatar (`emit-default`, the suite's canonical baseline) across three adapters on the structural/geometry layer of the new `benchmark_execute` op yields a sharp divergence:
+
+| renderer | draw_calls | triangles | vertices |
+|---|---|---|---|
+| **UniVRM** (golden reference) | 3.0 | 4610 | 2454 |
+| **VMK** | 1.0 | 2304 | — |
+| **three-vrm** | 1.0 | 2304 | — |
+
+All three used the identical asset, identical scene config (camera / lighting / post from the asset's generated `test.yaml`), and `tone_mapping: none`. The ~2× triangle count + extra draw calls appear consistently across the measured window (per-frame means, 300 measured frames after 30 warmup).
+
+**Signal source.** The structural and geometry layers of `benchmark_execute` are hardware-independent and deterministic — they are explicitly **not** the timing layer. This divergence is not a host-speed difference; it is a count difference in geometry submitted to the GPU. Numbers are reproducible from the per-test `*.perf.json` files written by `vrm-runner benchmark-execute` (VMK/three-vrm) and `execute-test-batch --benchmark` (UniVRM). See `docs/superpowers/specs/2026-06-14-performance-metrics-design.md` for the methodology pins (especially the structural-vs-timing layer distinction).
+
+**Hypothesis.** The ~2× triangle count and 2 extra draw calls in UniVRM are consistent with an MToon **outline pass**: the outline technique inflates the mesh hull and re-renders it as a separate draw call, roughly doubling submitted triangles and adding at least one extra draw call (one per material with outlines enabled). VMK and three-vrm appear not to render an outline pass for this asset's configuration — either the default asset does not enable outlines, or those renderers skip the outline path and are not counting it.
+
+**Why it matters.** Per `docs/methodology.md`, structural counts are the cross-renderer "familiar" comparison axis — hardware-independent and designed to be similar across renderers for the same asset. A renderer that skips the outline pass would diverge both visually (missing outline on the avatar) and structurally (lower draw-call / triangle count). Applying the golden-reference convention: "VMK and three-vrm differ from UniVRM" on this axis. If the default asset is expected to render outlines (i.e. `outlineWidthMode` is not `none` and `outlineWidth > 0`), then VMK and three-vrm have a spec fidelity gap on outline rendering. If the default asset has outlines effectively disabled, the question becomes why UniVRM submits double geometry. Either way the divergence is real.
+
+**Status / next steps.** **OPEN — needs confirmation.** Two immediate checks: (1) inspect the generated default asset's MToon material for `outlineWidthMode` and `outlineWidthFactor`/`outlineWidth` to determine whether the asset spec expects an outline pass; (2) confirm whether VMK and three-vrm render any outline pass at all for any asset configuration (both adapters' `outline_width_mode != none` handling). If outlines are spec-expected on the default asset, file against VMK and three-vrm as a fidelity gap. If the default asset has outlines off, investigate why UniVRM is still submitting ~2× geometry and extra draw calls. Do **not** assert a verdict until the asset inspection is complete.
+
+**Discovery method.** Surfaced by the new `benchmark_execute` op (Task 4 of the performance-metrics slice, 2026-06-14). First cross-renderer structural divergence produced by the benchmark infra — the kind of finding the suite was designed to produce.
+
 ## 2026-06-13 (VMK 0.21.0-rc.1 verification) — **no perceptual regression: 397/428 A/B renders byte-identical to 0.20.1; the remaining 31 are sub-perceptual LSB drift (SSIM ≥ 0.9974, all pass the 0.85 gate) isolated entirely to MToon feature paths from the `mtoon_fragment_v2` function-constants specialization. Spring-bone output fully deterministic (5× byte-identical).**
 
 **What.** Regression-checked [VRMMetalKit 0.21.0-rc.1](https://github.com/arkavo-org/VRMMetalKit/releases/tag/0.21.0-rc.1) (`1ebe2ab`, pre-released 2026-06-13, cut from `main` 23 commits past 0.20.1) against the current pin 0.20.1 (`39e65f0`). The RC is a performance wave: parallel intra-mesh primitive decode, spring-bone sleep, batched morph dispatch, constraint cache + morph/skin recompute gates, an opt-in opaque depth prepass (#195, default off), outline pipeline bind dedup (#192), and — the one render-affecting surface here — **`mtoon_fragment_v2` specialized via Metal function constants** (`ac1e6b5`, shader hash refreshed; also in `40c5fe9`).

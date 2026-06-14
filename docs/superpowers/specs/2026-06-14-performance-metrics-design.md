@@ -115,7 +115,7 @@ PerfReport {
 |---|---|---|---|---|---|
 | **VMK** (Swift/Metal) | ✅ | ✅ | ✅ | ✅ (gpu) | `PerformanceTracker` driven through the existing `drawOffscreenHeadless` loop; `CACurrentMediaTime` for load/first-frame; Metal allocation for peak memory — **implemented 2026-06-14, verified on M4 Max** |
 | **three-vrm** (TS/Playwright) | ✅ (cpu) | ✅ (draw_calls only) | ✅ (triangles only) | host mem | `renderer.info.render.{calls,triangles}`, `performance.now()`, `performance.memory.usedJSHeapSize` — **implemented 2026-06-14**; `state_changes`/`texture_bindings`/`vertices` omitted (three.js does not instrument them; Rust `PerfStructural`/`PerfGeometry` sub-fields made optional in this slice to support honest partial reporting) |
-| **UniVRM** (C#/Unity) | — | ✅ | ✅ | host mem | `ProfilerRecorder` ("Draw Calls Count", "SetPass Calls Count", "Triangles Count", "Vertices Count"), `Profiler.GetTotalAllocatedMemoryLong` |
+| **UniVRM** (C#/Unity) | ✅ (cpu) | ✅ | ✅ | host mem | `ProfilerRecorder` ("Draw Calls Count", "SetPass Calls Count", "Triangles Count", "Vertices Count"), `Profiler.GetTotalAllocatedMemoryLong` — **implemented 2026-06-14**; flows through the batch protocol via `execute-test-batch --benchmark` (not per-op); `state_changes`/`texture_bindings` omitted — Unity does not expose them via ProfilerRecorder; UnityStats draw_calls/triangles/vertices/memory real in PlayMode only |
 | **mock** (Rust/CPU) | — | ✅ (deterministic) | ✅ | — | CPU-rasterizer counts; provides a no-GPU end-to-end path for the op + schema round-trip |
 | **godot** | `Unimplemented` | — | — | — | deferred to a later phase |
 | **babylon** | `Unimplemented` | — | — | — | L3-blocked upstream |
