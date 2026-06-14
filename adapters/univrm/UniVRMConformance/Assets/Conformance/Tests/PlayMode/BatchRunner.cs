@@ -22,6 +22,7 @@ using UniGLTF;
 using UnityEngine;
 using UnityEngine.TestTools;
 using UniVRM10;
+using Diag = System.Diagnostics;
 
 namespace Conformance.Tests.Play
 {
@@ -118,16 +119,21 @@ namespace Conformance.Tests.Play
             // Load — synchronous via ImmediateCaller works in PlayMode too.
             // canLoadVrm0X: true so that VRM 0.x assets are accepted and
             // auto-migrated to 1.0 internal representation (Task 28).
+            // loadMs is used by the benchmark branch to populate resources.load_ms.
             System.Threading.Tasks.Task<Vrm10Instance> loadTask = null;
             Exception loadException = null;
+            float loadMs = 0f;
             try
             {
+                var loadSw = Diag.Stopwatch.StartNew();
                 loadTask = Vrm10.LoadPathAsync(
                     t.vrm_path,
                     canLoadVrm0X: true,
                     showMeshes: true,
                     awaitCaller: new ImmediateCaller(),
                     ct: System.Threading.CancellationToken.None);
+                loadSw.Stop();
+                loadMs = (float)loadSw.Elapsed.TotalMilliseconds;
             }
             catch (Exception e)
             {
@@ -251,6 +257,12 @@ namespace Conformance.Tests.Play
             }
 
             // Render phase — has finally for guaranteed cleanup.
+            // When a benchmark is requested we still perform one normal render
+            // (so output_path / status are populated), THEN run the warmup +
+            // measured loop below.  The benchmark needs cam + vrm alive, so
+            // cleanup is deferred to after the benchmark coroutine when
+            // benchmark is active.
+            bool hasBenchmark = t.benchmark != null && t.benchmark.measured_frames > 0;
             try
             {
                 var outputPath = Path.Combine(outputDir, t.test_id + ".png");
@@ -269,9 +281,29 @@ namespace Conformance.Tests.Play
             catch (Exception e)
             {
                 result = ErrorEntry(t.test_id, -32002, "RenderFailed", "L4", e.ToString());
+                hasBenchmark = false; // skip benchmark on render failure
             }
             finally
             {
+                // When no benchmark: release resources now (original behaviour).
+                // When benchmark succeeded the render phase: release AFTER the loop.
+                if (!hasBenchmark || result == null || result.status != "ok")
+                {
+                    if (cameraGo != null) UnityEngine.Object.DestroyImmediate(cameraGo);
+                    if (lightGo != null) UnityEngine.Object.DestroyImmediate(lightGo);
+                    if (vrmGo != null) UnityEngine.Object.DestroyImmediate(vrmGo);
+                }
+            }
+
+            // Benchmark loop — yields require being outside try/catch (C# iterator
+            // restriction). cam + vrm are still alive when hasBenchmark is true.
+            if (hasBenchmark && result != null && result.status == "ok")
+            {
+                Manifest.PerfMeasurementDto benchMeasurement = null;
+                yield return BenchmarkCo(t, cam, vrm, loadMs, m => benchMeasurement = m);
+                result.measurement = benchMeasurement;
+
+                // Release resources now that the benchmark loop is done.
                 if (cameraGo != null) UnityEngine.Object.DestroyImmediate(cameraGo);
                 if (lightGo != null) UnityEngine.Object.DestroyImmediate(lightGo);
                 if (vrmGo != null) UnityEngine.Object.DestroyImmediate(vrmGo);
@@ -425,6 +457,155 @@ namespace Conformance.Tests.Play
             });
         }
 
+        // Warmup + measured render loop for a benchmark entry.
+        // Runs outside any try/catch so we can yield between frames.
+        // cam and vrm are alive when this coroutine runs.
+        // animate: lerps the VRM root along a canonical ±0.5 m Z axis arc,
+        // mirroring the swing-sweep excitation pattern. Static pose is
+        // rendered when animate is false (or spring-bone unavailable).
+        private IEnumerator BenchmarkCo(
+            Manifest.TestEntryDto t,
+            Camera cam,
+            UniVRM10.Vrm10Instance vrm,
+            float loadMs,
+            Action<Manifest.PerfMeasurementDto> setMeasurement)
+        {
+            var b = t.benchmark;
+            int warmupFrames = b.warmup_frames;
+            int measuredFrames = b.measured_frames;
+
+            var frameTimesMs = new List<float>(measuredFrames);
+            long peakMem = 0;
+            float firstFrameMs = 0f;
+            bool capturedFirst = false;
+            long drawSum = 0, triSum = 0, vertSum = 0;
+
+            // Animate setup: canonical ±0.5 m Z sweep (glTF → Unity: Z-flip).
+            var origPosition = vrm.transform.position;
+            var startV = origPosition + new Vector3(0f, 0f, 0.5f);  // glTF Z- → Unity Z+
+            var endV   = origPosition + new Vector3(0f, 0f, -0.5f); // glTF Z+ → Unity Z-
+            var runtime = vrm.Runtime;
+            bool doAnimate = b.animate && Application.isPlaying;
+
+            // ---- Warmup frames (discarded) ----
+            for (int i = 0; i < warmupFrames; i++)
+            {
+                if (doAnimate)
+                {
+                    float ti = warmupFrames > 1 ? (float)i / (warmupFrames - 1) : 0f;
+                    vrm.transform.position = Vector3.Lerp(startV, endV, ti);
+                    if (runtime != null && runtime.SpringBone != null)
+                        runtime.SpringBone.Process(1f / 60f);
+                }
+
+                var sw = Diag.Stopwatch.StartNew();
+                cam.Render();
+                sw.Stop();
+                float ms = (float)sw.Elapsed.TotalMilliseconds;
+                if (!capturedFirst) { firstFrameMs = ms; capturedFirst = true; }
+
+                peakMem = Math.Max(peakMem,
+                    UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong());
+                yield return null;
+            }
+
+            // ---- Measured frames ----
+            for (int i = 0; i < measuredFrames; i++)
+            {
+                if (doAnimate)
+                {
+                    float ti = measuredFrames > 1 ? (float)i / (measuredFrames - 1) : 0f;
+                    vrm.transform.position = Vector3.Lerp(startV, endV, ti);
+                    if (runtime != null && runtime.SpringBone != null)
+                        runtime.SpringBone.Process(1f / 60f);
+                }
+
+                var sw = Diag.Stopwatch.StartNew();
+                cam.Render();
+                sw.Stop();
+                frameTimesMs.Add((float)sw.Elapsed.TotalMilliseconds);
+
+#if UNITY_EDITOR
+                drawSum += UnityEditor.UnityStats.drawCalls;
+                triSum  += UnityEditor.UnityStats.triangles;
+                vertSum += UnityEditor.UnityStats.vertices;
+#endif
+
+                peakMem = Math.Max(peakMem,
+                    UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong());
+                yield return null;
+            }
+
+            // Restore root position.
+            vrm.transform.position = origPosition;
+
+            // Capture first_frame_ms from measured[0] if warmup was empty.
+            if (!capturedFirst && frameTimesMs.Count > 0)
+                firstFrameMs = frameTimesMs[0];
+
+            // ---- Statistics ----
+            frameTimesMs.Sort();
+            float meanMs = 0f;
+            foreach (var v in frameTimesMs) meanMs += v;
+            meanMs = frameTimesMs.Count > 0 ? meanMs / frameTimesMs.Count : 0f;
+            float p50 = Percentile(frameTimesMs, 0.50f);
+            float p95 = Percentile(frameTimesMs, 0.95f);
+            float p99 = Percentile(frameTimesMs, 0.99f);
+
+            float avgDrawCalls = measuredFrames > 0 ? (float)drawSum / measuredFrames : 0f;
+            long  avgTriangles = measuredFrames > 0 ? triSum / measuredFrames : 0L;
+            long  avgVertices  = measuredFrames > 0 ? vertSum / measuredFrames : 0L;
+
+            var measurement = new Manifest.PerfMeasurementDto
+            {
+                protocol = new Manifest.PerfProtocolDto
+                {
+                    warmup_frames   = warmupFrames,
+                    measured_frames = measuredFrames,
+                    animated        = doAnimate,
+                },
+                timing = new Manifest.PerfTimingDto
+                {
+                    frame_time_ms = new Manifest.PerfFrameTimeDto
+                    {
+                        p50 = p50,
+                        p95 = p95,
+                        p99 = p99,
+                    },
+                    fps_mean = meanMs > 0f ? 1000f / meanMs : 0f,
+                    clock    = "cpu",
+                },
+                structural = new Manifest.PerfStructuralDto
+                {
+                    draw_calls = avgDrawCalls,
+                },
+                geometry = new Manifest.PerfGeometryDto
+                {
+                    triangles = avgTriangles,
+                    vertices  = avgVertices,
+                },
+                resources = new Manifest.PerfResourcesDto
+                {
+                    peak_memory_bytes = peakMem,
+                    memory_kind       = "host",
+                    load_ms           = loadMs,
+                    first_frame_ms    = firstFrameMs,
+                },
+                host = new Manifest.PerfHostDto
+                {
+                    os             = "macOS",
+                    os_version     = SystemInfo.operatingSystem,
+                    gpu_vendor     = SystemInfo.graphicsDeviceVendor,
+                    gpu_model      = SystemInfo.graphicsDeviceName,
+                    driver_version = SystemInfo.graphicsDeviceVersion,
+                    build_flags    = "",
+                },
+                capabilities = new string[] { "timing", "structural", "geometry", "resources" },
+            };
+
+            setMeasurement(measurement);
+        }
+
         private static Manifest.EntryDto ErrorEntry(string test_id, int code, string label, string phase, string detail)
         {
             const int max = 1000;
@@ -472,6 +653,14 @@ namespace Conformance.Tests.Play
                 outSprings.Add(new Manifest.SpringPositionsDto { name = name, joint_positions = flat.ToArray() });
             }
             return outSprings.ToArray();
+        }
+
+        // Nearest-rank percentile on an already-sorted list.
+        private static float Percentile(List<float> sorted, float q)
+        {
+            if (sorted.Count == 0) return 0f;
+            int idx = Math.Min(sorted.Count - 1, (int)(q * (sorted.Count - 1)));
+            return sorted[idx];
         }
 
         private static List<string> ExtractAdapterArgs()

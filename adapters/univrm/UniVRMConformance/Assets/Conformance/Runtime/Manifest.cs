@@ -40,6 +40,7 @@ namespace Conformance
             public PhysicsDto physics;
             public AnimationDto animation;
             public RenderSequenceDto render_sequence;
+            public BenchmarkDto benchmark;
         }
 
         [Serializable]
@@ -181,6 +182,8 @@ namespace Conformance
             public RenderSequenceFrameOutputDto[] frames;
             public float duration_seconds;
             public float frame_hz_achieved;
+            // Benchmark measurement. Null for non-benchmark entries.
+            public PerfMeasurementDto measurement;
         }
 
         [Serializable]
@@ -221,6 +224,96 @@ namespace Conformance
             public string feature;
             public string value;
             public string[] supported;
+        }
+
+        // ============== benchmark DTOs (runner → Unity request; Unity → runner result) ==============
+
+        /// <summary>
+        /// Benchmark parameters stamped on a test entry by the runner when
+        /// `execute-test-batch --benchmark` is used. Unity runs a warmup+measured
+        /// render loop and returns a PerfMeasurementDto on the result entry.
+        /// </summary>
+        [Serializable]
+        public class BenchmarkDto
+        {
+            public int warmup_frames;
+            public int measured_frames;
+            public bool animate;
+        }
+
+        [Serializable]
+        public class PerfFrameTimeDto
+        {
+            public float p50;
+            public float p95;
+            public float p99;
+        }
+
+        [Serializable]
+        public class PerfTimingDto
+        {
+            public PerfFrameTimeDto frame_time_ms;
+            public float fps_mean;
+            public string clock; // "cpu"
+        }
+
+        /// <summary>
+        /// Structural metrics. ONLY draw_calls is declared — state_changes and
+        /// texture_bindings are not exposed by Unity, so they are intentionally
+        /// absent here to avoid emitting false-zero values. Absent C# field →
+        /// absent JSON key → Rust reads None (honesty principle).
+        /// </summary>
+        [Serializable]
+        public class PerfStructuralDto
+        {
+            public float draw_calls; // ONLY draw_calls — state_changes/texture_bindings NOT declared
+        }
+
+        [Serializable]
+        public class PerfGeometryDto
+        {
+            public long triangles;
+            public long vertices; // UnityStats.vertices IS available
+        }
+
+        [Serializable]
+        public class PerfResourcesDto
+        {
+            public long peak_memory_bytes;
+            public string memory_kind; // "host"
+            public float load_ms;
+            public float first_frame_ms;
+        }
+
+        [Serializable]
+        public class PerfHostDto
+        {
+            public string os;
+            public string os_version;
+            public string gpu_vendor;
+            public string gpu_model;
+            public string driver_version;
+            public string build_flags;
+        }
+
+        [Serializable]
+        public class PerfProtocolDto
+        {
+            public int warmup_frames;
+            public int measured_frames;
+            public bool animated;
+        }
+
+        [Serializable]
+        public class PerfMeasurementDto
+        {
+            public PerfProtocolDto protocol;
+            public PerfTimingDto timing;
+            public PerfStructuralDto structural;
+            public PerfGeometryDto geometry;
+            public PerfResourcesDto resources;
+            public PerfHostDto host;
+            public string[] capabilities;
         }
     }
 }
