@@ -239,6 +239,73 @@ pub fn dump_look_at_state(
     })
 }
 
+/// Deterministic benchmark measurement for the mock. No GPU and no real
+/// scene graph, so structural/geometry counts are fixed synthetic values
+/// (one draw call over a 2-triangle quad). Timing and resources are omitted —
+/// CPU-only timing is not a conformance signal. Determinism makes this a
+/// stable E2E + schema round-trip fixture (mirrors `synthetic_spring_chain`).
+fn mock_measurement(params: &ops::BenchmarkParams) -> ops::PerfMeasurement {
+    ops::PerfMeasurement {
+        protocol: ops::PerfProtocol {
+            warmup_frames: params.warmup_frames,
+            measured_frames: params.measured_frames,
+            animated: params.animate_root_transform.is_some(),
+        },
+        timing: None,
+        structural: Some(ops::PerfStructural {
+            draw_calls: 1.0,
+            state_changes: 0.0,
+            texture_bindings: 1.0,
+        }),
+        geometry: Some(ops::PerfGeometry {
+            triangles: 2,
+            vertices: 4,
+        }),
+        resources: None,
+        host: ops::PerfHost {
+            os: "mock".into(),
+            os_version: "0".into(),
+            gpu_vendor: "none".into(),
+            gpu_model: "cpu".into(),
+            driver_version: "0".into(),
+            build_flags: String::new(),
+        },
+        capabilities: vec![
+            ops::PerfCapability::Structural,
+            ops::PerfCapability::Geometry,
+        ],
+    }
+}
+
+pub fn benchmark_plan(
+    registry: &mut SessionRegistry,
+    params: ops::BenchmarkParams,
+) -> Result<ops::BenchmarkPlanResult, RpcError> {
+    let _session = registry
+        .get(&params.session_id)
+        .ok_or_else(|| invalid_session(&params.session_id))?;
+    let total = params.warmup_frames + params.measured_frames;
+    Ok(ops::BenchmarkPlanResult {
+        estimated_frames: total,
+        // Rough preview only; the mock does not really pace at 60 Hz.
+        estimated_seconds: total as f32 / 60.0,
+        scene_summary: format!(
+            "mock deterministic {}x{} msaa{}",
+            params.width, params.height, params.msaa
+        ),
+    })
+}
+
+pub fn benchmark_execute(
+    registry: &mut SessionRegistry,
+    params: ops::BenchmarkParams,
+) -> Result<ops::PerfMeasurement, RpcError> {
+    let _session = registry
+        .get(&params.session_id)
+        .ok_or_else(|| invalid_session(&params.session_id))?;
+    Ok(mock_measurement(&params))
+}
+
 pub fn render_sequence(
     registry: &mut SessionRegistry,
     params: ops::RenderSequenceParams,
@@ -590,5 +657,94 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code, -32602, "expected InvalidParams, got {err:?}");
+    }
+
+    #[test]
+    fn benchmark_execute_returns_deterministic_structural_and_geometry() {
+        let (mut registry, session_id) = make_test_session();
+        let params = ops::BenchmarkParams {
+            session_id,
+            width: 64,
+            height: 64,
+            color_space: ops::ColorSpace::Linear,
+            msaa: 1,
+            output_type: ops::OutputType::Color,
+            warmup_frames: 30,
+            measured_frames: 300,
+            animate_root_transform: None,
+        };
+        let m = benchmark_execute(&mut registry, params.clone()).unwrap();
+        assert_eq!(
+            m.capabilities,
+            vec![
+                ops::PerfCapability::Structural,
+                ops::PerfCapability::Geometry
+            ]
+        );
+        assert!(m.timing.is_none(), "mock reports no timing");
+        assert!(m.resources.is_none(), "mock reports no resources");
+        assert_eq!(m.geometry.unwrap().triangles, 2);
+        assert_eq!(m.protocol.measured_frames, 300);
+        assert!(!m.protocol.animated);
+        // Determinism: identical params -> identical measurement.
+        let m2 = benchmark_execute(&mut registry, params).unwrap();
+        assert_eq!(m, m2);
+    }
+
+    #[test]
+    fn benchmark_execute_reflects_animated_flag() {
+        let (mut registry, session_id) = make_test_session();
+        let params = ops::BenchmarkParams {
+            session_id,
+            width: 8,
+            height: 8,
+            color_space: ops::ColorSpace::Linear,
+            msaa: 1,
+            output_type: ops::OutputType::Color,
+            warmup_frames: 1,
+            measured_frames: 1,
+            animate_root_transform: Some(ops::RootTransformAnimation {
+                translation_start: [0.0, 0.0, 0.0],
+                translation_end: [0.0, 0.1, 0.0],
+            }),
+        };
+        let m = benchmark_execute(&mut registry, params).unwrap();
+        assert!(m.protocol.animated);
+    }
+
+    #[test]
+    fn benchmark_execute_on_unknown_session_is_invalid_params() {
+        let mut registry = SessionRegistry::default();
+        let params = ops::BenchmarkParams {
+            session_id: "ghost".into(),
+            width: 8,
+            height: 8,
+            color_space: ops::ColorSpace::Linear,
+            msaa: 1,
+            output_type: ops::OutputType::Color,
+            warmup_frames: 1,
+            measured_frames: 1,
+            animate_root_transform: None,
+        };
+        let err = benchmark_execute(&mut registry, params).unwrap_err();
+        assert_eq!(err.code, -32602);
+    }
+
+    #[test]
+    fn benchmark_plan_estimates_total_frames() {
+        let (mut registry, session_id) = make_test_session();
+        let params = ops::BenchmarkParams {
+            session_id,
+            width: 64,
+            height: 64,
+            color_space: ops::ColorSpace::Linear,
+            msaa: 1,
+            output_type: ops::OutputType::Color,
+            warmup_frames: 30,
+            measured_frames: 300,
+            animate_root_transform: None,
+        };
+        let plan = benchmark_plan(&mut registry, params).unwrap();
+        assert_eq!(plan.estimated_frames, 330);
     }
 }

@@ -92,6 +92,8 @@ fn dispatch(
         }
         "render" => json_result(handlers::render(registry, deser(params)?)),
         "render_sequence" => json_result(handlers::render_sequence(registry, deser(params)?)),
+        "benchmark_plan" => json_result(handlers::benchmark_plan(registry, deser(params)?)),
+        "benchmark_execute" => json_result(handlers::benchmark_execute(registry, deser(params)?)),
         "dispose" => json_result(handlers::dispose(registry, deser(params)?)),
         "step_physics" => json_result(handlers::step_physics(registry, params)),
         "reset_physics" => json_result(handlers::reset_physics(registry, params)),
