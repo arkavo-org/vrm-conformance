@@ -169,6 +169,7 @@ namespace Conformance.Tests.Play
                 lightGo = new GameObject("Directional");
                 var light = lightGo.AddComponent<Light>();
                 SceneSetup.ConfigureLighting(light, t.lighting);
+                SceneSetup.ConfigureShadowCasting(vrmGo, t.lighting);
 
                 // Spring-bone settle + animation. PlayMode == real work.
                 PhysicsDriver.Settle(vrm, t.physics);

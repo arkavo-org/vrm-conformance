@@ -143,7 +143,12 @@ pub struct MToonParams {
 
 impl MToonParams {
     /// Defaults match the VRMC_materials_mtoon spec defaults wherever
-    /// defined; otherwise a neutrally-rendering value.
+    /// defined; otherwise a value representative of typical VRM avatars.
+    /// `outline_width_mode` is `WorldCoordinates` with `outline_width_factor`
+    /// 0.05 — matching the sweep's `mtoon_outline_world_0p05` variant and
+    /// representative of avatars that ship with the MToon toon outline enabled.
+    /// The outline-OFF path is covered by the sweep's explicit
+    /// `mtoon_outline_none` variant (`OutlineWidthMode::None`, factor 0.0).
     pub fn defaults(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -157,8 +162,8 @@ impl MToonParams {
             parametric_rim_lift_factor: 0.0,
             rim_lighting_mix_factor: 0.0,
             matcap_factor: [1.0, 1.0, 1.0],
-            outline_width_mode: OutlineWidthMode::None,
-            outline_width_factor: 0.0,
+            outline_width_mode: OutlineWidthMode::WorldCoordinates,
+            outline_width_factor: 0.05,
             outline_color_factor: [0.0, 0.0, 0.0],
             outline_lighting_mix_factor: 1.0,
             uv_animation_scroll_x_speed_factor: 0.0,

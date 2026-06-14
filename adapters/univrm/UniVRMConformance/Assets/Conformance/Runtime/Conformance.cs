@@ -287,6 +287,7 @@ namespace Conformance
                 lightGo = new GameObject("Directional");
                 var light = lightGo.AddComponent<Light>();
                 SceneSetup.ConfigureLighting(light, t.lighting);
+                SceneSetup.ConfigureShadowCasting(vrmGo, t.lighting);
 
                 // L4: spring-bone physics — settle from rest pose, then
                 // optionally animate root transform while stepping
