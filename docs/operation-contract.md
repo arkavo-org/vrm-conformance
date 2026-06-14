@@ -331,6 +331,39 @@ Semantics (Task 35 enforces at runner level):
 
 Field is wire-omitted when absent (`#[serde(skip_serializing_if = "Option::is_none")]`).
 
+## Performance benchmark operations
+
+### `benchmark_plan` / `benchmark_execute` (performance metrics, v1 — observational)
+
+Measures per-renderer performance over a plan's scene. Two ops:
+
+- `benchmark_plan(BenchmarkParams) -> BenchmarkPlanResult` — cheap cost preview
+  (`estimated_frames`, `estimated_seconds`, `scene_summary`); renders nothing.
+- `benchmark_execute(BenchmarkParams) -> PerfMeasurement` — renders
+  `warmup_frames` discarded frames, then `measured_frames` steady-state frames,
+  aggregating metrics.
+
+**Naming exception:** these use noun_verb (`benchmark_*`) rather than the
+contract's usual `plan_*` / `execute_*` prefix, by maintainer directive, so the
+pair groups under the `benchmark` noun.
+
+**Identity is runner-owned.** `benchmark_execute` returns a `PerfMeasurement`
+(metrics + `host` + `capabilities`). The runner composes the on-disk
+`PerfReport` by adding `test_id`, `renderer_name`, and `asset_blake3`
+(`blake3:<hex>` of the `.vrm`), flattened with the measurement (serde flatten —
+the on-disk JSON has no `measurement` wrapper key; the measurement fields sit at
+the top level). This mirrors the "BLAKE3 centralized in the runner" rule.
+
+**Capabilities, not per-field Unimplemented.** Each measurement block
+(`timing` / `structural` / `geometry` / `resources`) is nullable; the
+`capabilities` array lists what was populated. A structural-only adapter omits
+`timing`. Adapters with no benchmark support at all return
+`-32000 Unimplemented` with `data: { phase: "perf-v1" }` (on both ops).
+
+`timing` is hardware-dependent (compare same-host only); `structural` /
+`geometry` are hardware-independent and are the cross-renderer comparison axis.
+See `docs/methodology.md`, "Benchmark protocol".
+
 ## Reserved operations (Phase 2+)
 
 Required to be **declared** by every adapter (`describe` lists them) but may return a structured `Unimplemented` error in v0.1:

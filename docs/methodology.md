@@ -371,3 +371,38 @@ Rules:
   Spatial's writer emits (see the findings entry on unregistered hips root
   motion). A fixture that fails `load_vrma` on any adapter is a finding
   (`docs/findings.md`), not a fixture bug to silently work around.
+
+## Benchmark protocol (performance metrics, observational v1)
+
+Performance is a conformance axis: a renderer should sit inside an expected,
+familiar envelope. Because adapters run on different runtimes/hardware, metrics
+split into two layers — **structural** (draw calls, state changes, geometry,
+count-based memory: hardware-independent, the cross-renderer "familiar" axis)
+and **timing** (frame-time percentiles, FPS, byte-valued memory:
+hardware-dependent, same-host only).
+
+Pins:
+
+- **Scene:** the plan's `output` block (width/height/color_space/msaa) and the
+  plan's camera/lighting/post. `tone_mapping: none` consistent with the
+  MToon-math pins.
+- **Frames:** 30 warmup frames discarded (shader/pipeline compile, cache warm),
+  then 300 measured steady-state frames (both configurable;
+  `--warmup-frames` / `--measured-frames`). VMK's internal baseline used 500;
+  300 is the suite default.
+- **Excitation:** static by default; `--animate` drives a small root
+  translation so spring-bone cost is exercised (`protocol.animated = true`).
+- **Determinism:** structural and geometry counts are deterministic and
+  host-independent — the comparison layer. Timing is non-deterministic and
+  host-bound.
+
+### Reference machine (timing anchor)
+
+VMK timing is anchored to a single declared host: **Apple M4 Max Mac Studio,
+128 GB RAM**. Xcode Cloud runs count as equivalent only on matching silicon.
+Timing numbers are interpreted same-host only; structural/geometry/count-based
+memory carry across renderers.
+
+v1 is **observational**: collect and report (`scripts/perf-report.sh` ->
+`goldens-cache/perf-report.json`, with a VMK-vs-golden-ref structural delta).
+No pass/fail gate — budgets are a deliberate later phase informed by v1 data.
