@@ -601,6 +601,101 @@
         }
       };
 
+      // Benchmark helper — warmup + measured frames, per-frame timing via
+      // performance.now(), draw_calls + triangles via renderer.info.render
+      // (autoReset=false so counters aren't reset between renders).
+      // Mirrors __render's color-space setup and __renderSequence's root-
+      // translation lerp when animate_root_transform is provided.
+      // Does NOT report state_changes, texture_bindings, or vertices —
+      // three.js does not instrument those. They are omitted, never faked as 0.
+      window.__benchmarkRender = function (params) {
+        ensureRenderer(params.width, params.height);
+        // Mirror __render's color-space setup.
+        if (params.color_space === "Linear") {
+          state.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+        } else {
+          state.renderer.outputColorSpace = THREE.SRGBColorSpace;
+        }
+
+        const r = state.renderer;
+        const warmup = params.warmup_frames | 0;
+        const measured = params.measured_frames | 0;
+        const art = params.animate_root_transform ?? null;
+        const animated = art !== null;
+
+        // If animated: snapshot original position for restoration.
+        let origX = 0, origY = 0, origZ = 0;
+        if (animated && state.vrm) {
+          origX = state.vrm.scene.position.x;
+          origY = state.vrm.scene.position.y;
+          origZ = state.vrm.scene.position.z;
+        }
+
+        r.info.autoReset = false;
+
+        let firstFrameMs = 0;
+        let capturedFirst = false;
+
+        // Render a single frame. tNorm in [0,1] drives root translation lerp.
+        const renderOnce = function (tNorm) {
+          // Mirror __renderSequence's root-translation lerp.
+          if (animated && state.vrm && art) {
+            const start = art.translation_start ?? [0, 0, 0];
+            const end = art.translation_end ?? [0, 0, 0];
+            state.vrm.scene.position.set(
+              start[0] + (end[0] - start[0]) * tNorm,
+              start[1] + (end[1] - start[1]) * tNorm,
+              start[2] + (end[2] - start[2]) * tNorm,
+            );
+          }
+          r.info.reset();
+          const t0 = performance.now();
+          if (state.vrm && state.vrm.update) state.vrm.update(1 / 60);
+          r.render(state.scene, state.camera);
+          const ms = performance.now() - t0;
+          if (!capturedFirst) { firstFrameMs = ms; capturedFirst = true; }
+          return ms;
+        };
+
+        // Warmup frames (tNorm=0 so root stays at start).
+        for (let i = 0; i < warmup; i++) renderOnce(0);
+
+        // Measured frames.
+        const frameTimes = [];
+        let drawCallsSum = 0, trianglesSum = 0;
+        for (let i = 0; i < measured; i++) {
+          const tNorm = measured > 1 ? i / (measured - 1) : 0;
+          frameTimes.push(renderOnce(tNorm));
+          drawCallsSum += r.info.render.calls;
+          trianglesSum += r.info.render.triangles;
+        }
+
+        r.info.autoReset = true;
+
+        // Restore original root position if animated.
+        if (animated && state.vrm) {
+          state.vrm.scene.position.set(origX, origY, origZ);
+        }
+
+        const jsHeap = (performance.memory && performance.memory.usedJSHeapSize) || null;
+
+        return {
+          frame_times_ms: frameTimes,
+          draw_calls_mean: measured ? drawCallsSum / measured : 0,
+          triangles_mean: measured ? trianglesSum / measured : 0,
+          js_heap_bytes: jsHeap,
+          first_frame_ms: firstFrameMs,
+          animated: animated,
+          gpu_model: (function () {
+            try {
+              const gl = r.getContext();
+              const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+              return dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "headless-chromium";
+            } catch (e) { return "headless-chromium"; }
+          })(),
+        };
+      };
+
       window.__rendererReady = true;
     </script>
   </body>

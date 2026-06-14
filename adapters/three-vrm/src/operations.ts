@@ -202,6 +202,14 @@ export async function dispatch(
         const result = await ctx.session.dumpLookAtState();
         return { ok: true, result };
       }
+      case "benchmark_plan": {
+        const result = await ctx.session.benchmarkPlan(params as any);
+        return { ok: true, result };
+      }
+      case "benchmark_execute": {
+        const result = await ctx.session.benchmarkExecute(params as any);
+        return { ok: true, result };
+      }
       default: {
         const phase = PHASE_BY_RESERVED_METHOD[method];
         if (phase) {
@@ -280,6 +288,8 @@ export function knownMethods(): string[] {
     "dump_humanoid_pose",
     "dump_expression_weights",
     "dump_look_at_state",
+    "benchmark_plan",
+    "benchmark_execute",
     ...Object.keys(PHASE_BY_RESERVED_METHOD),
   ];
 }

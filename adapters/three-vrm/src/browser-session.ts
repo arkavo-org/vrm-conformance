@@ -39,10 +39,15 @@ export class BrowserSession {
   // avatar at a time — so loading a new asset implicitly clears the previous.
   private currentAsset: LoadedAsset | null = null;
   private currentVrma: LoadedAsset | null = null;
+  /** Node-side wall-clock milliseconds for the last loadVrm call. */
+  private loadMs = 0;
 
   async start(): Promise<void> {
     if (this.browser) return;
-    this.browser = await chromium.launch({ headless: true });
+    this.browser = await chromium.launch({
+      headless: true,
+      args: ["--enable-precise-memory-info"],
+    });
     this.page = await this.browser.newPage();
 
     // Intercept all requests; serve `https://app.local/asset` from `currentAsset.diskPath`,
@@ -116,12 +121,14 @@ export class BrowserSession {
       throw new Error(`vrm not found: ${diskPath}`);
     }
     this.currentAsset = { diskPath };
+    const t0 = performance.now();
     await this.page.evaluate(
       ({ url }: { url: string }) =>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__loadVrm(url),
       { url: "https://app.local/asset" },
     );
+    this.loadMs = performance.now() - t0;
   }
 
   async setCamera(params: unknown): Promise<void> {
@@ -379,6 +386,99 @@ export class BrowserSession {
       await fs.mkdir(dir, { recursive: true });
     }
     await fs.writeFile(params.output_path, png);
+  }
+
+  async benchmarkPlan(p: {
+    warmup_frames?: number;
+    measured_frames?: number;
+    width?: number;
+    height?: number;
+  }): Promise<{ estimated_frames: number; estimated_seconds: number; scene_summary: string }> {
+    const warmup = p.warmup_frames ?? 30;
+    const measured = p.measured_frames ?? 300;
+    const total = warmup + measured;
+    return {
+      estimated_frames: total,
+      estimated_seconds: total / 60.0,
+      scene_summary: `three-vrm ${p.width ?? 0}x${p.height ?? 0}`,
+    };
+  }
+
+  async benchmarkExecute(p: {
+    width?: number;
+    height?: number;
+    color_space?: string;
+    warmup_frames?: number;
+    measured_frames?: number;
+    animate_root_transform?: unknown;
+  }): Promise<unknown> {
+    if (!this.page) throw new Error("no session loaded");
+    const warmup = p.warmup_frames ?? 30;
+    const measured = p.measured_frames ?? 300;
+    const raw = (await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (q) => (window as any).__benchmarkRender(q),
+      {
+        width: p.width ?? 256,
+        height: p.height ?? 256,
+        color_space: p.color_space ?? "Linear",
+        warmup_frames: warmup,
+        measured_frames: measured,
+        animate_root_transform: p.animate_root_transform ?? null,
+      },
+    )) as {
+      frame_times_ms: number[];
+      draw_calls_mean: number;
+      triangles_mean: number;
+      js_heap_bytes: number | null;
+      first_frame_ms: number;
+      animated: boolean;
+      gpu_model: string;
+    };
+
+    // Compute percentiles on Node side.
+    const sorted = [...raw.frame_times_ms].sort((a, b) => a - b);
+    const pct = (q: number) =>
+      sorted.length
+        ? sorted[Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1)))]
+        : 0;
+    const mean =
+      sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : 0;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const measurement: any = {
+      protocol: { warmup_frames: warmup, measured_frames: measured, animated: raw.animated },
+      timing: {
+        frame_time_ms: { p50: pct(0.5), p95: pct(0.95), p99: pct(0.99) },
+        fps_mean: mean > 0 ? 1000 / mean : 0,
+        clock: "cpu",
+      },
+      // state_changes and texture_bindings omitted — three.js does not instrument them.
+      structural: { draw_calls: raw.draw_calls_mean },
+      // vertices omitted — three.js does not expose a per-frame vertex counter.
+      geometry: { triangles: Math.round(raw.triangles_mean) },
+      host: {
+        os: process.platform,
+        os_version: process.version,
+        gpu_vendor: "Google",
+        gpu_model: raw.gpu_model,
+        driver_version: "0",
+        build_flags: "",
+      },
+      capabilities: ["timing", "structural", "geometry"],
+    };
+
+    if (raw.js_heap_bytes != null) {
+      measurement.resources = {
+        peak_memory_bytes: raw.js_heap_bytes,
+        memory_kind: "host",
+        load_ms: this.loadMs,
+        first_frame_ms: raw.first_frame_ms,
+      };
+      measurement.capabilities.push("resources");
+    }
+
+    return measurement;
   }
 
   async clearVrm(): Promise<void> {

@@ -302,6 +302,135 @@ test("dump_bone_positions with missing session_id returns InvalidParams (-32602)
   }
 });
 
+test("benchmark_plan returns estimated_frames = warmup + measured", async () => {
+  const h = spawnAdapter();
+  try {
+    const resp = await rpc(h, 1, "benchmark_plan", {
+      warmup_frames: 5,
+      measured_frames: 10,
+      width: 64,
+      height: 64,
+    });
+    assert.ok(!resp.error, `benchmark_plan failed: ${JSON.stringify(resp.error)}`);
+    const result = resp.result as {
+      estimated_frames: number;
+      estimated_seconds: number;
+      scene_summary: string;
+    };
+    assert.strictEqual(result.estimated_frames, 15, "estimated_frames must equal warmup + measured");
+    assert.ok(result.estimated_seconds > 0, "estimated_seconds must be > 0");
+    assert.ok(typeof result.scene_summary === "string", "scene_summary must be a string");
+  } finally {
+    h.stdin.end();
+    await new Promise((r) => h.child.on("exit", r));
+  }
+});
+
+test(
+  "benchmark_execute returns timing/structural/geometry capabilities with correct shape",
+  { timeout: 120_000 },
+  async () => {
+    const { mkdtempSync, existsSync } = await import("node:fs");
+    const { execFileSync } = await import("node:child_process");
+    const { tmpdir } = await import("node:os");
+    const generator = path.resolve(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "target",
+      "release",
+      "vrm-asset-generator",
+    );
+    if (!existsSync(generator)) {
+      // Skip gracefully if release binary absent (CI doesn't build release for TS tests).
+      return;
+    }
+    const assetDir = mkdtempSync(path.join(tmpdir(), "three-vrm-bench-asset-"));
+    execFileSync(generator, ["emit-default", "--id", "smoke", "--output-dir", assetDir], {
+      stdio: "inherit",
+    });
+    const vrmPath = path.join(assetDir, "smoke.vrm");
+
+    const h = spawnAdapter();
+    try {
+      // Phase 1 setup: load, camera, lighting, post-processing.
+      await rpc(h, 1, "load_vrm", { path: vrmPath });
+      await rpc(h, 2, "set_camera", {
+        position: [0, 1, 3],
+        target: [0, 1, 0],
+        fov_degrees: 30,
+        up: [0, 1, 0],
+      });
+      await rpc(h, 3, "set_lighting", {
+        directional: { dir: [0, -1, 0], color: [1, 1, 1], intensity: 1.0 },
+        ambient: { color: [1, 1, 1], intensity: 0.3 },
+        cast_shadows: false,
+      });
+      await rpc(h, 4, "set_post_processing", { tone_mapping: "None", exposure: 1.0 });
+
+      const benchResp = await rpc(h, 5, "benchmark_execute", {
+        width: 64,
+        height: 64,
+        color_space: "Srgb",
+        warmup_frames: 2,
+        measured_frames: 4,
+      });
+
+      assert.ok(
+        !benchResp.error,
+        `benchmark_execute failed: ${JSON.stringify(benchResp.error)}`,
+      );
+      const result = benchResp.result as {
+        capabilities: string[];
+        timing: {
+          frame_time_ms: { p50: number; p95: number; p99: number };
+          fps_mean: number;
+          clock: string;
+        };
+        structural: { draw_calls: number; state_changes?: number; texture_bindings?: number };
+        geometry: { triangles: number; vertices?: number };
+      };
+
+      // Capabilities must include timing, structural, geometry.
+      assert.ok(Array.isArray(result.capabilities), "capabilities must be an array");
+      assert.ok(result.capabilities.includes("timing"), 'capabilities must include "timing"');
+      assert.ok(result.capabilities.includes("structural"), 'capabilities must include "structural"');
+      assert.ok(result.capabilities.includes("geometry"), 'capabilities must include "geometry"');
+
+      // Timing shape and values.
+      assert.ok(result.timing.frame_time_ms.p50 >= 0, "p50 must be >= 0");
+      assert.ok(result.timing.frame_time_ms.p95 >= 0, "p95 must be >= 0");
+      assert.ok(result.timing.frame_time_ms.p99 >= 0, "p99 must be >= 0");
+      assert.strictEqual(result.timing.clock, "cpu", 'clock must be "cpu"');
+
+      // Structural: draw_calls present; state_changes / texture_bindings OMITTED.
+      assert.ok(result.structural.draw_calls >= 0, "draw_calls must be >= 0");
+      assert.strictEqual(
+        result.structural.state_changes,
+        undefined,
+        "state_changes must be omitted (three.js does not instrument it)",
+      );
+      assert.strictEqual(
+        result.structural.texture_bindings,
+        undefined,
+        "texture_bindings must be omitted (three.js does not instrument it)",
+      );
+
+      // Geometry: triangles present; vertices OMITTED.
+      assert.ok(result.geometry.triangles >= 0, "triangles must be >= 0");
+      assert.strictEqual(
+        result.geometry.vertices,
+        undefined,
+        "vertices must be omitted (three.js does not instrument it)",
+      );
+    } finally {
+      h.stdin.end();
+      await new Promise((r) => h.child.on("exit", r));
+    }
+  },
+);
+
 test(
   "dump_bone_positions after load_vrm returns springs array with correct shape",
   { timeout: 60_000 },
