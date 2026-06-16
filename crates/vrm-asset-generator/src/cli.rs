@@ -81,6 +81,41 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the MToon emissive sweep using the Khronos-ratified
+    /// `KHR_materials_emissive_strength` extension (8 assets) — the modern
+    /// companion the VRM 1.0 spec README lists as superseding the archived
+    /// `VRMC_materials_hdr_emissiveMultiplier`. Sweeps `emissiveStrength` ∈
+    /// {0, 0.25, 0.5, 0.75, 1, 2, 4} × white emissive, plus a zero-emissive
+    /// baseline that must NOT emit the extension. `emissive_multiplier` is
+    /// held at 1.0 so only the KHR extension is carried (isolated signal).
+    /// VRM 1.0-only (0.x has no glTF material-extension path).
+    EmitEmissiveStrengthSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Emit the MToon outline `outlineColorFactor` × `outlineLightingMixFactor`
+    /// sweep (9 assets, a 3×3 cross of colour {black, red, white} ×
+    /// lighting-mix {0, 0.5, 1}). Width mode/factor are held constant so
+    /// outline colour and how much scene lighting bleeds into it are the
+    /// only variables — the gap the existing outline sweeps leave open.
+    /// VRM 1.0-only (`outlineLightingMixFactor` has no 0.x materialProperties
+    /// equivalent).
+    EmitOutlineColorLightingMixSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        /// VRM spec version target: "0.x" or "1.0". Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_spec_version)]
+        spec_version: vrm_ops::SpecVersion,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the VRMC_vrm.firstPerson sweep (4 assets, one per spec
     /// `meshAnnotations[*].type` enum value: auto, both, thirdPersonOnly,
     /// firstPersonOnly). Standard third-person camera. Conformant
@@ -1102,6 +1137,106 @@ pub fn run(cli: Cli) -> Result<()> {
             } else {
                 println!(
                     "emitted {} emissive sweep assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
+        Cmd::EmitEmissiveStrengthSweep {
+            output_dir,
+            spec_version,
+            json: emit_json,
+        } => {
+            if spec_version == vrm_ops::SpecVersion::V0 {
+                anyhow::bail!(
+                    "emit-emissive-strength-sweep has no VRM 0.x form: \
+                     NotApplicableReason::KhrMaterialsEmissiveStrengthV1Only"
+                );
+            }
+            use crate::sweep::mtoon_emissive_strength_sweep;
+            std::fs::create_dir_all(&output_dir)?;
+            let assets = mtoon_emissive_strength_sweep();
+            let total = assets.len();
+            let mut emitted = Vec::new();
+            for (i, p) in assets.iter().enumerate() {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-emissive-strength-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": p.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+                }
+                let stem = output_dir.join(&p.id);
+                emit_with_sidecars(p, &stem)?;
+                emitted.push(stem);
+            }
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} emissive-strength sweep assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
+        Cmd::EmitOutlineColorLightingMixSweep {
+            output_dir,
+            spec_version,
+            json: emit_json,
+        } => {
+            if spec_version == vrm_ops::SpecVersion::V0 {
+                anyhow::bail!(
+                    "emit-outline-color-lighting-mix-sweep has no VRM 0.x form: \
+                     NotApplicableReason::OutlineLightingMixV1Only"
+                );
+            }
+            use crate::sweep::mtoon_outline_color_lightingmix_sweep;
+            std::fs::create_dir_all(&output_dir)?;
+            let assets = mtoon_outline_color_lightingmix_sweep();
+            let total = assets.len();
+            let mut emitted = Vec::new();
+            for (i, p) in assets.iter().enumerate() {
+                if emit_json {
+                    let evt = json!({
+                        "event": "progress",
+                        "op": "emit-outline-color-lighting-mix-sweep",
+                        "index": i,
+                        "total": total,
+                        "id": p.id
+                    });
+                    eprintln!("{}", serde_json::to_string(&evt)?);
+                } else {
+                    eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+                }
+                let stem = output_dir.join(&p.id);
+                emit_with_sidecars(p, &stem)?;
+                emitted.push(stem);
+            }
+            if emit_json {
+                let summary = json!({
+                    "ok": true,
+                    "count": emitted.len(),
+                    "output_dir": output_dir,
+                    "assets": emitted
+                });
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "emitted {} outline color×lighting-mix sweep assets to {}",
                     emitted.len(),
                     output_dir
                 );

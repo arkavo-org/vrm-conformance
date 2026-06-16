@@ -93,6 +93,14 @@ fn emit_vrm_inner(
     if emits_emissive_multiplier {
         extensions_used.push("VRMC_materials_hdr_emissiveMultiplier");
     }
+    // KHR_materials_emissive_strength is the modern Khronos-ratified
+    // companion; emitted on the material under the same non-zero-factor
+    // condition as `base_material`, so its extensionsUsed entry mirrors it.
+    let emits_khr_emissive_strength =
+        params.emissive_factor.iter().any(|&c| c != 0.0) && params.khr_emissive_strength.is_some();
+    if emits_khr_emissive_strength {
+        extensions_used.push("KHR_materials_emissive_strength");
+    }
     // KHR_texture_transform is referenced on every textureInfo whose
     // material carries the extension. We only emit it when the
     // transform is non-identity (see base_material), so the
@@ -3612,6 +3620,61 @@ mod extended_emit_integration_tests {
         assert!(
             !names.contains(&"VRMC_springBone_extended_collider"),
             "base sphere collider must NOT declare VRMC_springBone_extended_collider: {names:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod emissive_strength_extensions_used_tests {
+    use super::*;
+    use crate::params::MToonParams;
+    use camino::Utf8Path;
+    use tempfile::tempdir;
+
+    fn extensions_used_of(params: &MToonParams) -> Vec<String> {
+        let tmp = tempdir().unwrap();
+        let out = Utf8Path::from_path(tmp.path()).unwrap().join("emit.vrm");
+        emit_vrm(params, &out).unwrap();
+        let bytes = std::fs::read(&out).unwrap();
+        let json_chunk = crate::glb::extract_json_chunk(&bytes).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json_chunk).unwrap();
+        doc["extensionsUsed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect()
+    }
+
+    #[test]
+    fn default_params_do_not_declare_khr_emissive_strength() {
+        let used = extensions_used_of(&MToonParams::defaults("khr_default"));
+        assert!(
+            !used.iter().any(|e| e == "KHR_materials_emissive_strength"),
+            "default corpus must not declare KHR_materials_emissive_strength: {used:?}"
+        );
+    }
+
+    #[test]
+    fn nonzero_emissive_with_khr_strength_declares_extension_used() {
+        let mut p = MToonParams::defaults("khr_strength");
+        p.emissive_factor = [1.0, 1.0, 1.0];
+        p.khr_emissive_strength = Some(2.0);
+        let used = extensions_used_of(&p);
+        assert!(
+            used.iter().any(|e| e == "KHR_materials_emissive_strength"),
+            "extensionsUsed must declare KHR_materials_emissive_strength when emitted: {used:?}"
+        );
+    }
+
+    #[test]
+    fn zero_factor_with_khr_strength_does_not_declare_extension_used() {
+        let mut p = MToonParams::defaults("khr_zero");
+        p.khr_emissive_strength = Some(4.0); // factor stays [0,0,0]
+        let used = extensions_used_of(&p);
+        assert!(
+            !used.iter().any(|e| e == "KHR_materials_emissive_strength"),
+            "extensionsUsed must not declare KHR extension when factor is zero: {used:?}"
         );
     }
 }

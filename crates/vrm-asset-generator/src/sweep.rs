@@ -226,6 +226,60 @@ pub fn mtoon_outline_width_multiply_texture_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// MToon outline `outlineColorFactor` × `outlineLightingMixFactor` sweep.
+///
+/// The existing outline sweeps (`mtoon_basic_sweep`'s outline section,
+/// `mtoon_outline_width_multiply_texture_sweep`) vary width mode/factor
+/// and hardcode a black outline at the default lighting-mix, so neither
+/// the outline colour nor how much scene lighting bleeds into it is ever
+/// isolated. This sweep fixes width mode/factor (world coordinates,
+/// 0.05 — matching the outline-multiply baseline) so the only variables
+/// are the two colour axes: `outlineColorFactor` ∈ {black [0,0,0],
+/// red [1,0,0], white [1,1,1]} crossed with `outlineLightingMixFactor`
+/// ∈ {0.0, 0.5, 1.0}.
+///
+/// Per the MToon spec the rendered outline colour is a mix between
+/// `outlineColorFactor` and the lit surface colour weighted by
+/// `outlineLightingMixFactor` (0 = pure factor, 1 = fully lit-mixed), so
+/// the 3×3 cross produces 9 distinct outlines. Renderers that ignore
+/// `outlineLightingMixFactor` collapse each colour's three mix variants
+/// into one. `black × mix=0` (pure black outline, no lighting influence)
+/// is the natural reference cell.
+///
+/// VRM 1.0-only: `outlineLightingMixFactor` has no VRM 0.x materialProperties
+/// equivalent (see `mtoon_v0.rs`).
+///
+/// Methodology: outline tests render MSAA 4× with a wider local SSIM
+/// tolerance on outline regions (see `docs/methodology.md` §"Outline
+/// antialiasing"); the generated `.test.yaml` inherits the suite outline
+/// defaults like the other outline sweeps.
+pub fn mtoon_outline_color_lightingmix_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    for (color_name, color) in [
+        ("black", [0.0_f32, 0.0, 0.0]),
+        ("red", [1.0, 0.0, 0.0]),
+        ("white", [1.0, 1.0, 1.0]),
+    ] {
+        for mix in [0.0_f32, 0.5, 1.0] {
+            let mut p = MToonParams::defaults(format!(
+                "mtoon_outlinecolor_{color_name}_mix_{}",
+                fmt_num(mix)
+            ));
+            // Hold the width axes constant so colour/mix are the only
+            // variables (world coords, 0.05 — matches the outline-multiply
+            // baseline at mtoon_outlinewidthtex_*).
+            p.outline_width_mode = OutlineWidthMode::WorldCoordinates;
+            p.outline_width_factor = 0.05;
+            p.outline_color_factor = color;
+            p.outline_lighting_mix_factor = mix;
+            out.push(p);
+        }
+    }
+
+    out
+}
+
 /// MToon emissive sweep covering `material.emissiveFactor` +
 /// `VRMC_materials_hdr_emissiveMultiplier-1.0`. Held-constant axes:
 /// base color is mid-gray ([0.3,0.3,0.3,1]) so the emissive contribution
@@ -303,6 +357,55 @@ pub fn mtoon_emissive_sweep() -> Vec<MToonParams> {
     let mut zero = MToonParams::defaults("mtoon_emissive_zero_factor");
     zero.emissive_factor = [0.0, 0.0, 0.0];
     zero.emissive_multiplier = 4.0;
+    out.push(zero);
+
+    out
+}
+
+/// MToon emissive sweep using the Khronos-ratified
+/// `KHR_materials_emissive_strength` extension — the modern companion the
+/// VRM 1.0 spec README lists as superseding the archived
+/// `VRMC_materials_hdr_emissiveMultiplier`. This sweep is the KHR-extension
+/// counterpart to [`mtoon_emissive_sweep`]: same 8 axis values so the two
+/// corpora are directly comparable, and `emissive_multiplier` is held at
+/// the default 1.0 so the archived extension is never co-emitted — each
+/// asset carries only `KHR_materials_emissive_strength`, isolating the
+/// "does this renderer honour the modern extension on an MToon material"
+/// signal.
+///
+/// 8 variants:
+/// - 7 strength values {0, 0.25, 0.5, 0.75, 1, 2, 4} × white emissive
+///   [1,1,1] over a mid-gray base, mirroring the multiplier sweep. Values
+///   above 1 verify HDR saturation (clamps in UNORM output but must pass
+///   the spec's `emissiveFactor * emissiveStrength` step before clamping).
+/// - 1 zero-emissive baseline: `emissive_factor=[0,0,0]` with a non-unit
+///   strength — exercises the conditional-emit guard (no extension when
+///   the factor is zero).
+///
+/// Methodology: inherits the suite default `tone_mapping: None` (per
+/// `docs/methodology.md`), required so HDR strengths > 1 saturate the
+/// UNORM PNG channel rather than being reshaped by ACES/Filmic.
+pub fn mtoon_emissive_strength_sweep() -> Vec<MToonParams> {
+    let mut out = Vec::new();
+
+    // Mirror mtoon_emissive_sweep's multiplier axis so the KHR corpus is
+    // value-for-value comparable. emissive_multiplier stays at the default
+    // 1.0 (so the archived extension is never emitted); only the KHR
+    // strength varies.
+    for s in [0.0_f32, 0.25, 0.5, 0.75, 1.0, 2.0, 4.0] {
+        let mut p = MToonParams::defaults(format!("mtoon_emissive_strength_{}", fmt_num(s)));
+        p.base_color_factor = [0.3, 0.3, 0.3, 1.0];
+        p.emissive_factor = [1.0, 1.0, 1.0];
+        p.khr_emissive_strength = Some(s);
+        out.push(p);
+    }
+
+    // Zero-emissive baseline: strength is set but the factor is [0,0,0],
+    // so the extension must NOT be emitted (validators flag unused
+    // `extensionsUsed` entries; strength is meaningless on a zero factor).
+    let mut zero = MToonParams::defaults("mtoon_emissive_strength_zero_factor");
+    zero.emissive_factor = [0.0, 0.0, 0.0];
+    zero.khr_emissive_strength = Some(4.0);
     out.push(zero);
 
     out
@@ -2269,6 +2372,142 @@ mod first_person_sweep_tests {
                 p.id
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod outline_color_lightingmix_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn outline_color_lightingmix_sweep_emits_expected_cross() {
+        let s = mtoon_outline_color_lightingmix_sweep();
+        // 3 colours × 3 lighting-mix values = 9.
+        assert_eq!(
+            s.len(),
+            9,
+            "expected 9 outline color×lighting-mix variants, got {}",
+            s.len()
+        );
+
+        // IDs unique.
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            s.len(),
+            "outline color×mix sweep IDs must be unique"
+        );
+
+        // Width axes are held constant so colour/mix are the only variables.
+        for p in &s {
+            assert_eq!(
+                p.outline_width_mode,
+                OutlineWidthMode::WorldCoordinates,
+                "{}: outline width mode must be held at WorldCoordinates",
+                p.id
+            );
+            assert_eq!(
+                p.outline_width_factor, 0.05,
+                "{}: outline width factor must be held at 0.05",
+                p.id
+            );
+        }
+
+        // Corner cells of the cross must exist.
+        for id in [
+            "mtoon_outlinecolor_black_mix_0",
+            "mtoon_outlinecolor_red_mix_0p5",
+            "mtoon_outlinecolor_white_mix_1",
+        ] {
+            assert!(
+                s.iter().any(|p| p.id == id),
+                "missing expected cross cell {id}"
+            );
+        }
+
+        // A representative cell's colour + lighting-mix must round-trip
+        // into the emitted VRMC_materials_mtoon JSON.
+        let red_half = s
+            .iter()
+            .find(|p| p.id == "mtoon_outlinecolor_red_mix_0p5")
+            .unwrap();
+        let m = crate::vrm_ext::vrmc_materials_mtoon(red_half);
+        let color = m["outlineColorFactor"].as_array().unwrap();
+        assert_eq!(color[0].as_f64().unwrap(), 1.0);
+        assert_eq!(color[1].as_f64().unwrap(), 0.0);
+        assert_eq!(color[2].as_f64().unwrap(), 0.0);
+        assert_eq!(
+            m["outlineLightingMixFactor"].as_f64().unwrap(),
+            0.5,
+            "outlineLightingMixFactor must round-trip into the MToon JSON"
+        );
+    }
+}
+
+#[cfg(test)]
+mod emissive_strength_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn emissive_strength_sweep_emits_expected_variants() {
+        let s = mtoon_emissive_strength_sweep();
+        // 7 strength values × white emissive + 1 zero-factor baseline = 8.
+        assert_eq!(
+            s.len(),
+            8,
+            "expected 8 emissive-strength sweep entries, got {}",
+            s.len()
+        );
+
+        // IDs unique across the sweep.
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            s.len(),
+            "emissive-strength sweep IDs must be unique"
+        );
+
+        // Canonical strength=1 variant exists.
+        assert!(
+            s.iter().any(|p| p.id == "mtoon_emissive_strength_1"),
+            "missing canonical strength=1 variant"
+        );
+
+        // Every non-zero-factor variant carries a KHR strength and leaves
+        // the archived multiplier at the default 1.0 (clean isolation —
+        // the two extensions must never co-emit from this corpus).
+        for p in s
+            .iter()
+            .filter(|p| p.id != "mtoon_emissive_strength_zero_factor")
+        {
+            assert!(
+                p.khr_emissive_strength.is_some(),
+                "{}: must set khr_emissive_strength",
+                p.id
+            );
+            assert_eq!(
+                p.emissive_multiplier, 1.0,
+                "{}: archived multiplier must stay at default 1.0",
+                p.id
+            );
+        }
+
+        // Zero-factor baseline: zero emissive factor with a non-unit
+        // strength, exercising the conditional-emit guard.
+        let zero = s
+            .iter()
+            .find(|p| p.id == "mtoon_emissive_strength_zero_factor")
+            .expect("missing zero-factor baseline");
+        assert_eq!(zero.emissive_factor, [0.0, 0.0, 0.0]);
+        assert_eq!(
+            zero.khr_emissive_strength,
+            Some(4.0),
+            "zero-factor baseline must set a non-unit strength to exercise the conditional-emit guard"
+        );
     }
 }
 

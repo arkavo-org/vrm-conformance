@@ -49,11 +49,9 @@ Adapter-side wiring task; not RFC-level (RFC-0004 already covers the design). To
 
 ## Methodology questions still open
 
-### `outlineColorFactor` × `outlineLightingMixFactor` sweep
+### ~~`outlineColorFactor` × `outlineLightingMixFactor` sweep~~ — RESOLVED
 
-**Context.** The current MToon outline sweep (`mtoon_basic_sweep`'s outline section in `sweep.rs`) varies `outline_width_mode` × `outline_width_factor` × `outline_color_factor` partially. Neither `outline_color_factor` (varying outline colour) nor `outline_lighting_mix_factor` (mixing scene lighting into outline colour) is independently swept.
-
-Probably 2-3 small sweeps (cross black / red / coloured outlines × lighting-mix 0/0.5/1). Should land as another `mtoon_outline_*` sweep family. Concrete + small — could promote to a GH issue.
+**Resolved.** `emit-outline-color-lighting-mix-sweep` (`mtoon_outline_color_lightingmix_sweep` in `sweep.rs`) now emits the 3×3 cross of `outline_color_factor` {black, red, white} × `outline_lighting_mix_factor` {0, 0.5, 1} with width mode/factor held constant, isolating outline colour and lighting-mix as the only variables. VRM 1.0-only (`outlineLightingMixFactor` has no 0.x equivalent). Wired into `bootstrap-goldens.sh`.
 
 ### Schema-conformance probe
 
@@ -74,6 +72,8 @@ Quality-of-life tooling, not conformance signal per se. Could be a CI step.
 Tracked in issue #14 (re-validate sweeps through UniVRM). If UniVRM honours emissive multiplier, VMK#287 stays; if not, it's reclassified.
 
 Same question for VMK#288 (`KHR_texture_transform` on baseColorTexture) and VMK#289 (`outlineWidthMultiplyTexture` degraded pipeline). All three need UniVRM data before they can be treated as authoritative upstream bugs.
+
+**`KHR_materials_emissive_strength` (modern companion).** The generator now also emits the Khronos-ratified `KHR_materials_emissive_strength` — the extension the VRM 1.0 spec README lists as superseding the archived `VRMC_materials_hdr_emissiveMultiplier` — via `emit-emissive-strength-sweep` (`mtoon_emissive_strength_sweep`, 8 variants, validator-clean). This carries the **same unconfirmed-UniVRM hazard** as the multiplier question above: whether UniVRM honours `KHR_materials_emissive_strength` on an MToon material is not yet confirmed. Treat the cross-renderer result as **provisional pending UniVRM data** — do not pre-assert a pass/fail. three-vrm/three.js support the extension natively on standard materials; whether the MToon path honours it is the conformance observation to log once rendered.
 
 ### VRM 0.0 legacy corpus — keep or skip?
 

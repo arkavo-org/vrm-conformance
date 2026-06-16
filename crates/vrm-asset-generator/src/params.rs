@@ -44,6 +44,20 @@ pub struct MToonParams {
     /// `emissive_multiplier != 1.0` AND `emissive_factor != [0,0,0]`.
     /// glTF default if extension omitted is implicit multiplier=1.
     pub emissive_multiplier: f32,
+    /// `KHR_materials_emissive_strength`: the Khronos-ratified extension
+    /// the VRM 1.0 spec README lists as the modern companion that
+    /// supersedes the archived `VRMC_materials_hdr_emissiveMultiplier`.
+    /// Per the extension spec the emitted light is
+    /// `emissiveFactor * emissiveTexture * emissiveStrength`, so it plays
+    /// the same role as `emissive_multiplier` but via the standard glTF
+    /// extension. Independent of `emissive_multiplier`: `None` (default)
+    /// keeps the existing corpus byte-identical and emits no KHR
+    /// extension; `Some(s)` emits `KHR_materials_emissive_strength`
+    /// (only when `emissive_factor != [0,0,0]`, mirroring the archived
+    /// extension's conditional emit). The emissive-strength sweep sets
+    /// this and leaves `emissive_multiplier = 1.0` so the two extensions
+    /// never co-emit and the KHR signal is isolated.
+    pub khr_emissive_strength: Option<f32>,
 
     /// `VRMC_vrm.firstPerson.meshAnnotations[*].type` override for the
     /// avatar's mesh-bearing node. `None` keeps the canonical default
@@ -166,6 +180,7 @@ impl MToonParams {
             uv_animation_rotation_speed_factor: 0.0,
             emissive_factor: [0.0, 0.0, 0.0],
             emissive_multiplier: 1.0,
+            khr_emissive_strength: None,
             first_person_type: None,
             texture_transform: None,
             shade_multiply_texture: false,

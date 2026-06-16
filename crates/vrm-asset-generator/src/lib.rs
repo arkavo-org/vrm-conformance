@@ -42,6 +42,7 @@ pub enum NotApplicableReason {
     ShadingShiftTextureV1Only,
     RimMultiplyTextureV1Only,
     KhrTextureTransformV1Only,
+    KhrMaterialsEmissiveStrengthV1Only,
     // Extend with new variants as discovered; never use free text.
 }
 
@@ -78,6 +79,7 @@ mod applicability_tests {
             NotApplicableReason::ShadingShiftTextureV1Only,
             NotApplicableReason::RimMultiplyTextureV1Only,
             NotApplicableReason::KhrTextureTransformV1Only,
+            NotApplicableReason::KhrMaterialsEmissiveStrengthV1Only,
         ] {
             let s = serde_json::to_string(&r).unwrap();
             let back: NotApplicableReason = serde_json::from_str(&s).unwrap();

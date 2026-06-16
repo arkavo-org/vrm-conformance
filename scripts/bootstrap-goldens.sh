@@ -116,6 +116,28 @@ else
     cargo run --release -q -p vrm-asset-generator -- emit-emissive-sweep \
         --output-dir "$EMISSIVE_DIR" --json ${SPEC_FLAG[@]+"${SPEC_FLAG[@]}"} >/dev/null
 
+    if [ "$SPEC_VERSION" != "0.x" ]; then
+        echo "==> Emitting MToon emissive-strength sweep (8 plans, KHR_materials_emissive_strength)"
+        EMISSIVE_STRENGTH_DIR="$GOLDENS_DIR/_assets_emissive_strength"
+        rm -rf "$EMISSIVE_STRENGTH_DIR"; mkdir -p "$EMISSIVE_STRENGTH_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-emissive-strength-sweep \
+            --output-dir "$EMISSIVE_STRENGTH_DIR" --json >/dev/null
+    else
+        echo "    SKIP emit-emissive-strength-sweep: NotApplicable at VRM 0.x (rejects --spec-version 0.x with a structured NotApplicableReason)"
+        EMISSIVE_STRENGTH_DIR=""
+    fi
+
+    if [ "$SPEC_VERSION" != "0.x" ]; then
+        echo "==> Emitting MToon outline color×lighting-mix sweep (9 plans, outlineColorFactor × outlineLightingMixFactor)"
+        OUTLINE_CM_DIR="$GOLDENS_DIR/_assets_outline_colormix"
+        rm -rf "$OUTLINE_CM_DIR"; mkdir -p "$OUTLINE_CM_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-outline-color-lighting-mix-sweep \
+            --output-dir "$OUTLINE_CM_DIR" --json >/dev/null
+    else
+        echo "    SKIP emit-outline-color-lighting-mix-sweep: NotApplicable at VRM 0.x (rejects --spec-version 0.x with a structured NotApplicableReason)"
+        OUTLINE_CM_DIR=""
+    fi
+
     echo "==> Emitting VRMC_vrm.firstPerson sweep (4 plans, third-person camera)"
     FIRSTPERSON_DIR="$GOLDENS_DIR/_assets_firstperson"
     rm -rf "$FIRSTPERSON_DIR"; mkdir -p "$FIRSTPERSON_DIR"
@@ -482,6 +504,8 @@ if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
             "${VRMA_MULTI_DIR:-}" \
             "${VRMA_FINGER_DIR:-}" \
             "${EMISSIVE_DIR:-}" \
+            "${EMISSIVE_STRENGTH_DIR:-}" \
+            "${OUTLINE_CM_DIR:-}" \
             "${FIRSTPERSON_DIR:-}" \
             "${UVXFORM_DIR:-}" \
             "${SHADETEX_DIR:-}" \

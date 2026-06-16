@@ -402,6 +402,18 @@ pub fn base_material(p: &MToonParams) -> Value {
                 "emissiveMultiplier": p.emissive_multiplier
             });
         }
+
+        // KHR_materials_emissive_strength: the Khronos-ratified modern
+        // companion (VRM 1.0 spec README lists it as superseding the
+        // archived VRMC extension above). Independent path — emitted only
+        // when explicitly requested via `khr_emissive_strength`, and only
+        // when the factor is non-zero (same rationale as the multiplier:
+        // strength is meaningless on a [0,0,0] factor).
+        if let Some(strength) = p.khr_emissive_strength {
+            material["extensions"]["KHR_materials_emissive_strength"] = json!({
+                "emissiveStrength": strength
+            });
+        }
     }
 
     material
@@ -1055,6 +1067,73 @@ mod emissive_emit_tests {
             ext["emissiveMultiplier"].as_f64().unwrap(),
             2.5,
             "emissiveMultiplier value must round-trip"
+        );
+    }
+
+    #[test]
+    fn default_params_emit_no_khr_emissive_strength() {
+        // `khr_emissive_strength: None` (the default) must keep the
+        // material JSON byte-identical to before the field existed.
+        let p = defaults();
+        let m = base_material(&p);
+        let exts = m["extensions"].as_object().unwrap();
+        assert!(
+            !exts.contains_key("KHR_materials_emissive_strength"),
+            "KHR extension must be absent by default; got {exts:?}"
+        );
+    }
+
+    #[test]
+    fn nonzero_emissive_with_khr_strength_emits_extension() {
+        let mut p = defaults();
+        p.emissive_factor = [1.0, 1.0, 1.0];
+        p.khr_emissive_strength = Some(2.0);
+        let m = base_material(&p);
+        assert!(
+            m.get("emissiveFactor").is_some(),
+            "emissiveFactor must be present"
+        );
+        let ext = &m["extensions"]["KHR_materials_emissive_strength"];
+        assert_eq!(
+            ext["emissiveStrength"].as_f64().unwrap(),
+            2.0,
+            "emissiveStrength value must round-trip"
+        );
+    }
+
+    #[test]
+    fn zero_emissive_factor_with_khr_strength_omits_extension() {
+        // Per the same logic as the archived multiplier: strength is
+        // meaningless when factor is [0,0,0], so the extension must not
+        // be emitted (validators flag unused `extensionsUsed` entries).
+        let mut p = defaults();
+        p.khr_emissive_strength = Some(4.0); // factor stays [0,0,0]
+        let m = base_material(&p);
+        let exts = m["extensions"].as_object().unwrap();
+        assert!(
+            !exts.contains_key("KHR_materials_emissive_strength"),
+            "KHR extension must NOT be emitted when factor is zero, even if strength is set"
+        );
+    }
+
+    #[test]
+    fn khr_strength_and_hdr_multiplier_are_independent() {
+        // The two extensions are independent paths; setting only the KHR
+        // strength must not emit the archived VRMC extension (the sweep
+        // relies on this isolation).
+        let mut p = defaults();
+        p.emissive_factor = [1.0, 1.0, 1.0];
+        p.khr_emissive_strength = Some(2.0);
+        // emissive_multiplier stays at default 1.0
+        let m = base_material(&p);
+        let exts = m["extensions"].as_object().unwrap();
+        assert!(
+            exts.contains_key("KHR_materials_emissive_strength"),
+            "KHR extension must be present"
+        );
+        assert!(
+            !exts.contains_key("VRMC_materials_hdr_emissiveMultiplier"),
+            "archived VRMC extension must be absent when only KHR strength is set"
         );
     }
 }
