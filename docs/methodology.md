@@ -80,6 +80,18 @@ The v1.0 conformance threshold is **SSIM ≥ 0.85 against the consortium referen
 
 Future tightening (post-1.0) can ratchet the MToon-material threshold toward 0.90 once dedicated engine-alignment work (MSAA sample-pattern matching, color-pipeline alignment) is in scope. The threshold for a 1.0 conformance claim is 0.85; tighter would over-claim.
 
+### Tightest-band exception: `mtoon_rimLightingMix_1` on VMK (documented 1.0 limitation)
+
+`mtoon_rimLightingMix_1` (rim mix at the `→1` extreme) is a **known, documented exception** to the tighter 0.95 rim band for VRMMetalKit 1.0. At maximum rim mix VMK's parametric rim doesn't fully wrap the unlit silhouette, so it trails the UniVRM golden by a hair at exactly one cell.
+
+Re-measured at **VMK 0.21.0** (`985bd7c`, 2026-06-16), VMK-vs-UniVRM from identical outlines-off assets:
+
+| `rimLightingMix` | 0 | 0.1 | 0.25 | 0.5 | 0.75 | 1.0 |
+| --- | --- | --- | --- | --- | --- | --- |
+| SSIM | 0.9930 | 0.9935 | 0.9901 | 0.9803 | 0.9674 | **0.9491** |
+
+Every variant passes 0.95 except `=1`, which lands **0.9491** — a **0.0009** miss, at the parameter extreme only, degrading monotonically with the mix factor. Tracked upstream as [VRMMetalKit#226](https://github.com/arkavo-org/VRMMetalKit/issues/226); same status class as the accepted `giEqualizationFactor` proxy deviation ([#328](https://github.com/arkavo-org/VRMMetalKit/issues/328)). This is a documented spec deviation, **not** a 1.0 release blocker. See `docs/findings.md` 2026-06-16 for the full re-measure (including the outline-contaminated-cache hazard that must be avoided when re-running). Revisit when the post-1.0 rim-alignment work lands.
+
 ## Spring bone determinism
 
 `VRMC_springBone` does not pin a fixed time-step. Adapters must guarantee deterministic stepping at 60 Hz with reset between tests.
