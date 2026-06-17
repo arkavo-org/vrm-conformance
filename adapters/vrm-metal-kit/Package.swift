@@ -588,7 +588,34 @@ let package = Package(
             // spring-bone + outline corpus (49/49). Goldens need a re-baseline
             // for the 31 sub-perceptual MToon cells when this pin lands. See
             // docs/findings.md 2026-06-14. Prior pin: 0.20.1 (39e65f0).
-            revision: "985bd7cbc560c967f979c460dcaf30675b15ba24"
+            // 1.0.0-rc.2 (ef52802, 2026-06-17) — second 1.0 release candidate,
+            // cut on the release/1.0 branch (rebased onto main so it carries the
+            // post-0.21.0 code work + the 1.0 release docs). vs 0.21.0 (985bd7c):
+            //   - #356 (55b577b): crash fix in async loaders (unowned-self) +
+            //          LookAt animation-speed (delta-time) fix.
+            //   - #357 (46cd0b1): "Reduce per-draw CPU overhead by gating debug
+            //          work behind warmup" — four rounds of cmdEncode CPU
+            //          optimization. Render-NEUTRAL by construction: the large
+            //          MToonShader.metal churn hoists the debug-viz branches into
+            //          a gated mtoon_debug_visualize() (debugUVs != 0 only, never
+            //          set in conformance renders); the new MToon uniform field
+            //          shadeUsesBaseColor replaces _padding2 (same 4-byte size,
+            //          no ABI change) and defaults to 0 = prior behavior; the
+            //          base-sample-reuse fast path is bit-identical. The cpuBudget
+            //          metric is in the standalone VRMBenchmark CLI, not the
+            //          library the adapter links.
+            //   - 4 release/1.0 docs commits (ce9249a #299 VRM 0.x +Z deviation
+            //          note — VRMModel.swift COMMENT-only; README/CHANGELOG/docc)
+            //          replayed on top. Non-code, render-irrelevant.
+            // Validated (docs/findings.md 2026-06-17): the code tip 46cd0b1 is
+            // 429/429 byte-identical to 0.21.0 across the full corpus (render-
+            // neutral); conformance-vs-UniVRM invariant; upstream VRMBenchmark on
+            // AvatarSample_A reproduces cmdEncode -25.5%, render total -17.7%,
+            // +21.5% fps, pipeline 30->6, state 60->36. ef52802 adds only the
+            // docs/comment commits, so the validation transfers. Pin-only bump —
+            // no adapter code change. Promote to stable 1.0.0 after the gating
+            // run. Prior pin: 0.21.0 (985bd7c).
+            revision: "ef52802388b9ec00d8990b8f222641d1f4fbfe1f"
         ),
     ],
     targets: [
