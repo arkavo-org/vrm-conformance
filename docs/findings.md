@@ -33,7 +33,20 @@ This document records cross-renderer divergence findings produced by the suite, 
 | @ `1.0.0` (buggy — first-group-only) | **0.9942 — cells diverge** (probe's collider ignored) |
 | @ `1.1.0-beta` (fixed) | **1.00000 — byte-identical** (probe now collides) |
 
-This reproduces the beta's "Collider group semantics fixed" note as a falsifiable measurement and is now ready to point at UniVRM / three-vrm / godot to check whether any of them carry the same first-group-only bug. (Discriminating power is partly masked at `1.0.0` by default-on augmentation constraining the hair regardless; running the probe with `augment_colliders: false` would sharpen the buggy-side signal — a follow-up tied to the augment-off methodology note above.)
+This reproduces the beta's "Collider group semantics fixed" note as a falsifiable measurement.
+
+**Cross-renderer result — one discriminator, two different multi-group bugs.** Ran the probe (augment-off plans) through three renderers plus both VMK pins, disambiguating the mechanism against the geometrically-identical single-group control `swing_springbone_collider_sphere_x0p02_r0p05` (same sphere, one group, spring references it). All renders are deterministic (three-vrm self-SSIM = 1.00000, so sub-1.0 numbers are real, not noise):
+
+| renderer | `singleref` vs `secondref` | `singleref` vs `bothref` | multi-group handling |
+| --- | --- | --- | --- |
+| VMK `1.1.0-beta` | 1.00000 | 1.00000 | **correct** — collider applied once regardless of routing |
+| VMK `1.0.0` | **0.99416** | 1.00000 | **first-group-only** — a collider referenced only via its *second* group is dropped (confirms the release note) |
+| three-vrm `3.5.0` | 1.00000 | **0.99307** | **double-count** — a collider reached via *two* referenced groups is applied twice; `secondref` (single reference) is correct |
+| godot-vrm (Godot 4.7) | — | — | not runnable this pass — pre-existing GDScript compile error (`register_all` nonexistent) against Godot 4.7, unrelated to this work |
+
+So the same collider-in-two-groups asset exposes **opposite** defects: VMK 1.0.0 *under*-applies (`secondref` drops it), three-vrm *over*-applies (`bothref` doubles it), and fixed VMK does neither. The discriminator localizes the mechanism, not just "they differ."
+
+**Open — needs the golden reference.** Whether per-collider dedup across referenced groups is *required* by `VRMC_springBone` (making three-vrm's double-count a genuine bug) or merely unspecified is the arbitration question, and per methodology **UniVRM is the oracle** — it was not run this pass (Unity batch boot). Next step: render the probe through UniVRM; its `singleref`-vs-`bothref` result declares whether three-vrm's double-count is a conformance miss or acceptable latitude. The consensus run lacking UniVRM is provisional.
 
 **Pointers.** Upstream: `1.1.0-beta` release notes (cross-avatar collision, hair-vs-body fix, loader speedup, `groupIndex`→`groupMask`). Suite-side (this change): `crates/vrm-asset-generator` `spring_bone_collider_multigroup_sweep` + `emit-springbone-collider-multigroup-sweep` CLI/describe; pin `adapters/vrm-metal-kit/Package.swift` → `1.0.0`. Related: the augment-off methodology question (`docs/methodology.md` spring-bone determinism conventions) and the UniVRM-as-golden-reference triage rule.
 
