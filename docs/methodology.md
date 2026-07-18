@@ -108,6 +108,16 @@ Renderers initialize spring positions differently from a fresh load. The `reset_
 
 **v1.0 default: 30 settle steps at 60 Hz (0.5 s).**
 
+## Spring bone collider augmentation (spec-faithful cross-renderer loads)
+
+Spring-bone collision comes **only** from the colliders and collider-groups the asset authors in `VRMC_springBone`. Some renderers, notably **VRMMetalKit**, additionally *synthesize* colliders at load time (`VRMLoadingOptions(augmentSpringBoneColliders:)`, default `true` — leg/head/forearm/hand capsules, and as of `1.1.0-beta` a torso capsule + upper-arm capsules) so avatars don't self-clip out of the box. UniVRM, three-vrm, godot-vrm and babylon do **not** — they collide against the authored set only.
+
+Augmentation is therefore **extra-spec**: an augment-on render measures a renderer's proprietary physics, not the authored asset, so it is not comparable across renderers and is a divergence source against the [UniVRM golden reference](findings.md). It also cannot be conformance-tested — no other library implements it.
+
+**Convention: spring-bone test plans set `augment_colliders: false`.** The generator emits this field on every spring-bone plan (settle, swing, sequence, collider, extended, multichain, multi-group). The runner forwards it to `load_vrm`; the plan value takes precedence over the `--augment-colliders` CLI flag, and renderers that never augment ignore it. This pins collision to the authored set so all renderers are measured against the same physical inputs. (Empirically the effect is chain-length-dependent on VMK: a no-op on the short default chain, ~SSIM 0.994 on the 16-joint chain that reaches the body — see `docs/findings.md` 2026-07-17.)
+
+Single-renderer VMK-fidelity or robustness runs may still load augment-on deliberately; that is a different question (does *this* renderer keep the avatar tidy) from conformance (does it implement the spec). **Consequence:** migrating the existing augment-on VMK spring-bone goldens to augment-off requires a re-baseline — flagged in `docs/findings.md`.
+
 ## Spring bone excitation
 
 Static avatars under `step_physics` only exercise gravity settling. Testing inertia, drag, stiffness requires moving the avatar through space. The `animate_root_transform(start, end, duration_seconds, fps)` operation drives this.

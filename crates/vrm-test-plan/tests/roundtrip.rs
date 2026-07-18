@@ -177,6 +177,7 @@ fn plan_without_physics_serializes_without_field() {
         ignore_renderers: Vec::new(),
         properties: Vec::new(),
         physics: None,
+        augment_colliders: None,
         animation: None,
         render_sequence: None,
         cross_variant: None,
