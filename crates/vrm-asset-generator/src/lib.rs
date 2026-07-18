@@ -2,6 +2,11 @@
 //! `<asset>.vrm + <asset>.meta.json + <asset>.test.yaml` from a single
 //! parameter dictionary.
 
+// The `describe` operation catalog is a single large `serde_json::json!`
+// literal; each added op deepens the macro expansion. Lift the limit above the
+// default 128 so the catalog can keep growing.
+#![recursion_limit = "256"]
+
 pub mod buffer;
 pub mod chain_mesh;
 pub mod cli;

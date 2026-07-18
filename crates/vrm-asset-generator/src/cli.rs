@@ -364,6 +364,21 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the multi-group collider-membership sweep (4 assets = 2 variants ×
+    /// settle + swing). One sphere collider is registered in two collider
+    /// groups; `bothref` has the spring reference both groups (control),
+    /// `secondref` references only the collider's second group. A spec-faithful
+    /// renderer renders the two identically; a renderer that honors only a
+    /// collider's first group diverges. Cross-renderer discriminator for the
+    /// VRMC_springBone multi-group rule (VRMMetalKit fixed this in 1.1.0-beta).
+    /// V1-only (multi-group is a VRM 1.0 concern).
+    EmitSpringboneColliderMultigroupSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the VRMC_springBone_extended_collider sweep (36 assets = 18 variants
     /// × settle + swing). Variants: 3 shapes (plane, inside-sphere, inside-capsule)
     /// × 3 placements + 3 shapes × 3 angle-limits (30°, 60°, 90°) = 18 base ×
@@ -1788,6 +1803,92 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitSpringboneColliderMultigroupSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            use crate::emit::{
+                emit_with_sidecars_spring_bone_colliders,
+                emit_with_sidecars_spring_bone_colliders_swing,
+            };
+            use crate::sweep::spring_bone_collider_multigroup_sweep;
+
+            std::fs::create_dir_all(&output_dir)?;
+            let variants = spring_bone_collider_multigroup_sweep();
+            let total = variants.len() * 2; // settle + swing per variant
+            let mut emitted = Vec::new();
+            let mut idx = 0;
+
+            for (mtoon, scene) in &variants {
+                // Settle variant: ID unchanged (`springbone_collider_multigroup_*`).
+                let settle_id = mtoon.id.clone();
+                if emit_json {
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "event": "progress",
+                            "op": "emit-springbone-collider-multigroup-sweep",
+                            "index": idx, "total": total, "id": settle_id
+                        }))?
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", idx + 1, total, settle_id);
+                }
+                let stem = output_dir.join(&settle_id);
+                emit_with_sidecars_spring_bone_colliders(mtoon, scene, &stem)?;
+                emitted.push(stem);
+                idx += 1;
+
+                // Swing variant: `swing_` prefix, excites the chain into the collider.
+                let swing_id = format!("swing_{}", mtoon.id);
+                if emit_json {
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "event": "progress",
+                            "op": "emit-springbone-collider-multigroup-sweep",
+                            "index": idx, "total": total, "id": swing_id
+                        }))?
+                    );
+                } else {
+                    eprintln!("[{:3}/{}] {}", idx + 1, total, swing_id);
+                }
+                let swing_mtoon = {
+                    let mut m = mtoon.clone();
+                    m.id = swing_id.clone();
+                    m
+                };
+                let swing_scene = {
+                    let mut s = scene.clone();
+                    s.springs[0].id = swing_id.clone();
+                    s.springs[0].spring_name = format!("{swing_id}_chain");
+                    s
+                };
+                let stem = output_dir.join(&swing_id);
+                emit_with_sidecars_spring_bone_colliders_swing(&swing_mtoon, &swing_scene, &stem)?;
+                emitted.push(stem);
+                idx += 1;
+            }
+
+            if emit_json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&json!({
+                        "ok": true,
+                        "count": emitted.len(),
+                        "output_dir": output_dir,
+                        "assets": emitted
+                    }))?
+                );
+            } else {
+                println!(
+                    "emitted {} multi-group collider spring-bone assets to {}",
+                    emitted.len(),
+                    output_dir
+                );
+            }
+            Ok(())
+        }
         Cmd::EmitSpringboneExtendedSweep {
             output_dir,
             spec_version,
@@ -2986,6 +3087,29 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-springbone-collider-sweep": {
                         "summary": "VRMC_springBone collider sweep (48 assets = 24 Cartesian variants × settle + swing). Axes: shape (sphere, capsule), offset_y (-0.08, -0.04, 0, +0.04), radius (0.03, 0.05, 0.10). Each settle plan uses 60-step settle; swing plans add animate_root_transform.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-springbone-collider-multigroup-sweep": {
+                        "summary": "Multi-group collider-membership sweep (4 assets = 2 variants × settle + swing). One sphere collider registered in two collider groups; `bothref` has the spring reference both groups (control), `secondref` references only the second group. A spec-faithful renderer renders them identically; a renderer honoring only a collider's first group diverges. Cross-renderer discriminator for the VRMC_springBone multi-group rule. V1-only.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],
