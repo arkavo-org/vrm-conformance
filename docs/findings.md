@@ -46,7 +46,24 @@ This reproduces the beta's "Collider group semantics fixed" note as a falsifiabl
 
 So the same collider-in-two-groups asset exposes **opposite** defects: VMK 1.0.0 *under*-applies (`secondref` drops it), three-vrm *over*-applies (`bothref` doubles it), and fixed VMK does neither. The discriminator localizes the mechanism, not just "they differ."
 
-**Open — needs the golden reference.** Whether per-collider dedup across referenced groups is *required* by `VRMC_springBone` (making three-vrm's double-count a genuine bug) or merely unspecified is the arbitration question, and per methodology **UniVRM is the oracle**. Attempted the UniVRM PlayMode batch on the three probe assets this pass but it was **blocked by Unity licensing** — batchmode reported `com.unity.editor.headless was not found` / 404 entitlement / "No valid Unity Editor license," because no Unity Hub / licensing-client daemon was running to serve the (still-activated) Personal license. Unblock: start Unity Hub, then re-run `execute-test-batch` through `adapters/univrm/launcher.sh`. Until UniVRM's `singleref`-vs-`bothref` result lands, the arbitration (three-vrm double-count = conformance miss vs acceptable latitude) is open and this consensus is provisional.
+**Arbitration RESOLVED against the golden reference (UniVRM, PlayMode).** Ran the three probe assets through UniVRM v0.131.0 in PlayMode (real FastSpringBone; two runs for a noise floor). UniVRM has a small render-nondeterminism floor (self-SSIM 0.99872–1.00000). Against it:
+
+| UniVRM comparison | SSIM | vs noise floor |
+| --- | --- | --- |
+| `singleref` vs `secondref` | 0.99977 | at/above floor → **identical** (one application) |
+| `singleref` vs `bothref` | 0.99786 | **below** floor → real difference |
+| `secondref` vs `bothref` | 0.99772 / 0.99781 (both cross-run pairings) | **below** floor (`bothref` self-noise = 1.00000) → **robust** real difference |
+
+So **the oracle *double-counts*: a collider reached via two referenced groups is applied per-group** (`bothref` ≠ `secondref`), while `secondref` (single reference) is applied once. This matches the literal `VRMC_springBone` loop (iterate `colliderGroups` → colliders, no dedup step). Revised standings:
+
+| renderer | `secondref` (single ref) | `bothref` (collider in two referenced groups) | vs oracle |
+| --- | --- | --- | --- |
+| **UniVRM v0.131.0** (oracle) | applied once ✓ | **double-counts** (0.9977 vs single) | — |
+| three-vrm 3.5.0 | applied once ✓ | **double-counts** (0.993) | **matches** oracle direction |
+| VMK **1.1.0-beta** | applied once ✓ | **dedups** (== `secondref`, exactly 1.0) | **diverges** — the outlier |
+| VMK 1.0.0 | **dropped** (0.994) — genuine bug | applied once | diverges (fixed in beta) |
+
+**Net.** VMK 1.0.0's `secondref`-drop was an unambiguous bug and the beta correctly fixed it (all renderers now apply `secondref` once). But the beta *over-corrected*: it also **deduplicated** `bothref`, making VMK the only renderer that does so — a **new, small divergence from the UniVRM golden reference**, which (with three-vrm) applies the collider once per referenced group. Perceptually minor (VMK `bothref`==`secondref` exactly; oracle `bothref` is ~0.9977 off `secondref`) but structurally real and worth an upstream note to VMK: the multi-group fix should match the reference's per-group application rather than dedup. The discriminator thus caught both a fixed bug *and* the fix's side effect — one asset, the full story.
 
 **Pointers.** Upstream: `1.1.0-beta` release notes (cross-avatar collision, hair-vs-body fix, loader speedup, `groupIndex`→`groupMask`). Suite-side (this change): `crates/vrm-asset-generator` `spring_bone_collider_multigroup_sweep` + `emit-springbone-collider-multigroup-sweep` CLI/describe; pin `adapters/vrm-metal-kit/Package.swift` → `1.0.0`. Related: the augment-off methodology question (`docs/methodology.md` spring-bone determinism conventions) and the UniVRM-as-golden-reference triage rule.
 
