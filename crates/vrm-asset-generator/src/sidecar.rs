@@ -91,6 +91,7 @@ pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> Tes
         ignore_renderers: Vec::new(),
         properties: default_properties(params),
         physics: None,
+        augment_colliders: None,
         animation: None,
         render_sequence: None,
         cross_variant: None,
@@ -189,6 +190,11 @@ fn conformance_status_for(test_id: &str) -> ConformanceStatus {
 pub fn build_spring_bone_test_plan(params: &MToonParams, asset_relpath: &str) -> TestPlan {
     let mut plan = build_default_test_plan(params, asset_relpath);
     plan.physics = Some(PhysicsConfig { settle_steps: 30 });
+    // Spec-faithful cross-renderer load: no renderer-synthesized colliders, so
+    // collision comes only from what the asset authors. Aligns VRMMetalKit
+    // (which augments by default) with UniVRM/three-vrm/godot (which never do).
+    // See docs/methodology.md.
+    plan.augment_colliders = Some(false);
     plan.spec_section = "VRMC_materials_mtoon + VRMC_springBone".into();
     plan
 }
@@ -270,6 +276,8 @@ pub fn build_spring_bone_collider_test_plan(
 ) -> TestPlan {
     let mut plan = build_default_test_plan(params, asset_relpath);
     plan.physics = Some(PhysicsConfig { settle_steps: 60 });
+    // Spec-faithful cross-renderer load — see build_spring_bone_test_plan.
+    plan.augment_colliders = Some(false);
     plan.spec_section = "VRMC_springBone + colliders".into();
     plan
 }
@@ -307,6 +315,8 @@ pub fn build_spring_bone_extended_test_plan(
 ) -> TestPlan {
     let mut plan = build_default_test_plan(params, asset_relpath);
     plan.physics = Some(PhysicsConfig { settle_steps: 60 });
+    // Spec-faithful cross-renderer load — see build_spring_bone_test_plan.
+    plan.augment_colliders = Some(false);
     plan.spec_section = "VRMC_springBone + VRMC_springBone_extended_collider".into();
     plan
 }
@@ -343,6 +353,8 @@ pub fn build_spring_bone_multichain_test_plan(
 ) -> vrm_test_plan::TestPlan {
     let mut plan = build_default_test_plan(params, asset_relpath);
     plan.physics = Some(vrm_test_plan::PhysicsConfig { settle_steps: 60 });
+    // Spec-faithful cross-renderer load — see build_spring_bone_test_plan.
+    plan.augment_colliders = Some(false);
     plan.spec_section = "VRMC_springBone multi-chain".into();
     plan
 }

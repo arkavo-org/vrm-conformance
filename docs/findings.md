@@ -2,6 +2,77 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-07-17 (VMK 1.1.0-beta regression check + pin catch-up to stable 1.0.0) — **BUMPED the pin `1.0.0-rc.2` (`ef52802`) → stable `1.0.0` (`a94531d`) — an overdue, render-neutral catch-up (we sat on rc.2 while stable shipped 2026-07-02; `1.0.0` = rc.2 + #369, which confines VRM authoring to the test target so the public API is render-only — a test-target/API-surface change, zero render effect). Separately REGRESSION-CHECKED the new pre-release `1.1.0-beta` (`c68eb28`, 2026-07-17, "not for production pinning") against the suite: NO shading regression (MToon 70/71 byte-identical to 1.0.0, the lone differ being a spring-bone cell), and an INTENDED spring-bone golden shift (16/20 swing cells move, all still pass the gate) driven by the beta's new default-on synthetic torso/upper-arm colliders. Also landed a new cross-renderer test — the multi-group collider-membership discriminator — which empirically confirms the beta's "collider group semantics fixed." VERDICT: promoted to stable 1.0.0 now; do NOT advance the pin to the 1.1.0-beta pre-release, but the beta's collider-group fix is a genuine spec-conformance improvement and its default-on augmentation is a methodology flag (below).**
+
+**Method.** Built the VMK adapter at each of `1.0.0-rc.2`-equivalent stable `1.0.0` (`a94531d`) and `1.1.0-beta` (`c68eb28`) on the M-series/Xcode-26 dev machine, rendered the MToon (71) + swing (20) corpora through each, and diffed **beta directly against 1.0.0** (same machine/toolchain — no stored-baseline ambiguity). Provenance cross-check: fresh `1.0.0` renders are **swing 20/20 byte-identical** to the stored `goldens-cache-rc` baseline (MToon 60/71; the 11 are the already-documented tightest-band `shadingShift`/`rimLightingMix` re-baseline cells), confirming the `rc.2 → 1.0.0` promotion is render-neutral in practice, not just by construction.
+
+**Change scope (rc.2 → 1.1.0-beta).** 101 files, +14.8k/−0.6k, but tightly localized: spring-bone (`SpringBoneComputeSystem`, `SpringBoneColliderAugmentor`, `SpringBoneCollision.metal`), all-new Crowd/BalanceModel/Stagger/ArmCounterbalance animation layers, and the loader (`BufferLoader`/`BufferPreloader`, the 50–70% parse speedup). **`MToonShader.metal` and the MToon render path are untouched** — the only shader changed is `SpringBoneCollision.metal`.
+
+**Beta vs 1.0.0 — the true delta.**
+
+| corpus | byte-identical vs 1.0.0 | worst SSIM | interpretation |
+| --- | --- | --- | --- |
+| MToon (71) | **70/71** | 0.9995 (`springbone_joints_16`, a spring-bone cell) | Every actual `mtoon_*` cell is byte-identical → **zero shading regression**, exactly as the untouched shader predicts. |
+| swing (20) | 4/20 | 0.9869 (`swing_springbone_joints_16`) | **Intended** shift from default-on torso/upper-arm augmentation; mean SSIM 0.9956, all ≥ the 0.85 gate. Shift scales with chain length (`joints_16` > `joints_8`) — more hair segments now deflect off the new body capsules. |
+
+**Behavior change you must validate before ever adopting the beta.** `VRMLoadingOptions(augmentSpringBoneColliders:)` (default `true`) now also synthesizes a **torso capsule (spine→chest) + upper-arm capsules** on top of the prior leg/head/forearm/hand set. Our adapter defaults `augment_colliders: true` (`Operations.swift:231`) and no spring-bone/swing plan overrides it, so the whole spring-bone corpus renders with augmentation on. Adopting the beta therefore requires a **re-baseline of the spring-bone + swing goldens**. Deeper methodology note: **augmentation is VMK-proprietary — no spec-faithful renderer (UniVRM, three-vrm, godot) synthesizes colliders**, so an augment-on spring-bone render measures VMK's synthetic physics, not the authored asset. The beta widens this pre-existing gap. For cross-renderer comparison against the UniVRM golden reference, the spring-bone corpus arguably should load with `augment_colliders: false`. Flagged, not changed here.
+
+**New feature → existing-library mapping (which beta features are conformance-testable).** Only one of the beta's headline features is VRM-spec behavior other renderers must also implement:
+
+| beta feature | in VRM 1.0 spec? | other libs | conformance verdict |
+| --- | --- | --- | --- |
+| **Multi-group collider fix** (a collider in N groups collides with springs referencing *any* of its groups) | ✅ `VRMC_springBone` | should honor it | **cross-renderer test candidate — added this change (below).** |
+| Synthetic torso/upper-arm colliders (default on) | ❌ extra-spec | none | not conformance-testable; divergence source (see above). |
+| Cross-avatar spring collision; balance/stagger/crowd | ❌ app-layer | none | single-renderer only; out of scope. |
+| VRM parse 50–70% faster | n/a | all have loaders | perf axis only (`load_ms` benchmark), not correctness. |
+
+**New cross-renderer test: multi-group collider-membership discriminator.** `emit-springbone-collider-multigroup-sweep` (generator; 4 assets = 2 variants × settle+swing). Both variants place one identical sphere collider in the hair path and register it in **two** collider groups; they differ only in which group(s) the spring references — `bothref` references both (control, every renderer collides), `secondref` references **only the collider's second group** (probe). On a spec-faithful renderer the two render identically; a renderer that honors only a collider's *first* group ignores `secondref`'s collider and the hair passes through. The A/B (not an absolute image) is the discriminator, so no oracle is needed. **Validated against known-buggy and known-fixed VMK:**
+
+| cross-SSIM(`secondref`, `bothref`) | |
+| --- | --- |
+| @ `1.0.0` (buggy — first-group-only) | **0.9942 — cells diverge** (probe's collider ignored) |
+| @ `1.1.0-beta` (fixed) | **1.00000 — byte-identical** (probe now collides) |
+
+This reproduces the beta's "Collider group semantics fixed" note as a falsifiable measurement.
+
+**Cross-renderer result — one discriminator, two different multi-group bugs.** Ran the probe (augment-off plans) through three renderers plus both VMK pins, disambiguating the mechanism against the geometrically-identical single-group control `swing_springbone_collider_sphere_x0p02_r0p05` (same sphere, one group, spring references it). All renders are deterministic (three-vrm self-SSIM = 1.00000, so sub-1.0 numbers are real, not noise):
+
+| renderer | `singleref` vs `secondref` | `singleref` vs `bothref` | multi-group handling |
+| --- | --- | --- | --- |
+| VMK `1.1.0-beta` | 1.00000 | 1.00000 | **correct** — collider applied once regardless of routing |
+| VMK `1.0.0` | **0.99416** | 1.00000 | **first-group-only** — a collider referenced only via its *second* group is dropped (confirms the release note) |
+| three-vrm `3.5.0` | 1.00000 | **0.99307** | **double-count** — a collider reached via *two* referenced groups is applied twice; `secondref` (single reference) is correct |
+| godot-vrm (Godot 4.7) | — | — | not runnable this pass — pre-existing GDScript compile error (`register_all` nonexistent) against Godot 4.7, unrelated to this work |
+
+So the same collider-in-two-groups asset exposes **opposite** defects: VMK 1.0.0 *under*-applies (`secondref` drops it), three-vrm *over*-applies (`bothref` doubles it), and fixed VMK does neither. The discriminator localizes the mechanism, not just "they differ."
+
+**Arbitration RESOLVED against the golden reference (UniVRM, PlayMode).** Ran the three probe assets through UniVRM v0.131.0 in PlayMode (real FastSpringBone; two runs for a noise floor). UniVRM has a small render-nondeterminism floor (self-SSIM 0.99872–1.00000). Against it:
+
+| UniVRM comparison | SSIM | vs noise floor |
+| --- | --- | --- |
+| `singleref` vs `secondref` | 0.99977 | at/above floor → **identical** (one application) |
+| `singleref` vs `bothref` | 0.99786 | **below** floor → real difference |
+| `secondref` vs `bothref` | 0.99772 / 0.99781 (both cross-run pairings) | **below** floor (`bothref` self-noise = 1.00000) → **robust** real difference |
+
+So **the oracle *double-counts*: a collider reached via two referenced groups is applied per-group** (`bothref` ≠ `secondref`), while `secondref` (single reference) is applied once. This matches the literal `VRMC_springBone` loop (iterate `colliderGroups` → colliders, no dedup step). Revised standings:
+
+| renderer | `secondref` (single ref) | `bothref` (collider in two referenced groups) | vs oracle |
+| --- | --- | --- | --- |
+| **UniVRM v0.131.0** (oracle) | applied once ✓ | **double-counts** (0.9977 vs single) | — |
+| three-vrm 3.5.0 | applied once ✓ | **double-counts** (0.993) | **matches** oracle direction |
+| VMK **1.1.0-beta** | applied once ✓ | **dedups** (== `secondref`, exactly 1.0) | **diverges** — the outlier |
+| VMK 1.0.0 | **dropped** (0.994) — genuine bug | applied once | diverges (fixed in beta) |
+
+**Net.** VMK 1.0.0's `secondref`-drop was an unambiguous bug and the beta correctly fixed it (all renderers now apply `secondref` once). But the beta *over-corrected*: it also **deduplicated** `bothref`, making VMK the only renderer that does so — a **new, small divergence from the UniVRM golden reference**, which (with three-vrm) applies the collider once per referenced group. Perceptually minor (VMK `bothref`==`secondref` exactly; oracle `bothref` is ~0.9977 off `secondref`) but structurally real and worth an upstream note to VMK: the multi-group fix should match the reference's per-group application rather than dedup. The discriminator thus caught both a fixed bug *and* the fix's side effect — one asset, the full story.
+
+**Pointers.** Upstream: `1.1.0-beta` release notes (cross-avatar collision, hair-vs-body fix, loader speedup, `groupIndex`→`groupMask`). Suite-side (this change): `crates/vrm-asset-generator` `spring_bone_collider_multigroup_sweep` + `emit-springbone-collider-multigroup-sweep` CLI/describe; pin `adapters/vrm-metal-kit/Package.swift` → `1.0.0`. Related: the augment-off methodology question (`docs/methodology.md` spring-bone determinism conventions) and the UniVRM-as-golden-reference triage rule.
+
+**Follow-up — tightest-band MToon re-baseline (11 cells).** Fresh `1.0.0` renders diverge from the stored local baseline on exactly 11 cells — `mtoon_shadingShift_{neg0p5,0p2,0p5,0p8,1}` + `mtoon_basic_shadeShift_neg05` + `mtoon_rimLightingMix_{0p1,0p25,0p5,0p75,1}` — all **sub-perceptual** (SSIM ≥ 0.998, worst `shadingShift_1`), i.e. the already-documented tightest-band cells, not a regression (the stored baseline predates the 0.21.0/rc line; `MToonShader.metal` is unchanged rc.2→1.0.0). Refreshed the **local** baseline cache to the `1.0.0` pixels (diffs now clean). The committed `goldens/manifest.json` is empty (goldens are maintainer-pushed to S3 per the trust model), so there is no committed manifest to update — the durable action is that the S3 `1.0.0` golden set, when generated, should carry these fresh renders for the 11 cells. Flagged, not pushed.
+
+**Follow-up — spring-bone loads made spec-faithful (`augment_colliders: false`).** Resolved the methodology question above: every generated spring-bone plan (settle/swing/sequence/collider/extended/multichain/multi-group) now emits `augment_colliders: false`, a new `TestPlan` field the runner forwards to `load_vrm` (plan value wins over the `--augment-colliders` CLI flag). Collision is now pinned to the **authored** collider set, so VMK is measured against the same physical inputs as UniVRM/three-vrm/godot (which never augment) rather than against its proprietary synthetic capsules. Forwarding verified end-to-end: on VMK the plan-driven flip changes the render on the 16-joint chain (augment on-vs-off SSIM **0.994**) while being a no-op on the short default chain — chain-length-dependent, as expected. Convention written up in `docs/methodology.md`.
+
+**Re-baseline delta measured.** Regenerated the full augment-off spring-bone corpus (186 plans across sweep/swing/collider/extended/multichain/taper/gravity/multi-group) and re-rendered through VMK `1.0.0`, diffing each against the old augment-on baseline. **Only 26/186 cells move, all sub-perceptual (min SSIM 0.9905, mean ≥ 0.995, ZERO below the 0.85 gate), 0 render failures.** Movement is confined to the swing collider/extended/long-chain cases where the hair actually reaches the synthetic body capsules — collider 8/48, extended 10/36, swing 5/20, sweep 3/20; **multichain, taper, and gravity move 0 cells** (settle-only or chains that never contact the body). Worst movers are the large-radius (r0.1) swing collider cells (SSIM ~0.990). So the spec-faithful flip is **safe**: it pins collision to the authored set without a perceptual golden change. The S3 `1.0.0` golden set, when regenerated via `scripts/bootstrap-goldens.sh`, will carry these augment-off pixels; non-VMK spring-bone goldens are unaffected (those renderers never augmented). See `docs/methodology.md` "Spring bone collider augmentation."
+
 ## 2026-06-17 (VMK 1.0.0-rc.2 candidate: render-neutral + measurable per-draw CPU win) — **VALIDATED: bumped the pin `0.21.0` (`985bd7c`) → `1.0.0-rc.2` (`ef52802`). This is the second 1.0 release candidate — `release/1.0` was rebased onto main so it carries the post-0.21.0 code work (VRMMetalKit #356 async-loader crash + LookAt delta-time fix, and #357 "Reduce per-draw CPU overhead by gating debug work behind warmup", a four-round `cmdEncode` optimization) plus the four 1.0 release-docs commits. The validated code tip is `46cd0b1` (#357 merge); `ef52802` = `46cd0b1` + the docs/comment commits (non-code, render-irrelevant). Render-equivalence: 429/429 byte-identical to 0.21.0 across the full corpus (MToon/outline/matcap/shade/rim/shadingshift/pbrtex/uvxform/emissive/spring-bone/VRMA) — ZERO differing cells, stronger than the rc.3→0.21.0 promotion's 31 sub-perceptual cells (re-confirmed 429/429 against the rebased `ef52802` pin). Conformance is therefore invariant by construction (byte-identical pixels ⇒ identical SSIM-vs-UniVRM ⇒ identical pass/fail) — inherits 0.21.0's status verbatim: no hard VRM-1.0 blockers, lone miss #226 unchanged. Performance: no regression; a real, draw-count-scaled CPU-encode win — upstream `VRMBenchmark` on AvatarSample_A (20 draws) reproduces the PR headline (cmdEncode −25.5%, render total −17.7%, eff FPS +21.5%, pipeline changes 30→6, state changes 60→36). Tagged upstream `1.0.0-rc.2` pre-release (superseding the `1.0.0-rc.1` draft, which was 0.21.0 + docs only). VERDICT: promotable to stable `1.0.0`.**
 
 **Why this entry exists.** A new upstream performance PR (#357) merged 2026-06-17. This validates it as an RC against the suite's three bars — render-equivalence (no regression), conformance (no new miss vs the UniVRM golden reference), and performance (the claimed win, plus no regression on light scenes) — before promoting the pin to stable.
