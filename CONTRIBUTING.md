@@ -22,6 +22,28 @@ cd adapters/vrm-metal-kit && swift build && swift test
 cd site && npm install && npm run dev
 ```
 
+### A/B builds of the VRMMetalKit adapter: stash the exe AND its resource bundle
+
+The adapter's Metal shaders live in a SwiftPM resource bundle, not in the
+executable. The generated `Bundle.module` accessor loads
+`VRMMetalKit_VRMMetalKit.bundle` from the executable-adjacent path if present,
+otherwise from the **absolute baked `.build` path** — i.e. whatever revision
+was built last. A bare copied executable therefore silently pairs one
+revision's host code with another revision's shaders once `.build` is rebuilt
+(this produced two invalidated regression passes on 2026-08-16; see
+`docs/findings.md`). When building adapter binaries at multiple upstream
+revisions for comparison:
+
+1. `rm -rf .build` before each side's build (a sub-second `swift build` after
+   a pin change means nothing was compiled — the binary is stale).
+2. Stash both artifacts together so the adjacent bundle takes precedence:
+   `cp .build/release/vrm-metal-kit-adapter DIR/ && cp -R .build/release/VRMMetalKit_VRMMetalKit.bundle DIR/`
+3. Sanity-probe each stashed binary before trusting its renders: the collider
+   sweep cells `swing_springbone_collider_sphere_x0p02_r0p05` and `..._r0p1`
+   must render differently (byte-identical output means colliders are inert —
+   a mismatched shader bundle), and a known-stable cell should byte-match
+   `goldens-cache-rc/vrm-metal-kit/`.
+
 ## Repository structure
 
 This is a polyglot monorepo. See [README.md](./README.md) for the layout.
