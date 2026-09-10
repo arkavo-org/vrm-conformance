@@ -56,6 +56,15 @@ install_one "AvatarSample_U_0.0.vrm.glb" "avatarU_0_0.vrm" || true
 # next to the symlink is committed to git (gitignore negation).
 install_one "vroid_default_F_1_0.vrm" "vroid_default_F_1_0.vrm" || true
 
+# Real-rig humanoid retarget triplet (vrm-conformance#17 / VMK#338): the
+# avatarO/avatarA/avatarH x VRMA_01 plans discriminate the retarget defect
+# (O: right-lower-leg deformation, A: whole-clip no-op, H: control). The
+# clip is the official VRM sample animation VRMA_01 (full-body idle,
+# 11.8 s) — third-party binary, symlinked like the .vrm fixtures.
+install_one "AvatarSample_O_1.0.vrm" "avatarO_1_0.vrm" || true
+install_one "AvatarSample_H_1.0.vrm" "avatarH_1_0.vrm" || true
+install_one "VRMA_01.vrma" "VRMA_01_idle.vrma" || true
+
 # Gaze VRMA clips for the VMK #332 eye look-at corpus (vroid_default_F_gaze_*).
 # Generated next to the avatar so the runner's --asset-dir finds both.
 echo "Emitting gaze VRMA clips (VMK #332 coverage)..."

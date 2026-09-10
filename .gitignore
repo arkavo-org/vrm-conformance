@@ -72,6 +72,11 @@ assets/humanoid/*.vrm
 assets/humanoid/gaze_*.vrma
 # Generated expression VRMA clips (emitted by scripts/install-humanoid-fixtures.sh)
 assets/humanoid/expr_*.vrma
+# Upstream sample VRMA clips (VRMA_01..VRMA_07): symlinks into a local
+# VRMMetalKit checkout, so machine-specific and upstream-licensed for the
+# same reason as the .vrm symlinks above. The suite-authored spatial_*.vrma
+# clips next to them are real files and stay tracked.
+assets/humanoid/VRMA_*.vrma
 
 # Python bytecode cache (vrma-pose-consensus.py + future python helpers)
 __pycache__/
