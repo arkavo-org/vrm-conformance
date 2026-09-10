@@ -238,7 +238,9 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
             "load_vrm",
             ops::LoadVrmParams {
                 path: asset_path.to_string(),
-                augment_colliders: opts.augment_colliders,
+                // Plan value wins over the CLI flag: a plan that opts into a
+                // spec-faithful (augment-off) load carries that intent itself.
+                augment_colliders: plan.augment_colliders.or(opts.augment_colliders),
             },
         )
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;
@@ -597,7 +599,9 @@ pub fn execute_plan_capturing_positions(
             "load_vrm",
             ops::LoadVrmParams {
                 path: asset_path.to_string(),
-                augment_colliders: opts.augment_colliders,
+                // Plan value wins over the CLI flag: a plan that opts into a
+                // spec-faithful (augment-off) load carries that intent itself.
+                augment_colliders: plan.augment_colliders.or(opts.augment_colliders),
             },
         )
         .map_err(|e| anyhow::anyhow!("adapter error: {e}"))?;

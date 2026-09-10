@@ -25,6 +25,16 @@ pub struct TestPlan {
     pub properties: Vec<PropertyAssertion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub physics: Option<PhysicsConfig>,
+    /// Spring-bone collider augmentation for the `load_vrm` op. `Some(false)`
+    /// requests a **spec-faithful** load — no renderer-synthesized colliders —
+    /// so cross-renderer comparison measures the authored asset, not a
+    /// renderer's proprietary augmentation (e.g. VRMMetalKit's synthetic
+    /// leg/head/torso/upper-arm capsules). `None` leaves the renderer default.
+    /// Forwarded to `load_vrm` as `augment_colliders`; the plan value takes
+    /// precedence over the runner's `--augment-colliders` CLI flag. Renderers
+    /// that never augment ignore it. See `docs/methodology.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub augment_colliders: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<AnimationConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -819,6 +829,7 @@ capture_positions: true
             ignore_renderers: vec![],
             properties: vec![],
             physics: None,
+            augment_colliders: None,
             animation: None,
             render_sequence: None,
             cross_variant: None,
@@ -958,6 +969,7 @@ mod ccd_colliders_tests {
             ignore_renderers: vec![],
             properties: vec![],
             physics: None,
+            augment_colliders: None,
             animation: None,
             render_sequence: None,
             cross_variant: None,

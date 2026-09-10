@@ -54,6 +54,7 @@ fn plan_with(spec_version: SpecVersion, camera_z: f32) -> TestPlan {
         ignore_renderers: vec![],
         properties: vec![],
         physics: None,
+        augment_colliders: None,
         animation: None,
         render_sequence: None,
         cross_variant: None,

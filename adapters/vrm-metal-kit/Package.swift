@@ -615,7 +615,16 @@ let package = Package(
             // docs/comment commits, so the validation transfers. Pin-only bump —
             // no adapter code change. Promote to stable 1.0.0 after the gating
             // run. Prior pin: 0.21.0 (985bd7c).
-            revision: "ef52802388b9ec00d8990b8f222641d1f4fbfe1f"
+            // 1.0.0 (a94531d, 2026-07-02) — first STABLE release. Promotes
+            // 1.0.0-rc.2 (ef52802) with one addition: #369 confines VRM
+            // authoring (VRMBuilder/CharacterRecipe/serialization) to the test
+            // target so the public API is render-only (#368). Test-target +
+            // API-surface change only — render output is unchanged from rc.2,
+            // which was itself 429/429 byte-identical to 0.21.0. Overdue
+            // catch-up: we sat on rc.2 while stable shipped. Validated the
+            // render-neutral promotion locally (see docs/findings.md 2026-07-17)
+            // before advancing this pin. Prior pin: 1.0.0-rc.2 (ef52802).
+            revision: "a94531d99f9f8d744d7702595f77c615c169835e"
         ),
     ],
     targets: [

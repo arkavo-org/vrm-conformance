@@ -1016,6 +1016,63 @@ pub fn spring_bone_collider_sweep() -> Vec<(MToonParams, SpringBoneSceneParams)>
     out
 }
 
+/// Multi-group collider-membership sweep — a cross-renderer conformance probe
+/// for the VRMC_springBone rule that a collider referenced by *several*
+/// collider groups collides with a spring referencing *any* of those groups.
+///
+/// Both cells place one identical sphere collider in the chain's swing path and
+/// register it in TWO collider groups (`g_first`, `g_second`). They differ only
+/// in which group(s) the spring references:
+///
+/// - `..._bothref`   — spring references [g_first, g_second]. The collider is
+///   reachable via the first group, so *every* renderer collides. Control.
+/// - `..._secondref` — spring references [g_second] ONLY. The collider is only
+///   reachable via its *second* group membership. A spec-faithful renderer
+///   collides; a renderer that honors only a collider's first group (the bug
+///   VRMMetalKit fixed in 1.1.0-beta) ignores it and the hair passes through.
+///
+/// On a correct renderer the two cells render identically (same collider, same
+/// contact); on a buggy one `secondref` diverges from `bothref`. That A/B — not
+/// an absolute reference — is the discriminator, so this needs no oracle image.
+/// V1-only: multi-group semantics are a VRM 1.0 (`VRMC_springBone`) concern.
+pub fn spring_bone_collider_multigroup_sweep() -> Vec<(MToonParams, SpringBoneSceneParams)> {
+    // Same geometry as the contact regime of `spring_bone_collider_sweep`
+    // (small |x|, mid radius, mid-chain depth) so the chain actually contacts
+    // the collider — otherwise the group-routing bug would be unobservable.
+    let make_collider = || ColliderParams {
+        shape: ColliderShape::Sphere { radius: 0.05 },
+        offset: [0.02, -0.10, 0.0],
+        attach: ColliderAttach::Head,
+    };
+    let two_groups = || {
+        vec![
+            ColliderGroupParams {
+                name: "g_first".into(),
+                collider_indices: vec![0],
+            },
+            ColliderGroupParams {
+                name: "g_second".into(),
+                collider_indices: vec![0],
+            },
+        ]
+    };
+
+    let mut out = Vec::with_capacity(2);
+    for (id, spring_groups) in [
+        ("springbone_collider_multigroup_bothref", vec![0usize, 1]),
+        ("springbone_collider_multigroup_secondref", vec![1usize]),
+    ] {
+        let scene = SpringBoneSceneParams {
+            springs: vec![SpringBoneParams::defaults(id)],
+            colliders: vec![make_collider()],
+            collider_groups: two_groups(),
+            spring_collider_groups: vec![spring_groups],
+        };
+        out.push((MToonParams::defaults(id), scene));
+    }
+    out
+}
+
 /// Build a (ColliderShape, offset) pair for the extended collider at the
 /// given shape name and placement index (0=tight, 1=medium, 2=loose).
 fn make_extended_shape_with_placement(shape_name: &str, p_idx: usize) -> (ColliderShape, [f32; 3]) {
@@ -2039,6 +2096,49 @@ mod collider_sweep_tests {
             .map(|(mtoon, _scene)| mtoon.id.clone())
             .collect();
         assert_eq!(names.len(), 24, "all variant IDs must be unique");
+    }
+
+    #[test]
+    fn multigroup_sweep_encodes_the_first_group_only_discriminator() {
+        let variants = spring_bone_collider_multigroup_sweep();
+        assert_eq!(variants.len(), 2, "control (bothref) + probe (secondref)");
+
+        let by_id = |needle: &str| {
+            variants
+                .iter()
+                .find(|(m, _)| m.id.contains(needle))
+                .map(|(_, s)| s)
+                .unwrap_or_else(|| panic!("missing {needle} cell"))
+        };
+        let bothref = by_id("bothref");
+        let secondref = by_id("secondref");
+
+        for (label, scene) in [("bothref", bothref), ("secondref", secondref)] {
+            // Identical geometry: one collider registered in BOTH groups.
+            assert_eq!(scene.colliders.len(), 1, "{label}: single collider");
+            assert_eq!(scene.collider_groups.len(), 2, "{label}: two groups");
+            assert!(
+                scene
+                    .collider_groups
+                    .iter()
+                    .all(|g| g.collider_indices == vec![0]),
+                "{label}: collider 0 must belong to both groups"
+            );
+        }
+
+        // The only difference is which group(s) the spring references — that is
+        // the entire discriminator. bothref reaches the collider via group 0
+        // (every renderer collides); secondref reaches it ONLY via group 1.
+        assert_eq!(
+            bothref.spring_collider_groups,
+            vec![vec![0usize, 1]],
+            "control references both groups"
+        );
+        assert_eq!(
+            secondref.spring_collider_groups,
+            vec![vec![1usize]],
+            "probe references only the collider's second group"
+        );
     }
 
     #[test]
