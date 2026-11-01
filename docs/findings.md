@@ -85,6 +85,26 @@ Cells needed before the 1.2.1 re-gate means anything for #456/#457:
 
 UV animation needs `render_sequence` or a capture-time op first.*
 
+*Coverage cells added (same day).* Three new sweeps, registered in `scripts/bootstrap-goldens.sh`:
+- `emit-texture-transform-rigged-sweep` (8 cells): the uvxform variants on a sphere skinned to `head`.
+- `emit-slot-texture-transform-sweep` (25 cells): 5 slots × {`none`, `slotonly`, `baseident`, `baseonly`, `both`}.
+- `emit-material-name-blend-sweep` (12 cells): `plain` and `lace` across zwrite × `doubleSided`, plus `frill`/`ribbon`/`collar`/`ruffle` single-sided with zwrite off.
+
+All 45 assets pass `vrm-validator` with 0 errors, and regenerating the existing sweeps is byte-identical. Ids avoid VMK's name tokens: `rigged`, not "skinned" (contains "skin"); `owidth`, not "outline" (contains "line").
+
+Baseline: VMK `1.2.0` (`6b2e2cb`) against three-vrm, counting pixels that differ by more than Δ8.
+
+| check | three-vrm | VMK 1.2.0 |
+| --- | --- | --- |
+| skinned cell vs its rigid twin | 0 px, all 8 | identity 1 px; every non-identity variant 410–476 k px |
+| per-slot `slotonly` vs `none` | 76–392 k px (per-texture) | 0 px on all five slots |
+| per-slot `baseonly` vs `both` | differ | identical (one base transform, UniVRM's fragment model) |
+| name-token cell vs `plain` at the same flags | 0 px, all 8 | 203,636 px, identical for all five tokens (single-sided, zwrite off) |
+
+The skinned row confirms upstream's finding 1 independently. In the name cells, `lace` double-sided zwrite-off differs from `plain` by 343,144 px (forced depth write), and `lace` double-sided zwrite-on matches `plain` (0 px).
+
+Expected on `1.2.1`: skinned cells equal their rigid twins, per-slot cells follow three-vrm, and name cells equal `plain`. UniVRM's reading (per its MToon10 source) is `slotonly` = `none` for fragment slots and an untransformed width mask, so those cells will separate VMK 1.2.1 from UniVRM by design.*
+
 **Pointers.** Upstream: [`1.2.0-rc.2`](https://github.com/arkavo-org/VRMMetalKit/releases/tag/1.2.0-rc.2) (`6b2e2cb`, pre-release). The range `1.2.0-rc.1..1.2.0-rc.2` is 3 commits: `4d28280` #450, `7d92796` #455, `6b2e2cb` #453 (fixes #451). VMK#452 (hair nondeterminism). Scratch caches: `goldens-cache-ab120/rc2/` plus `probes_ds/`, `probes_tt/`, `probes_nm/` under `rc1`/`rc2` (gitignored).
 
 ## 2026-11-01 (VMK 1.2.0-rc.1 conformance run — release gate) — **`1.2.0-rc.1` (`c4925b5`) checked against the pin `1.0.0` (`a94531d`), with `1.1.0` / `1.1.2` / `1.2.0-rc` waypoints and a 4-point bisect of the `1.2.0-rc` line: NO conformance regression on the gate, but the release ships one new visible artifact and needs a large, deliberate re-baseline. Every mover attributes to a named commit — #427 (1.1.2), #429, #444, #445 (1.2.0-rc) and #447/#448 (rc.1); the other eight commits in `1.1.2..1.2.0-rc` are byte-identical. 22 cells fall below 0.85 vs the pin (2 matcap + 20 `vroid_default_F` expression/gaze cells), and **all 22 move TOWARD the three-vrm reference**: matcap `red_tint` 0.743→0.927 and uvxform `rotation_eighth` 0.850→0.930 (#429 shader conventions), gaze 0.639→0.733 (#427 + #429 + #444), expressions 0.645→0.729 (#427). The upstream claim "byte-identical with the five features off, except `transparentWithZWrite`" HOLDS exactly: `1.2.0-rc → rc.1` is 461/462 synthetic + 116/116 0.x + 39/39 humanoid byte-identical, and the only mover is the zwrite cell. The headline behaviour change is VERIFIED on a real asset: AliciaSolid's `_BlendMode=3` bangs stop being covered by their own outline hull. But on the suite's own single-sided zwrite cell it EXPOSES a pre-existing VMK defect. `selectCullMode` returns `.none` for every BLEND material and ignores `doubleSided: false` (proved: VMK renders `doubleSided` false/true byte-identically). Once the surface writes depth, back faces drawn earlier in index order occlude front faces, producing latitude-stripe artifacts. SSIM vs three-vrm drops 0.965→0.940, the only cell in the release that moves AWAY from the reference. Separately, the never-gated **1.1.0→1.1.2 patch hop moved every humanoid golden** (20 below 0.85; #427 warmup fix, toward the reference). It also surfaced a low-rate, load-only nondeterminism in spring-driven hair (3 of 136 loaded runs on 1.1.2/1.2.0-rc/rc.1, 0 of 80 on 1.0.0/1.1.0; serial renders are always byte-identical). VERDICT: conditional GO (below). Do NOT pin (pre-release; policy).**

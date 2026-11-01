@@ -875,6 +875,137 @@ pub fn material_name_classification_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// `KHR_texture_transform` on a SKINNED mesh: the eight
+/// [`mtoon_texture_transform_sweep`] variants with the sphere skinned to the
+/// `head` joint instead of parented to it (emit via
+/// [`crate::emit::emit_with_sidecars_rigged`]). Each `mtoon_uvxform_rigged_*`
+/// cell must render like its rigid `mtoon_uvxform_*` twin: skinning moves
+/// vertices, never UVs. VMK through 1.2.0 drew skinned meshes with raw UVs
+/// (only the rigid shader applied the transform), so every non-identity
+/// rigged cell collapses to the identity render there. Ids say "rigged"
+/// because VMK's name heuristics match the substring "skin".
+pub fn mtoon_texture_transform_rigged_sweep() -> Vec<MToonParams> {
+    mtoon_texture_transform_sweep()
+        .into_iter()
+        .map(|mut p| {
+            p.id = p.id.replacen("mtoon_uvxform_", "mtoon_uvxform_rigged_", 1);
+            p
+        })
+        .collect()
+}
+
+/// Per-texture `KHR_texture_transform`: for each mesh-UV texture slot
+/// (shade multiply, shading shift, rim multiply, outline width, normal), five
+/// variants that move ONE transform (offset `[0.5, 0]`, which swaps the
+/// checkerboard's left and right halves) between textureInfos:
+///
+/// - `none`: slot texture only, no transform anywhere.
+/// - `slotonly`: transform on the slot's own textureInfo; no base texture.
+/// - `baseident`: base colour textured with an identity transform; slot plain.
+/// - `baseonly`: transform on `baseColorTexture` only; slot plain.
+/// - `both`: the same transform on both.
+///
+/// The references disagree, which is the point (docs/findings.md
+/// 2026-11-01). glTF scopes the extension per textureInfo and three-vrm
+/// follows it, so `slotonly` differs from `none` and `baseonly` moves only
+/// the base colour. UniVRM's MToon10 shader samples every fragment texture
+/// with the base colour's `_MainTex_ST`, so `slotonly` equals `none` and
+/// `baseonly` moves the slot too, while its outline pass samples the width
+/// mask with raw UVs. VMK 1.2.0 matches UniVRM on fragment textures and
+/// applies the base transform to the width mask; 1.2.1 switches to
+/// per-texture (VMK#457). Slot settings copy the existing per-slot sweeps so
+/// each texture is visible. Ids avoid VMK's name tokens: the width-mask slot
+/// is `owidth` because "outline" contains "line".
+pub fn mtoon_slot_texture_transform_sweep() -> Vec<MToonParams> {
+    use crate::params::{SlotTextureTransform, TextureSlot};
+
+    let shift = TextureTransform {
+        offset: [0.5, 0.0],
+        rotation: 0.0,
+        scale: [1.0, 1.0],
+    };
+    /// Slot name, slot, and the settings that make its texture visible.
+    type SlotCase = (&'static str, TextureSlot, fn(&mut MToonParams));
+    let slots: [SlotCase; 5] = [
+        ("shade", TextureSlot::ShadeMultiply, |p| {
+            p.shade_multiply_texture = true;
+        }),
+        ("shift", TextureSlot::ShadingShift, |p| {
+            p.shading_shift_texture_scale = Some(1.0);
+        }),
+        ("rim", TextureSlot::RimMultiply, |p| {
+            p.parametric_rim_color_factor = [1.0, 1.0, 1.0];
+            p.parametric_rim_fresnel_power_factor = 3.0;
+            p.parametric_rim_lift_factor = 0.0;
+            p.rim_lighting_mix_factor = 1.0;
+            p.rim_multiply_texture = true;
+        }),
+        ("owidth", TextureSlot::OutlineWidthMultiply, |p| {
+            p.outline_width_mode = OutlineWidthMode::WorldCoordinates;
+            p.outline_width_factor = 0.05;
+            p.outline_color_factor = [0.0, 0.0, 0.0];
+            p.outline_width_multiply_texture = true;
+        }),
+        ("normal", TextureSlot::Normal, |p| {
+            p.normal_texture_scale = Some(1.0);
+        }),
+    ];
+
+    let mut out = Vec::with_capacity(slots.len() * 5);
+    for (name, slot, enable) in slots {
+        let make =
+            |variant: &str, base: Option<TextureTransform>, on_slot: Option<TextureTransform>| {
+                let mut p = MToonParams::defaults(format!("mtoon_slotxform_{name}_{variant}"));
+                enable(&mut p);
+                p.texture_transform = base;
+                p.slot_texture_transform =
+                    on_slot.map(|transform| SlotTextureTransform { slot, transform });
+                p
+            };
+        out.push(make("none", None, None));
+        out.push(make("slotonly", None, Some(shift)));
+        out.push(make("baseident", Some(TextureTransform::identity()), None));
+        out.push(make("baseonly", Some(shift), None));
+        out.push(make("both", Some(shift), Some(shift)));
+    }
+    out
+}
+
+/// Name-heuristic BLEND cells (VMK#456): the half-transparent BLEND sphere of
+/// `mtoon_alpha_blend_zwrite_*` under a control name (`plain`) and each name
+/// VMK routes into its `transparentZWrite` face category (`lace`, `frill`,
+/// `ribbon`, `collar`, `ruffle`). `plain` and `lace` cross
+/// `transparentWithZWrite` x `doubleSided`; the other tokens take the
+/// single-sided, zwrite-off cell, where the override is most visible.
+/// A conformant renderer is name-invariant: every token cell renders like the
+/// `plain` cell with the same flags. VMK through 1.2.0 forces these names
+/// two-sided and depth-writing, so on the closed sphere a single-sided `lace`
+/// cell shows the triangle-order stripes #453 removed elsewhere.
+pub fn material_name_blend_sweep() -> Vec<MToonParams> {
+    let blend = |token: &str, zwrite: bool, double_sided: bool| {
+        let zw = u8::from(zwrite);
+        let sides = if double_sided { "ds" } else { "ss" };
+        let mut p = MToonParams::defaults(format!("matname_blend_{token}_zw{zw}_{sides}"));
+        p.alpha_mode = AlphaMode::Blend;
+        p.base_color_factor = [1.0, 1.0, 1.0, 0.5];
+        p.transparent_with_z_write = zwrite;
+        p.double_sided = double_sided;
+        p
+    };
+    let mut out = Vec::new();
+    for token in ["plain", "lace"] {
+        for zwrite in [false, true] {
+            for double_sided in [false, true] {
+                out.push(blend(token, zwrite, double_sided));
+            }
+        }
+    }
+    for token in ["frill", "ribbon", "collar", "ruffle"] {
+        out.push(blend(token, false, false));
+    }
+    out
+}
+
 fn fmt_num<T: std::fmt::Display + Copy + PartialOrd + Default>(v: T) -> String
 where
     f64: From<T>,
@@ -3514,5 +3645,190 @@ mod vrma_multichannel_sweep_tests {
             .expect("double-drive variant");
         assert!(dd.expressions.iter().any(|e| e.is_preset));
         assert!(dd.expressions.iter().any(|e| !e.is_preset));
+    }
+}
+
+#[cfg(test)]
+mod vmk_121_coverage_tests {
+    //! Coverage cells for the VMK 1.2.1 re-gate (VMK#456, VMK#457): skinned
+    //! `KHR_texture_transform`, per-slot transforms, and name-tripping BLEND
+    //! materials. See docs/findings.md 2026-11-01.
+    use super::*;
+    use crate::params::TextureSlot;
+
+    /// Substrings VMK 1.2.0 matches in material/node names
+    /// (`VRMRenderer.swift`). Control ids must avoid all of them.
+    const VMK_NAME_TOKENS: &[&str] = &[
+        "baked",
+        "body",
+        "bottoms",
+        "brow",
+        "cloth",
+        "collar",
+        "eye",
+        "face",
+        "frill",
+        "hair",
+        "head",
+        "highlight",
+        "hips",
+        "lace",
+        "lash",
+        "line",
+        "lip",
+        "mouth",
+        "other",
+        "pants",
+        "ribbon",
+        "ruffle",
+        "short",
+        "skin",
+        "skirt",
+        "tops",
+    ];
+
+    fn trips_vmk(id: &str) -> Vec<&'static str> {
+        VMK_NAME_TOKENS
+            .iter()
+            .copied()
+            .filter(|t| id.contains(t))
+            .collect()
+    }
+
+    #[test]
+    fn rigged_uvxform_mirrors_rigid_uvxform_one_to_one() {
+        let rigid = mtoon_texture_transform_sweep();
+        let rigged = mtoon_texture_transform_rigged_sweep();
+        assert_eq!(rigged.len(), rigid.len());
+        for (a, b) in rigid.iter().zip(&rigged) {
+            assert_eq!(
+                b.id,
+                a.id.replacen("mtoon_uvxform_", "mtoon_uvxform_rigged_", 1)
+            );
+            assert_eq!(a.texture_transform, b.texture_transform);
+        }
+    }
+
+    #[test]
+    fn slot_sweep_has_five_variants_per_slot() {
+        let s = mtoon_slot_texture_transform_sweep();
+        assert_eq!(s.len(), 25);
+        let mut ids: Vec<&str> = s.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 25, "ids must be unique");
+    }
+
+    #[test]
+    fn slot_sweep_variants_differ_only_in_where_the_transform_sits() {
+        let s = mtoon_slot_texture_transform_sweep();
+        for p in &s {
+            let tt = p.slot_texture_transform;
+            let base = p.texture_transform;
+            if p.id.ends_with("_none") {
+                assert!(tt.is_none() && base.is_none(), "{}", p.id);
+            } else if p.id.ends_with("_slotonly") {
+                assert!(base.is_none(), "{}", p.id);
+                assert!(!tt.expect("slot transform").transform.is_identity());
+            } else if p.id.ends_with("_baseident") {
+                assert!(tt.is_none(), "{}", p.id);
+                assert!(base.expect("base texture").is_identity());
+            } else if p.id.ends_with("_baseonly") {
+                assert!(tt.is_none(), "{}", p.id);
+                assert!(!base.expect("base transform").is_identity());
+            } else if p.id.ends_with("_both") {
+                let st = tt.expect("slot transform");
+                assert_eq!(Some(st.transform), base, "{}", p.id);
+            } else {
+                panic!("unexpected variant {}", p.id);
+            }
+        }
+    }
+
+    #[test]
+    fn slot_sweep_enables_each_slots_texture() {
+        for p in mtoon_slot_texture_transform_sweep() {
+            let slot = if p.id.contains("_shade_") {
+                TextureSlot::ShadeMultiply
+            } else if p.id.contains("_shift_") {
+                TextureSlot::ShadingShift
+            } else if p.id.contains("_rim_") {
+                TextureSlot::RimMultiply
+            } else if p.id.contains("_owidth_") {
+                TextureSlot::OutlineWidthMultiply
+            } else {
+                TextureSlot::Normal
+            };
+            let enabled = match slot {
+                TextureSlot::ShadeMultiply => p.shade_multiply_texture,
+                TextureSlot::ShadingShift => p.shading_shift_texture_scale.is_some(),
+                TextureSlot::RimMultiply => p.rim_multiply_texture,
+                TextureSlot::OutlineWidthMultiply => p.outline_width_multiply_texture,
+                TextureSlot::Normal => p.normal_texture_scale.is_some(),
+            };
+            assert!(enabled, "{} must enable its slot texture", p.id);
+            if let Some(st) = p.slot_texture_transform {
+                assert_eq!(st.slot, slot, "{}", p.id);
+            }
+        }
+    }
+
+    #[test]
+    fn name_blend_sweep_crosses_plain_and_lace_and_samples_other_tokens() {
+        let s = material_name_blend_sweep();
+        assert_eq!(s.len(), 12);
+        for p in &s {
+            assert_eq!(p.alpha_mode, AlphaMode::Blend, "{}", p.id);
+            assert_eq!(p.base_color_factor, [1.0, 1.0, 1.0, 0.5], "{}", p.id);
+            let zw = p.id.contains("_zw1_");
+            let ds = p.id.ends_with("_ds");
+            assert_eq!(p.transparent_with_z_write, zw, "{}", p.id);
+            assert_eq!(p.double_sided, ds, "{}", p.id);
+        }
+        for token in ["plain", "lace"] {
+            let grid = s
+                .iter()
+                .filter(|p| p.id.starts_with(&format!("matname_blend_{token}_")))
+                .count();
+            assert_eq!(grid, 4, "{token} needs the full zwrite x doubleSided grid");
+        }
+        for token in ["frill", "ribbon", "collar", "ruffle"] {
+            assert!(
+                s.iter()
+                    .any(|p| p.id == format!("matname_blend_{token}_zw0_ss")),
+                "{token} cell missing"
+            );
+        }
+    }
+
+    #[test]
+    fn control_ids_avoid_vmk_name_tokens() {
+        let controls = mtoon_texture_transform_rigged_sweep()
+            .into_iter()
+            .chain(mtoon_slot_texture_transform_sweep())
+            .chain(
+                material_name_blend_sweep()
+                    .into_iter()
+                    .filter(|p| p.id.contains("_plain_")),
+            );
+        for p in controls {
+            assert!(
+                trips_vmk(&p.id).is_empty(),
+                "{} trips {:?}",
+                p.id,
+                trips_vmk(&p.id)
+            );
+        }
+        for p in material_name_blend_sweep()
+            .into_iter()
+            .filter(|p| !p.id.contains("_plain_"))
+        {
+            assert_eq!(
+                trips_vmk(&p.id).len(),
+                1,
+                "{} must trip exactly one token",
+                p.id
+            );
+        }
     }
 }

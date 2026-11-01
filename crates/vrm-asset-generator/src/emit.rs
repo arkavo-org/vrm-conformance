@@ -29,7 +29,40 @@ pub fn emit_vrm_with_custom_expressions(
     output: &Utf8Path,
     custom_expression_names: &[&str],
 ) -> Result<()> {
-    emit_vrm_inner(params, output, custom_expression_names, &minimal_skeleton())
+    emit_vrm_inner(
+        params,
+        output,
+        custom_expression_names,
+        &minimal_skeleton(),
+        MeshBinding::Rigid,
+    )
+}
+
+/// Like [`emit_vrm`] but the sphere is a skinned mesh bound to the `head`
+/// joint (weight 1) instead of a rigid child of the `head` node. The node
+/// sits at the scene root as glTF requires for skinned meshes; vertices are
+/// stored in bind-pose world space with the head's inverse-bind matrix, so a
+/// conformant renderer draws it exactly where [`emit_vrm`] draws the rigid
+/// sphere. Exists because renderers can route skinned and rigid geometry
+/// through different shaders (VMK's skinned path ignored
+/// `KHR_texture_transform` through 1.2.0).
+pub fn emit_vrm_rigged(params: &MToonParams, output: &Utf8Path) -> Result<()> {
+    emit_vrm_inner(
+        params,
+        output,
+        &[],
+        &minimal_skeleton(),
+        MeshBinding::SkinnedToHead,
+    )
+}
+
+/// How the avatar's sphere mesh attaches to the skeleton.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MeshBinding {
+    /// Mesh node is a child of the `head` node (no skin).
+    Rigid,
+    /// Mesh node at scene root, skinned to the `head` joint.
+    SkinnedToHead,
 }
 
 /// Like [`emit_vrm`] but with a caller-supplied humanoid skeleton (e.g.
@@ -40,7 +73,7 @@ pub fn emit_vrm_with_skeleton(
     output: &Utf8Path,
     skeleton: &crate::humanoid::Skeleton,
 ) -> Result<()> {
-    emit_vrm_inner(params, output, &[], skeleton)
+    emit_vrm_inner(params, output, &[], skeleton, MeshBinding::Rigid)
 }
 
 fn emit_vrm_inner(
@@ -48,15 +81,38 @@ fn emit_vrm_inner(
     output: &Utf8Path,
     custom_expression_names: &[&str],
     skeleton: &crate::humanoid::Skeleton,
+    binding: MeshBinding,
 ) -> Result<()> {
     // 1) Mesh + buffer + five POSITION-only morph targets for visemes
     //    (aa, ih, ou, ee, oh). Each delta produces a visually distinct
     //    deformation pattern when the corresponding expression weight is
     //    driven to 1.0, so cross-renderer SSIM can falsify "weight accepted
     //    but mesh not deformed". Order MUST match `VISEME_PRESETS`.
-    let mesh = sphere(0.3, 24, 48); // small radius so the sphere fits at avatar chest height
+    let mut mesh = sphere(0.3, 24, 48); // small radius so the sphere fits at avatar chest height
     let morphs = viseme_morph_deltas(&mesh.positions);
-    let (packed, morph_accessors) = pack_mesh_with_morphs(&mesh, &morphs);
+    // A skinned sphere stores bind-pose positions in world space; the head's
+    // inverse-bind matrix maps them back to head-local space. Morph deltas
+    // are computed from head-local positions first so they match the rigid
+    // asset exactly.
+    let head_world = crate::humanoid::rest_pose_world_position("head");
+    if binding == MeshBinding::SkinnedToHead {
+        for p in &mut mesh.positions {
+            p[0] += head_world[0];
+            p[1] += head_world[1];
+            p[2] += head_world[2];
+        }
+    }
+    let (mut packed, morph_accessors) = pack_mesh_with_morphs(&mesh, &morphs);
+    let skin_accessors = (binding == MeshBinding::SkinnedToHead).then(|| {
+        #[rustfmt::skip]
+        let ibm: [f32; 16] = [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            -head_world[0], -head_world[1], -head_world[2], 1.0,
+        ];
+        crate::buffer::append_single_joint_skin(&mut packed, mesh.positions.len(), &[ibm])
+    });
 
     // 2) Humanoid skeleton
     let mut nodes: Vec<Value> = skeleton.nodes_json.as_array().unwrap().clone();
@@ -65,15 +121,28 @@ fn emit_vrm_inner(
     // 3) Add a mesh-bearing node parented to head (so the sphere visualizes
     //    where the head is). Material 0 = our MToon material.
     let mesh_node_index = nodes.len();
-    nodes.push(json!({
-        "name": format!("{}_mesh", params.id),
-        "mesh": 0
-    }));
-    // Append mesh_node_index as a child of head.
-    let head = &mut nodes[head_node];
-    let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
-    head_children.push(json!(mesh_node_index));
-    head["children"] = Value::Array(head_children);
+    let mut scene_roots = vec![json!(skeleton.root_node)];
+    match binding {
+        MeshBinding::Rigid => {
+            nodes.push(json!({
+                "name": format!("{}_mesh", params.id),
+                "mesh": 0
+            }));
+            // Append mesh_node_index as a child of head.
+            let head = &mut nodes[head_node];
+            let mut head_children = head["children"].as_array().cloned().unwrap_or_default();
+            head_children.push(json!(mesh_node_index));
+            head["children"] = Value::Array(head_children);
+        }
+        MeshBinding::SkinnedToHead => {
+            nodes.push(json!({
+                "name": format!("{}_mesh", params.id),
+                "mesh": 0,
+                "skin": 0
+            }));
+            scene_roots.push(json!(mesh_node_index));
+        }
+    }
 
     let targets: Vec<Value> = morph_accessors
         .iter()
@@ -105,11 +174,7 @@ fn emit_vrm_inner(
     // material carries the extension. We only emit it when the
     // transform is non-identity (see base_material), so the
     // extensionsUsed entry follows the same condition.
-    let emits_texture_transform = params
-        .texture_transform
-        .map(|t| !t.is_identity())
-        .unwrap_or(false);
-    if emits_texture_transform {
+    if crate::vrm_ext::uses_khr_texture_transform(params) {
         extensions_used.push("KHR_texture_transform");
     }
 
@@ -123,7 +188,7 @@ fn emit_vrm_inner(
         "extensionsRequired": ["VRMC_vrm"],
         "scene": 0,
         "scenes": [
-            { "nodes": [skeleton.root_node] }
+            { "nodes": scene_roots }
         ],
         "nodes": nodes,
         "meshes": [
@@ -151,6 +216,17 @@ fn emit_vrm_inner(
     });
 
     doc["extensions"]["VRMC_vrm"]["expressions"]["preset"] = viseme_preset_binds(mesh_node_index);
+
+    if let Some((joints, weights, ibm)) = skin_accessors {
+        let attributes = &mut doc["meshes"][0]["primitives"][0]["attributes"];
+        attributes["JOINTS_0"] = json!(joints);
+        attributes["WEIGHTS_0"] = json!(weights);
+        doc["skins"] = json!([{
+            "joints": [head_node],
+            "inverseBindMatrices": ibm,
+            "skeleton": head_node
+        }]);
+    }
 
     // Attach the procedural quadrant-checkerboard texture (16x16 RGBA
     // PNG, encoded inline as a data URI) when any sweep variant has
@@ -603,6 +679,26 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
         .unwrap_or_default();
     let plan = build_default_test_plan(params, &asset_relpath);
     write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// [`emit_with_sidecars`] for the head-skinned sphere ([`emit_vrm_rigged`]).
+/// The test plan is the default one, so a rigged cell and its rigid twin
+/// render under identical camera and lighting.
+pub fn emit_with_sidecars_rigged(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_rigged(params, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(params, None, &vrm_path, &meta_path)?;
+
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let plan = build_default_test_plan(params, &asset_relpath);
+    write_test_yaml(&plan, &stem.with_extension("test.yaml"))?;
 
     Ok(())
 }

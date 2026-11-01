@@ -4,7 +4,7 @@
 //! - VRMC_vrm: https://github.com/vrm-c/vrm-specification/tree/master/specification/VRMC_vrm-1.0
 //! - VRMC_materials_mtoon: https://github.com/vrm-c/vrm-specification/tree/master/specification/VRMC_materials_mtoon-1.0
 
-use crate::params::{AlphaMode, MToonParams, OutlineWidthMode};
+use crate::params::{AlphaMode, MToonParams, OutlineWidthMode, TextureSlot};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -262,7 +262,8 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
     // param is set), so the same texture serves both baseColorTexture
     // and shadeMultiplyTexture without duplication.
     if p.shade_multiply_texture {
-        mtoon["shadeMultiplyTexture"] = json!({ "index": 0 });
+        mtoon["shadeMultiplyTexture"] =
+            slot_texture_info(p, TextureSlot::ShadeMultiply, json!({ "index": 0 }));
     }
 
     // `matcapTexture` per VRMC_materials_mtoon-1.0 (rim lighting
@@ -284,10 +285,14 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
     // `shadingShiftTextureInfo` schema carries the extra `scale`
     // field on the textureInfo (default 1.0 per spec).
     if let Some(scale) = p.shading_shift_texture_scale {
-        mtoon["shadingShiftTexture"] = json!({
-            "index": 0,
-            "scale": scale,
-        });
+        mtoon["shadingShiftTexture"] = slot_texture_info(
+            p,
+            TextureSlot::ShadingShift,
+            json!({
+                "index": 0,
+                "scale": scale,
+            }),
+        );
     }
 
     // `rimMultiplyTexture` per VRMC_materials_mtoon-1.0: a plain
@@ -296,7 +301,8 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
     // sets a non-zero `parametricRimColorFactor` and a meaningful
     // `rimLightingMixFactor` — the sweep handles that.
     if p.rim_multiply_texture {
-        mtoon["rimMultiplyTexture"] = json!({ "index": 0 });
+        mtoon["rimMultiplyTexture"] =
+            slot_texture_info(p, TextureSlot::RimMultiply, json!({ "index": 0 }));
     }
 
     // `outlineWidthMultiplyTexture` per VRMC_materials_mtoon-1.0
@@ -305,10 +311,43 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
     // visible signal when `outlineWidthMode != none` and
     // `outlineWidthFactor > 0` — the sweep handles that.
     if p.outline_width_multiply_texture {
-        mtoon["outlineWidthMultiplyTexture"] = json!({ "index": 0 });
+        mtoon["outlineWidthMultiplyTexture"] =
+            slot_texture_info(p, TextureSlot::OutlineWidthMultiply, json!({ "index": 0 }));
     }
 
     mtoon
+}
+
+/// True when `slot`'s texture binding is enabled on `p`.
+fn slot_enabled(p: &MToonParams, slot: TextureSlot) -> bool {
+    match slot {
+        TextureSlot::ShadeMultiply => p.shade_multiply_texture,
+        TextureSlot::ShadingShift => p.shading_shift_texture_scale.is_some(),
+        TextureSlot::RimMultiply => p.rim_multiply_texture,
+        TextureSlot::OutlineWidthMultiply => p.outline_width_multiply_texture,
+        TextureSlot::Normal => p.normal_texture_scale.is_some(),
+    }
+}
+
+/// `info` with `KHR_texture_transform` attached when
+/// `p.slot_texture_transform` targets `slot` with a non-identity transform.
+fn slot_texture_info(p: &MToonParams, slot: TextureSlot, mut info: Value) -> Value {
+    if let Some(st) = p.slot_texture_transform {
+        if st.slot == slot && !st.transform.is_identity() {
+            info["extensions"] = st.transform.to_extension_json();
+        }
+    }
+    info
+}
+
+/// True when the emitted material references `KHR_texture_transform` on any
+/// textureInfo, so the document must list it in `extensionsUsed`.
+pub fn uses_khr_texture_transform(p: &MToonParams) -> bool {
+    let base = p.texture_transform.is_some_and(|t| !t.is_identity());
+    let slot = p
+        .slot_texture_transform
+        .is_some_and(|st| !st.transform.is_identity() && slot_enabled(p, st.slot));
+    base || slot
 }
 
 /// glTF base material wrapping MToon. MToon depends on KHR_materials_unlit
@@ -367,10 +406,14 @@ pub fn base_material(p: &MToonParams) -> Value {
     // because tangent-space normal maps require different RGB encoding
     // semantics from the color-style checkerboard at index 0.
     if let Some(scale) = p.normal_texture_scale {
-        material["normalTexture"] = json!({
-            "index": 1,
-            "scale": scale,
-        });
+        material["normalTexture"] = slot_texture_info(
+            p,
+            TextureSlot::Normal,
+            json!({
+                "index": 1,
+                "scale": scale,
+            }),
+        );
     }
 
     // glTF-core `occlusionTexture` per `material.occlusionTextureInfo.schema.json`.

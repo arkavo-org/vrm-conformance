@@ -562,6 +562,46 @@ pub enum Cmd {
 
     /// Emit the material-name render-classification sweep (6 variants).
     ///
+    /// Emit the skinned `KHR_texture_transform` sweep (8 assets): the
+    /// `emit-texture-transform-sweep` variants with the sphere skinned to the
+    /// `head` joint. Each `mtoon_uvxform_rigged_*` cell must render like its
+    /// rigid `mtoon_uvxform_*` twin; a renderer whose skinned path drops the
+    /// transform collapses every rigged cell to the identity render.
+    /// VRM 1.0 only.
+    EmitTextureTransformRiggedSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Emit the per-slot `KHR_texture_transform` sweep (25 assets): for each
+    /// mesh-UV texture slot (shade multiply, shading shift, rim multiply,
+    /// outline width, normal), five variants that move one transform between
+    /// the slot's own textureInfo and `baseColorTexture` (`none`, `slotonly`,
+    /// `baseident`, `baseonly`, `both`). Separates per-texture transforms
+    /// (glTF, three-vrm) from a single base-colour transform (UniVRM MToon10).
+    /// VRM 1.0 only.
+    EmitSlotTextureTransformSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Emit the name-heuristic BLEND sweep (12 assets): the half-transparent
+    /// BLEND sphere under a control name (`plain`) and the names VMK routes
+    /// into `transparentZWrite` (`lace`, `frill`, `ribbon`, `collar`,
+    /// `ruffle`). `plain` and `lace` cross transparentWithZWrite x
+    /// doubleSided. A conformant renderer is name-invariant at fixed flags.
+    /// VRM 1.0 only.
+    EmitMaterialNameBlendSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// One MToon material under heuristic-tripping names (`matname_clothing_*`,
     /// `matname_skirt_*`) vs control names (`matname_plain_*`, `matname_body_*`)
     /// crossed with the glTF `doubleSided` flag. Every variant is byte-identical
@@ -2744,6 +2784,36 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::EmitTextureTransformRiggedSweep {
+            output_dir,
+            json: emit_json,
+        } => emit_mtoon_sweep(
+            "emit-texture-transform-rigged-sweep",
+            &crate::sweep::mtoon_texture_transform_rigged_sweep(),
+            &output_dir,
+            emit_json,
+            crate::emit::emit_with_sidecars_rigged,
+        ),
+        Cmd::EmitSlotTextureTransformSweep {
+            output_dir,
+            json: emit_json,
+        } => emit_mtoon_sweep(
+            "emit-slot-texture-transform-sweep",
+            &crate::sweep::mtoon_slot_texture_transform_sweep(),
+            &output_dir,
+            emit_json,
+            emit_with_sidecars,
+        ),
+        Cmd::EmitMaterialNameBlendSweep {
+            output_dir,
+            json: emit_json,
+        } => emit_mtoon_sweep(
+            "emit-material-name-blend-sweep",
+            &crate::sweep::material_name_blend_sweep(),
+            &output_dir,
+            emit_json,
+            emit_with_sidecars,
+        ),
         Cmd::EmitMaterialNameClassificationSweep {
             output_dir,
             json: emit_json,
@@ -3449,6 +3519,75 @@ pub fn run(cli: Cli) -> Result<()> {
                             }
                         }
                     },
+                    "emit-texture-transform-rigged-sweep": {
+                        "summary": "Skinned KHR_texture_transform sweep (8 assets): the texture-transform sweep with the sphere skinned to the head joint. Each mtoon_uvxform_rigged_* cell must match its rigid mtoon_uvxform_* twin. VRM 1.0 only.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-slot-texture-transform-sweep": {
+                        "summary": "Per-slot KHR_texture_transform sweep (25 assets = 5 slots x {none, slotonly, baseident, baseonly, both}). Separates per-textureInfo transforms (glTF, three-vrm) from one base-colour transform (UniVRM MToon10). VRM 1.0 only.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-material-name-blend-sweep": {
+                        "summary": "Name-heuristic BLEND sweep (12 assets): a half-transparent BLEND sphere named plain (control) or lace/frill/ribbon/collar/ruffle; plain and lace cross transparentWithZWrite x doubleSided. Conformant renderers are name-invariant. VRM 1.0 only.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
                     "emit-doublesided-spec-test": {
                         "summary": "Emit the doubleSided back-face-culling spec-test pair (doublesided_quad_false/true): an open quad viewed from behind so culling is observable. The false variant's plan carries a cross_variant SSIM assertion requiring the two renders to diverge.",
                         "input_schema": {
@@ -3524,4 +3663,48 @@ pub fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Shared body of the single-emitter MToon sweep subcommands: emit each
+/// asset triplet with `emit`, NDJSON progress on stderr under `--json`, and a
+/// structured summary on stdout.
+fn emit_mtoon_sweep(
+    op: &str,
+    assets: &[MToonParams],
+    output_dir: &camino::Utf8Path,
+    emit_json: bool,
+    emit: fn(&MToonParams, &camino::Utf8Path) -> Result<()>,
+) -> Result<()> {
+    std::fs::create_dir_all(output_dir)?;
+    let total = assets.len();
+    let mut emitted = Vec::with_capacity(total);
+    for (i, p) in assets.iter().enumerate() {
+        if emit_json {
+            let evt = json!({
+                "event": "progress",
+                "op": op,
+                "index": i,
+                "total": total,
+                "id": p.id
+            });
+            eprintln!("{}", serde_json::to_string(&evt)?);
+        } else {
+            eprintln!("[{:3}/{}] {}", i + 1, total, p.id);
+        }
+        let stem = output_dir.join(&p.id);
+        emit(p, &stem)?;
+        emitted.push(stem);
+    }
+    if emit_json {
+        let summary = json!({
+            "ok": true,
+            "count": emitted.len(),
+            "output_dir": output_dir,
+            "assets": emitted
+        });
+        println!("{}", serde_json::to_string(&summary)?);
+    } else {
+        println!("{op}: emitted {} assets to {output_dir}", emitted.len());
+    }
+    Ok(())
 }
