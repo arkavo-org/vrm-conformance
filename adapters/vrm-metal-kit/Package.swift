@@ -624,7 +624,20 @@ let package = Package(
             // catch-up: we sat on rc.2 while stable shipped. Validated the
             // render-neutral promotion locally (see docs/findings.md 2026-07-17)
             // before advancing this pin. Prior pin: 1.0.0-rc.2 (ef52802).
-            revision: "a94531d99f9f8d744d7702595f77c615c169835e"
+            // 1.2.0 (6b2e2cb, 2026-11-01) — stable, tagged on the same commit as
+            // 1.2.0-rc.2. Skips 1.1.0/1.1.2. Not render-neutral: vs 1.0.0 it
+            // moves 176 synthetic, 14 VRM 0.x, all 39 humanoid and both
+            // AvatarSample_U cells (22 below 0.85, all toward three-vrm): #427
+            // spring warmup, #429 matcap/uvxform/capsule/gaze/VRM0 conventions,
+            // #444/#445 spring push-out + collider sizing, #447/#448
+            // transparentWithZWrite depth write, #453 single-sided BLEND culling.
+            // Re-baseline any local VMK goldens. Gated in docs/findings.md
+            // 2026-11-01 (rc.1 conditional GO, rc.2 GO). Known issues: VMK#452
+            // (hair flake under concurrent GPU load; render serially), #456
+            // (name-matched lace/frill materials), #457 (KHR_texture_transform
+            // from baseColorTexture). Pin-only bump — no adapter code change.
+            // Prior pin: 1.0.0 (a94531d).
+            revision: "6b2e2cb8ba5e08de3c729de6a1c437db46fe1bec"
         ),
     ],
     targets: [
