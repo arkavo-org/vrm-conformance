@@ -2,7 +2,7 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
-## 2026-11-01 (RFC 0007 `set_material_time` + VMK 1.2.1 candidate preview) — **The suite can now test MToon UV animation at a pinned time. A preview render of VMK PR #460 (`1af2eff`, the 1.2.1 candidate) fixes everything the new #456/#457 cells measure, and it matches three-vrm on every UV-animation cell. Both renderers leave the outline width mask unanimated, which departs from the spec; VMK documents this as deliberate. This is a preview, not the gate: the 1.2.1-rc.1 re-gate (full corpus, clean build) still runs when the tag exists.**
+## 2026-11-01 (RFC 0007 `set_material_time` + VMK 1.2.1 candidate preview) — **The suite can now test MToon UV animation at a pinned time. A preview render of VMK PR #460 (`1af2eff`, the 1.2.1 candidate) fixes every #456/#457 cell except one shared-image shade case (correction below), and it matches three-vrm on every UV-animation cell. Both renderers leave the outline width mask unanimated, which departs from the spec; VMK documents this as deliberate. This is a preview, not the gate: the 1.2.1-rc.1 re-gate (full corpus, clean build) still runs when the tag exists.**
 
 **What landed.** [RFC 0007](../rfcs/0007-material-time-op.md):
 - A new op, `set_material_time { session_id, time_seconds }`, and a plan field, `material_time_seconds`. The runner calls the op after any physics ops and before `render`. An adapter that answers `-32000`/`-32601` fails the plan (`set_material_time unsupported by <renderer>`), so a timed plan never renders at an adapter's own clock. `execute-test-batch` (UniVRM) skips timed plans with a warning.
@@ -19,11 +19,15 @@ This document records cross-renderer divergence findings produced by the suite, 
 | skinned uvxform cell vs rigid twin | 410–476 k px | **1 px** (all 8) | 0 px |
 | per-slot `slotonly` vs `none` (shade/shift/rim/normal) | 0 px | **108–446 k px** | 118–392 k px |
 | per-slot `slotonly` vs `none` (outline width) | 0 px | 3,459 px | 76,583 px |
+| per-slot `baseonly` vs `both` (shift/rim/owidth/normal) | 0 px | 3–453 k px | 76–473 k px |
+| per-slot `baseonly` vs `both` (**shade**) | 0 px | **0 px** | 399,577 px |
 | name-token cells vs `plain` | 203,636 px | **0 px** (all 8) | 0 px |
 | UV `scrollx_t0` vs `still_t1` | — | 0 px | 0 px |
 | UV `owidth_t1` vs `owidth_t0` (spec: the mask animates) | — | **0 px** | 352 px |
 
 The outline-width slot moves far less on VMK because this sphere hits the 2026-06-14 under-extrusion, so VMK's outline barely leaves the surface; the transform now applies, it just has little silhouette to move. Visual comparison of the UV cells shows the same animated geometry in VMK and three-vrm for scroll, rotation, rotation + scroll (the spec order), the B-channel mask, and `KHR(anim(uv))`. SSIM between them is 0.90–0.95 on every cell, `still_t1` included. That level comes from a standing difference, not the animation: VMK shows the base texture through the shaded hemisphere, where three-vrm draws flat shade colour.
+
+**Correction (same day): the preview missed a #457 gap that the corpus already catches.** I first read the per-slot cells only as `slotonly` vs `none`. `mtoon_slotxform_shade_baseonly` renders identically to `_both` on `1af2eff`, so the shade texture took the base colour's transform. Every generator texture slot shares one image (texture index 0). When `shadeMultiplyTexture` and `baseColorTexture` reference the same image, VMK reused the base colour sample, transform included. Upstream found the same gap from this preview and fixed it in `62c1f77`: the sample is reused only when the transforms match too. That fix ships in the rc.1 squash-merge. Gate check: shade `baseonly` must differ from `both`.
 
 **Recorded divergences.**
 1. **Outline width mask is not animated.** The MToon 1.0 spec lists `outlineWidthMultiplyTexture` among the animated textures. VMK 1.2.1 (deliberately, documented in its release notes per its maintainers) and three-vrm (`mtoon.vert` samples raw `vUv`) both sample it unanimated, so `owidth_t1` equals `owidth_t0` apart from three-vrm's 352 edge pixels. UniVRM samples it at raw `texcoord0`, with no transform at all. Every reference departs from the spec text here; this is logged as a spec divergence, not a VMK defect.
