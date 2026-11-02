@@ -1096,6 +1096,39 @@ pub fn mtoon_uv_animation_sweep() -> Vec<(MToonParams, f32)> {
     out
 }
 
+/// Normal-map tangent-space convention cells (no TANGENT attribute, so the
+/// frame comes from UV derivatives, as on VRoid avatars). A flat quad facing
+/// the camera, U along world +X and image top at world +Y, carries a uniform
+/// tilted normal map and is lit edge-on (second tuple field: the direction
+/// the light travels). With the light grazing the surface, the flat cell sits
+/// on MToon's lit/shade boundary, and the sign of the tilt decides lit vs
+/// shaded. glTF 2.0 (+X = increasing U, +Y = up) predicts:
+///
+/// - `px_lx` lit and `nx_lx` shaded (light from +X);
+/// - `py_ly` lit and `ny_ly` shaded (light from +Y).
+///
+/// A renderer whose derivative tangent points along −dP/du swaps the X pair.
+/// Arbitrates the 2026-11-01 VMK-vs-three-vrm normal-map mirror without
+/// either renderer as the reference.
+pub fn normal_map_convention_sweep() -> Vec<(MToonParams, [f32; 3])> {
+    let cell = |name: &str, tilt: [f32; 2], light: [f32; 3]| {
+        let mut p = MToonParams::defaults(format!("nmapquad_{name}"));
+        p.normal_texture_scale = Some(1.0);
+        p.normal_map_tilt = Some(tilt);
+        (p, light)
+    };
+    let from_px = [-1.0, 0.0, 0.0];
+    let from_py = [0.0, -1.0, 0.0];
+    vec![
+        cell("flat_lx", [0.0, 0.0], from_px),
+        cell("px_lx", [0.5, 0.0], from_px),
+        cell("nx_lx", [-0.5, 0.0], from_px),
+        cell("flat_ly", [0.0, 0.0], from_py),
+        cell("py_ly", [0.0, 0.5], from_py),
+        cell("ny_ly", [0.0, -0.5], from_py),
+    ]
+}
+
 fn fmt_num<T: std::fmt::Display + Copy + PartialOrd + Default>(v: T) -> String
 where
     f64: From<T>,
@@ -4002,5 +4035,37 @@ mod uv_animation_sweep_tests {
                 assert!(!p.id.contains(token), "{} contains {token}", p.id);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod normal_map_convention_tests {
+    use super::*;
+
+    #[test]
+    fn six_cells_pair_each_tilt_with_its_axis_light() {
+        let s = normal_map_convention_sweep();
+        assert_eq!(s.len(), 6);
+        for (p, light) in &s {
+            let tilt = p.normal_map_tilt.expect("tilt");
+            assert!(p.normal_texture_scale.is_some(), "{}", p.id);
+            assert!(p.texture_transform.is_none(), "{}: untextured base", p.id);
+            if p.id.ends_with("_lx") {
+                assert_eq!(*light, [-1.0, 0.0, 0.0]);
+                assert_eq!(tilt[1], 0.0, "{}: X cells tilt only in X", p.id);
+            } else {
+                assert_eq!(*light, [0.0, -1.0, 0.0]);
+                assert_eq!(tilt[0], 0.0, "{}: Y cells tilt only in Y", p.id);
+            }
+        }
+    }
+
+    #[test]
+    fn uniform_map_encodes_the_tilt() {
+        let img = crate::texture::uniform_normal_map_16(0.5, 0.0);
+        let px = img.get_pixel(3, 11).0;
+        assert_eq!(&px[..3], &[191, 128, 238]);
+        let img = crate::texture::uniform_normal_map_16(0.0, -0.5);
+        assert_eq!(img.get_pixel(0, 0).0[1], 64);
     }
 }

@@ -184,9 +184,15 @@ else
         rm -rf "$UVANIM_DIR"; mkdir -p "$UVANIM_DIR"
         cargo run --release -q -p vrm-asset-generator -- emit-uv-animation-sweep \
             --output-dir "$UVANIM_DIR" --json >/dev/null
+
+        echo "==> Emitting normal-map convention sweep (6 plans, edge-lit tilted quad)"
+        NMAPCONV_DIR="$GOLDENS_DIR/_assets_nmapconv"
+        rm -rf "$NMAPCONV_DIR"; mkdir -p "$NMAPCONV_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-normal-map-convention-sweep \
+            --output-dir "$NMAPCONV_DIR" --json >/dev/null
     else
         echo "    SKIP VMK 1.2.1 coverage sweeps: VRM 1.0 only"
-        UVXFORM_RIGGED_DIR=""; SLOTXFORM_DIR=""; MATNAME_BLEND_DIR=""; UVANIM_DIR=""
+        UVXFORM_RIGGED_DIR=""; SLOTXFORM_DIR=""; MATNAME_BLEND_DIR=""; UVANIM_DIR=""; NMAPCONV_DIR=""
     fi
 
     echo "==> Emitting MToon shadeMultiplyTexture sweep (6 plans, shaded-color path)"
@@ -546,6 +552,7 @@ if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
             "${SLOTXFORM_DIR:-}" \
             "${MATNAME_BLEND_DIR:-}" \
             "${UVANIM_DIR:-}" \
+            "${NMAPCONV_DIR:-}" \
             "${SHADETEX_DIR:-}" \
             "${MATCAP_DIR:-}" \
             "${SHADINGSHIFTTEX_DIR:-}" \

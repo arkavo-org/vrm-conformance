@@ -165,6 +165,13 @@ pub struct MToonParams {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub uv_animation_mask_texture: bool,
 
+    /// When `Some([nx, ny])` (with `normal_texture_scale` set), the normal
+    /// texture is a uniform tilt instead of the quadrant map
+    /// (`texture::uniform_normal_map_16`). Used by the normal-map convention
+    /// cells. `None` (default) is skipped on serialization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_map_tilt: Option<[f32; 2]>,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -212,6 +219,7 @@ impl MToonParams {
             occlusion_texture_strength: None,
             slot_texture_transform: None,
             uv_animation_mask_texture: false,
+            normal_map_tilt: None,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,

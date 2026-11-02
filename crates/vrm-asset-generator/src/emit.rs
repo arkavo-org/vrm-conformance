@@ -273,7 +273,10 @@ fn emit_vrm_inner(
         // sampler — normal maps don't need a special filter for our
         // test corpus.
         if needs_normal_map {
-            let normal_img = crate::texture::quadrant_normal_map_16();
+            let normal_img = match params.normal_map_tilt {
+                Some([nx, ny]) => crate::texture::uniform_normal_map_16(nx, ny),
+                None => crate::texture::quadrant_normal_map_16(),
+            };
             let normal_uri = crate::texture::image_as_data_uri(&normal_img);
             images.push(json!({
                 "name": format!("{}_normal_map", params.id),
@@ -579,6 +582,26 @@ pub fn emit_vrm_textured_quad(params: &MToonParams, output: &Utf8Path) -> Result
         json!([{ "wrapS": 10497, "wrapT": 10497, "magFilter": 9729, "minFilter": 9729 }]);
     doc["textures"] = json!([{ "source": 0, "sampler": 0 }]);
 
+    // glTF-core normalTexture at index 1 (base_material binds it when
+    // normal_texture_scale is set): the quadrant map, or a uniform tilt for
+    // the normal-map convention cells. The quad carries no TANGENT, so
+    // renderers derive the frame from UV derivatives.
+    if params.normal_texture_scale.is_some() {
+        let normal_img = match params.normal_map_tilt {
+            Some([nx, ny]) => crate::texture::uniform_normal_map_16(nx, ny),
+            None => crate::texture::quadrant_normal_map_16(),
+        };
+        doc["images"].as_array_mut().unwrap().push(json!({
+            "name": format!("{}_normal_map", params.id),
+            "uri": crate::texture::image_as_data_uri(&normal_img),
+            "mimeType": "image/png"
+        }));
+        doc["textures"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "source": 1, "sampler": 0 }));
+    }
+
     for key in ["buffers", "bufferViews", "accessors"] {
         doc[key] = packed.json[key].clone();
     }
@@ -704,6 +727,32 @@ pub fn emit_with_sidecars_timed(
         .unwrap_or_default();
     let mut plan = build_default_test_plan(params, &asset_relpath);
     plan.material_time_seconds = Some(material_time_seconds);
+    write_test_yaml(&plan, &stem.with_extension("test.yaml"))?;
+
+    Ok(())
+}
+
+/// Sidecars for a normal-map convention cell: the flat quad
+/// ([`emit_vrm_textured_quad`]) with its plan's directional light replaced
+/// by `light_dir` (the direction the light travels), so the light grazes
+/// the quad and the sign of the normal-map tilt decides lit vs shaded.
+pub fn emit_with_sidecars_normal_quad(
+    params: &MToonParams,
+    stem: &Utf8Path,
+    light_dir: [f32; 3],
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm_textured_quad(params, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(params, None, &vrm_path, &meta_path)?;
+
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan = build_default_test_plan(params, &asset_relpath);
+    plan.lighting.directional.dir = light_dir;
     write_test_yaml(&plan, &stem.with_extension("test.yaml"))?;
 
     Ok(())

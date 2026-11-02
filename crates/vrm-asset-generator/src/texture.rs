@@ -76,6 +76,19 @@ pub fn quadrant_normal_map_16() -> RgbaImage {
     img
 }
 
+/// 16×16 tangent-space normal map with ONE uniform tilt `(nx, ny)`
+/// (nz completes the unit vector), encoded as glTF expects
+/// (`rgb = (n + 1) / 2 * 255`). glTF 2.0 defines tangent space as +X along
+/// increasing U and +Y "up" in the image, so on a quad whose U runs toward
+/// world +X and whose image top is world +Y, `(+0.5, 0)` must tilt the shading
+/// normal toward world +X and `(0, +0.5)` toward world +Y.
+pub fn uniform_normal_map_16(nx: f32, ny: f32) -> RgbaImage {
+    let encode = |v: f32| -> u8 { ((v + 1.0) * 0.5 * 255.0).round().clamp(0.0, 255.0) as u8 };
+    let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+    let px = image::Rgba([encode(nx), encode(ny), encode(nz), 255]);
+    RgbaImage::from_pixel(16, 16, px)
+}
+
 /// PNG-encode an image and wrap it in a `data:` URI suitable for
 /// `glTF.images[*].uri`. The base64 dance avoids touching the GLB
 /// binary chunk — keeps texture additions JSON-only, no new
