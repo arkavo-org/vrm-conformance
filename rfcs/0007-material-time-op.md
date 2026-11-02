@@ -66,7 +66,7 @@ From the MToon 1.0 spec (README §UV Animation › Transform Order; §Compatibil
 - The animated UV is `uv' = Scroll · T(0.5) · Rot · T(−0.5) · uv`: rotation about (0.5, 0.5) first, then scroll.
 - The animation runs before each texture's `KHR_texture_transform`: `KHR(anim(uv))`.
 - `uvAnimationMaskTexture` scales time by its **B** channel.
-- The animated textures are base colour, shade multiply, shading shift, rim multiply, outline width multiply, emissive and normal. Matcap is not animated.
+- The animated textures are base colour, shade multiply, rim multiply, outline width multiply, emissive and normal, plus `shadingToonyMultiplyTexture`. That last one is the README's own wording and appears to be a stale draft name for `shadingShiftTexture`. Matcap is not animated.
 
 Known reference divergences, from source reading on 2026-11-01:
 

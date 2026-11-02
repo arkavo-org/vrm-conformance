@@ -9,7 +9,8 @@ This document records cross-renderer divergence findings produced by the suite, 
 - three-vrm implements the op by writing `speed × t` into each MToon material after `vrm.update`. Before this, its `render` drew UV animation at 1/60 s per render plus any physics steps.
 - VMK implements it when built with `-DVMK_UV_ANIMATION_TIME` (`renderer.uvAnimationTime`, VMK ≥ 1.2.1); without the flag it returns Unimplemented. The mock, Godot and Babylon declare it Unimplemented.
 - `emit-uv-animation-sweep` (11 cells): still and t = 0 controls; scroll x and y; rotation; rotation + scroll; B-channel mask; animation × base `KHR_texture_transform` scale; shade texture; outline width mask at t = 0 and t = 1. All 11 pass `vrm-validator` with 0 errors.
-- Measured: the VMK 1.2.0 adapter fails all 10 timed plans loudly, as designed.
+- Measured: the pre-change VMK 1.2.0 adapter binary fails all 10 timed plans loudly (`-32601`). The new adapter code built without the flag answers `-32000` Unimplemented; a Swift unit test covers that, but it wasn't exercised in a render run.
+- Untimed cells are unchanged on both modified adapters. The unflagged VMK build renders `mtoon_alpha_blend_zwrite_true` byte-identically to the gated 1.2.0 build. The updated three-vrm adapter renders `mtoon_uvxform_offset_x_0p5` byte-identically to its pre-change render (twice). The existing corpus regenerates byte-identically (177/177 files).
 
 **Candidate preview** (`1af2eff`, flagged clean build, serial):
 
