@@ -310,6 +310,12 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
     // multiplied into the outline width per vertex. Only emits
     // visible signal when `outlineWidthMode != none` and
     // `outlineWidthFactor > 0` — the sweep handles that.
+    // `uvAnimationMaskTexture` per VRMC_materials_mtoon-1.0: the B channel
+    // scales UV-animation time per texel (README §uvAnimationMaskTexture).
+    if p.uv_animation_mask_texture {
+        mtoon["uvAnimationMaskTexture"] = json!({ "index": 0 });
+    }
+
     if p.outline_width_multiply_texture {
         mtoon["outlineWidthMultiplyTexture"] =
             slot_texture_info(p, TextureSlot::OutlineWidthMultiply, json!({ "index": 0 }));

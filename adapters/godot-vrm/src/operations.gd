@@ -11,6 +11,8 @@ const Session := preload("res://src/session.gd")
 
 const PHASE_BY_RESERVED_METHOD := {
     "set_environment": "v1.x",
+    # RFC 0007: pinning the MToon UV-animation clock is not wired up here.
+    "set_material_time": "material-time",
     "set_expression": "Phase 3",
     "set_humanoid_pose": "Phase 2",
     "set_root_transform": "Phase 2",

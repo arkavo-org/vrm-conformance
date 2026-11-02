@@ -589,6 +589,18 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the MToon UV-animation sweep (11 assets, RFC 0007): the
+    /// checkerboard sphere with scroll / rotation / mask / KHR-order / shade /
+    /// outline-mask variants. Each plan sets `material_time_seconds`, so the
+    /// runner pins the UV-animation clock with `set_material_time`; adapters
+    /// that cannot pin it fail those plans. VRM 1.0 only.
+    EmitUvAnimationSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the name-heuristic BLEND sweep (12 assets): the half-transparent
     /// BLEND sphere under a control name (`plain`) and the names VMK routes
     /// into `transparentZWrite` (`lace`, `frill`, `ribbon`, `collar`,
@@ -2804,6 +2816,22 @@ pub fn run(cli: Cli) -> Result<()> {
             emit_json,
             emit_with_sidecars,
         ),
+        Cmd::EmitUvAnimationSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            let cells = crate::sweep::mtoon_uv_animation_sweep();
+            let times: std::collections::HashMap<String, f32> =
+                cells.iter().map(|(p, t)| (p.id.clone(), *t)).collect();
+            let params: Vec<MToonParams> = cells.into_iter().map(|(p, _)| p).collect();
+            emit_mtoon_sweep(
+                "emit-uv-animation-sweep",
+                &params,
+                &output_dir,
+                emit_json,
+                |p, stem| crate::emit::emit_with_sidecars_timed(p, stem, times[&p.id]),
+            )
+        }
         Cmd::EmitMaterialNameBlendSweep {
             output_dir,
             json: emit_json,
@@ -3565,6 +3593,29 @@ pub fn run(cli: Cli) -> Result<()> {
                             }
                         }
                     },
+                    "emit-uv-animation-sweep": {
+                        "summary": "MToon UV-animation sweep (11 assets, RFC 0007): checkerboard sphere with scroll, rotation, combined rotation+scroll, B-channel mask, KHR-order, shade-texture and outline-mask variants plus still and t=0 controls. Every plan sets material_time_seconds, so the runner calls set_material_time before render. VRM 1.0 only.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
                     "emit-material-name-blend-sweep": {
                         "summary": "Name-heuristic BLEND sweep (12 assets): a half-transparent BLEND sphere named plain (control) or lace/frill/ribbon/collar/ruffle; plain and lace cross transparentWithZWrite x doubleSided. Conformant renderers are name-invariant. VRM 1.0 only.",
                         "input_schema": {
@@ -3673,7 +3724,7 @@ fn emit_mtoon_sweep(
     assets: &[MToonParams],
     output_dir: &camino::Utf8Path,
     emit_json: bool,
-    emit: fn(&MToonParams, &camino::Utf8Path) -> Result<()>,
+    emit: impl Fn(&MToonParams, &camino::Utf8Path) -> Result<()>,
 ) -> Result<()> {
     std::fs::create_dir_all(output_dir)?;
     let total = assets.len();

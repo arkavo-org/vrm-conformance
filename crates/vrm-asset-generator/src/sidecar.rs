@@ -96,6 +96,7 @@ pub fn build_default_test_plan(params: &MToonParams, asset_relpath: &str) -> Tes
         render_sequence: None,
         cross_variant: None,
         ccd_colliders: None,
+        material_time_seconds: None,
     }
 }
 

@@ -605,6 +605,16 @@ fn discover_plan_vrm_pairs(
         let plan_bytes = std::fs::read(&path)?;
         let plan: TestPlan = serde_yml::from_slice(&plan_bytes)
             .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))?;
+        // RFC 0007: the batch manifest cannot carry a material time, so a
+        // timed plan would render at the engine's own clock. Never send it.
+        if let Some(t) = plan.material_time_seconds {
+            tracing::warn!(
+                "skipping {}: material_time_seconds={t} needs set_material_time, \
+                 which the batch protocol does not support (RFC 0007)",
+                plan.id
+            );
+            continue;
+        }
         pairs.push((plan, vrm_path));
     }
     // Stable ordering — discovery order is filesystem-dependent.
@@ -675,6 +685,32 @@ fn reconcile_to_local_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovery_skips_plans_that_need_a_material_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let plans = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let plan = |id: &str, extra: &str| {
+            format!(
+                "id: {id}\nspec_section: s\nasset: {id}.vrm\n\
+                 camera: {{ position: [0, 1.4, 1.5], target: [0, 1.4, 0], up: [0, 1, 0], fov_degrees: 30 }}\n\
+                 lighting:\n  directional: {{ dir: [0, -1, 0], color: [1, 1, 1], intensity: 1 }}\n  \
+                 ambient: {{ color: [1, 1, 1], intensity: 0.3 }}\n  cast_shadows: false\n  receive_shadows: false\n\
+                 output: {{ width: 8, height: 8, color_space: srgb, msaa: 1 }}\n\
+                 diff: {{ mode: ssim, threshold: 0.85, reference_renderer: univrm }}\n{extra}"
+            )
+        };
+        for (id, extra) in [("plain", ""), ("timed", "material_time_seconds: 1.0\n")] {
+            std::fs::write(plans.join(format!("{id}.test.yaml")), plan(id, extra)).unwrap();
+            std::fs::write(plans.join(format!("{id}.vrm")), b"glTF").unwrap();
+        }
+        let ids: Vec<String> = discover_plan_vrm_pairs(&plans)
+            .unwrap()
+            .into_iter()
+            .map(|(p, _)| p.id)
+            .collect();
+        assert_eq!(ids, vec!["plain".to_string()]);
+    }
 
     #[test]
     fn absolutize_handles_already_absolute_path() {

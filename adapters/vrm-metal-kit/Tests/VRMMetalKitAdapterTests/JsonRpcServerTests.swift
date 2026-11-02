@@ -218,6 +218,36 @@ final class JsonRpcServerTests: XCTestCase {
         XCTAssertEqual(data["phase"] as? String, "v1.x")
     }
 
+    func testSetMaterialTimeRejectsNegativeTime() throws {
+        // RFC 0007: invalid time is an InvalidParams error with or without
+        // the VMK_UV_ANIMATION_TIME build flag.
+        let request = #"{"jsonrpc":"2.0","id":8,"method":"set_material_time","params":{"session_id":"s","time_seconds":-1}}"#
+        let writer = MemoryWriter()
+        JsonRpcServer(input: MemoryReader(frame(request)), output: writer, log: MemoryWriter()).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+    }
+
+    func testSetMaterialTimeWithoutFlagIsUnimplemented() throws {
+        #if VMK_UV_ANIMATION_TIME
+        throw XCTSkip("built with VMK_UV_ANIMATION_TIME: the op is real")
+        #else
+        // RFC 0007: a build that cannot pin the clock must say so, so the
+        // runner fails timed plans instead of rendering at VMK's own clock.
+        let request = #"{"jsonrpc":"2.0","id":9,"method":"set_material_time","params":{"session_id":"s","time_seconds":1.0}}"#
+        let writer = MemoryWriter()
+        JsonRpcServer(input: MemoryReader(frame(request)), output: writer, log: MemoryWriter()).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32000)
+        let data = try XCTUnwrap(err["data"] as? [String: Any])
+        XCTAssertEqual(data["phase"] as? String, "material-time")
+        #endif
+    }
+
     func testMultipleFramedRequestsBackToBack() throws {
         // Two requests on one stream must produce two correctly framed responses.
         let r1 = #"{"jsonrpc":"2.0","id":1,"method":"load_vrm","params":{}}"#

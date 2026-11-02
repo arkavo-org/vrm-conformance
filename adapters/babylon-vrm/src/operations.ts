@@ -28,6 +28,7 @@ const PHASE_BY_METHOD: Record<string, string> = {
   dispose: "L3 (babylon-vrm integration deferred)",
   // Reserved ops with phase labels per docs/operation-contract.md.
   set_environment: "v1.x",
+  set_material_time: "material-time", // RFC 0007
   set_expression: "Phase 3",
   set_humanoid_pose: "Phase 2",
   set_root_transform: "Phase 2",

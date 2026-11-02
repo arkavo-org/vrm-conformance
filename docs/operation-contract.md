@@ -118,6 +118,15 @@ These cover MToon material tests and must be implemented by every renderer adapt
 }
 ```
 
+### `set_material_time`
+
+[RFC 0007](../rfcs/0007-material-time-op.md). Pins the MToon UV-animation clock: until the session is disposed or the op is called again, every `render` draws UV animation as if `time_seconds` had elapsed since the animation started at zero. That holds whatever physics stepping or earlier renders did to the adapter's own clock. It affects MToon materials only, outline passes included.
+
+- Params: `SetMaterialTimeParams { session_id, time_seconds }`. `time_seconds` must be finite and ≥ 0, otherwise the adapter returns `-32602`.
+- Result: `{}`
+- An adapter that cannot pin the clock returns `-32000` Unimplemented with `data.phase = "material-time"`. Implemented by three-vrm, and by VRMMetalKit when built with `-DVMK_UV_ANIMATION_TIME` (VMK ≥ 1.2.1). The mock declares the op but returns Unimplemented.
+- The runner calls it after any physics ops and before `render`, only when the plan sets `material_time_seconds`. On `-32000` or `-32601` it fails the plan (`set_material_time unsupported by <renderer>`) rather than rendering at another time. `execute-test-batch` skips timed plans with a warning, because the batch protocol cannot carry the time. A plan that sets both `material_time_seconds` and `render_sequence` is invalid.
+
 ### `render_sequence`
 
 Capture N frames at a fixed display Hz while advancing physics (and optionally a `.vrma` clip or root-transform animation) between samples. The adapter steps physics by `physics_dt_seconds` between each captured frame — display Hz and physics Hz are decoupled so the spring-bone determinism pin (60 Hz fixed step) holds independent of capture rate. See [`rfcs/0004-render-sequence-op.md`](../rfcs/0004-render-sequence-op.md) for the full design.

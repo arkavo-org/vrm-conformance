@@ -218,6 +218,16 @@ export class BrowserSession {
     );
   }
 
+  /** RFC 0007: pin the MToon UV-animation clock for subsequent renders. */
+  async setMaterialTime(timeSeconds: number): Promise<void> {
+    if (!this.page) throw new Error("BrowserSession not started");
+    await this.page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (t) => (window as any).__setMaterialTime(t),
+      timeSeconds,
+    );
+  }
+
   async applyVrmaAtTime(params: unknown): Promise<{
     channels_applied: {
       humanoid_bones: number;

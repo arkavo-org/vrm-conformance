@@ -43,6 +43,31 @@
         vrmaMixer: null,      // THREE.AnimationMixer
         vrmaClip: null,       // THREE.AnimationClip (retargeted)
         sourceSpecVersion: null, // "0.x" | "1.0" | null
+        materialTime: null,   // RFC 0007: pinned MToon UV-animation clock (s)
+      };
+
+      // RFC 0007: draw MToon UV animation as if `state.materialTime` seconds
+      // had elapsed since it started at zero. three-vrm advances the clock by
+      // `delta` on every vrm.update (renders and physics steps), so the pinned
+      // value is written straight into each material's offsets after the
+      // update, outline materials included.
+      function applyMaterialTime() {
+        if (state.materialTime === null || !state.vrm) return;
+        const t = state.materialTime;
+        state.vrm.scene.traverse((obj) => {
+          const mats = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+          for (const m of mats) {
+            if (!m.isMToonMaterial) continue;
+            m.uvAnimationScrollXOffset = m.uvAnimationScrollXSpeedFactor * t;
+            m.uvAnimationScrollYOffset = m.uvAnimationScrollYSpeedFactor * t;
+            m.uvAnimationRotationPhase = m.uvAnimationRotationSpeedFactor * t;
+            m.uniformsNeedUpdate = true;
+          }
+        });
+      }
+
+      window.__setMaterialTime = function (t) {
+        state.materialTime = t;
       };
 
       // Detect VRM spec version from glTF extensionsUsed.
@@ -113,6 +138,7 @@
           state.scene.remove(state.vrm.scene);
           state.vrm = null;
         }
+        state.materialTime = null; // a new session starts with an unpinned clock
         const loader = new GLTFLoader();
         loader.register((parser) => new VRMLoaderPlugin(parser));
         const gltf = await loader.loadAsync(url);
@@ -387,6 +413,7 @@
         if (state.vrm && typeof state.vrm.update === "function") {
           state.vrm.update(1 / 60);
         }
+        applyMaterialTime();
         state.renderer.render(state.scene, state.camera);
         const dataUrl = state.canvas.toDataURL("image/png");
         return dataUrl;
@@ -599,6 +626,7 @@
           state.scene.remove(state.vrm.scene);
           state.vrm = null;
         }
+        state.materialTime = null;
       };
 
       // Benchmark helper — warmup + measured frames, per-frame timing via

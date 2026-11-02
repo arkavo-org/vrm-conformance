@@ -135,6 +135,10 @@ Cross-renderer pixel-exact comparison is impossible for non-PBR toon shading —
 
 Multi-frame capture for temporal conformance. End-to-end across all four real adapters + the deterministic mock. Test plans opt in with a `render_sequence:` block (mutually exclusive with `animation:` per `TestPlan::validate`). The runner dispatches `render_sequence` instead of single-frame `render`; per-frame PNGs land at `<output_dir>/<test_id>_<renderer>_frames/<NNNN>.png`. BLAKE3 is centralized in the runner — adapters return a 64-zero sentinel and the runner re-hashes from on-disk PNG bytes (`execute.rs::rehash_frames` for per-op adapters, batch-level loop in `execute_batch.rs::run` for UniVRM). Diff via `vrm_diff_engine::temporal::temporal_diff` (mean/p95/min SSIM + worst-frame + BLAKE3 short-circuit). Asset corpus via `cargo run -p vrm-asset-generator -- emit-sequence-sweep` (20 swing variants, `swing_seq_*` prefix). See [`rfcs/0004-render-sequence-op.md`](rfcs/0004-render-sequence-op.md) (Accepted) and the rollout meta-plan at `docs/superpowers/plans/2026-05-18-render-sequence-rollout.md`.
 
+### `set_material_time` (RFC 0007)
+
+Pins the MToon UV-animation clock for single-frame renders. Plans opt in with `material_time_seconds:` (rejected together with `render_sequence:`). The runner calls the op after physics and before `render`, and fails the plan if the adapter answers Unimplemented, so a timed plan never renders at an adapter's own clock. three-vrm implements it. VMK implements it only when built with `-DVMK_UV_ANIMATION_TIME`, which needs VMK ≥ 1.2.1; add that define to `Package.swift` when the pin reaches 1.2.1. Mock, Godot and Babylon return Unimplemented, and the UniVRM batch path skips timed plans. Corpus: `emit-uv-animation-sweep`.
+
 ### CI guardrails
 
 - `rust.yml` enforces `cargo fmt --check` and `cargo clippy -D warnings` — zero clippy warnings is a hard merge gate.

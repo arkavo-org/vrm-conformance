@@ -2,6 +2,40 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-11-01 (RFC 0007 `set_material_time` + VMK 1.2.1 candidate preview) — **The suite can now test MToon UV animation at a pinned time. A preview render of VMK PR #460 (`1af2eff`, the 1.2.1 candidate) fixes every #456/#457 cell except one shared-image shade case (correction below), and it matches three-vrm on every UV-animation cell. Both renderers leave the outline width mask unanimated, which departs from the spec; VMK documents this as deliberate. This is a preview, not the gate: the 1.2.1-rc.1 re-gate (full corpus, clean build) still runs when the tag exists.**
+
+**What landed.** [RFC 0007](../rfcs/0007-material-time-op.md):
+- A new op, `set_material_time { session_id, time_seconds }`, and a plan field, `material_time_seconds`. The runner calls the op after any physics ops and before `render`. An adapter that answers `-32000`/`-32601` fails the plan (`set_material_time unsupported by <renderer>`), so a timed plan never renders at an adapter's own clock. `execute-test-batch` (UniVRM) skips timed plans with a warning.
+- three-vrm implements the op by writing `speed × t` into each MToon material after `vrm.update`. Before this, its `render` drew UV animation at 1/60 s per render plus any physics steps.
+- VMK implements it when built with `-DVMK_UV_ANIMATION_TIME` (`renderer.uvAnimationTime`, VMK ≥ 1.2.1); without the flag it returns Unimplemented. The mock, Godot and Babylon declare it Unimplemented.
+- `emit-uv-animation-sweep` (11 cells): still and t = 0 controls; scroll x and y; rotation; rotation + scroll; B-channel mask; animation × base `KHR_texture_transform` scale; shade texture; outline width mask at t = 0 and t = 1. All 11 pass `vrm-validator` with 0 errors.
+- Measured: the pre-change VMK 1.2.0 adapter binary fails all 10 timed plans loudly (`-32601`). The new adapter code built without the flag answers `-32000` Unimplemented; a Swift unit test covers that, but it wasn't exercised in a render run.
+- Untimed cells are unchanged on both modified adapters. The unflagged VMK build renders `mtoon_alpha_blend_zwrite_true` byte-identically to the gated 1.2.0 build. The updated three-vrm adapter renders `mtoon_uvxform_offset_x_0p5` byte-identically to its pre-change render (twice). The existing corpus regenerates byte-identically (177/177 files).
+
+**Candidate preview** (`1af2eff`, flagged clean build, serial):
+
+| check | VMK 1.2.0 | candidate | three-vrm |
+| --- | --- | --- | --- |
+| skinned uvxform cell vs rigid twin | 410–476 k px | **1 px** (all 8) | 0 px |
+| per-slot `slotonly` vs `none` (shade/shift/rim/normal) | 0 px | **108–446 k px** | 118–392 k px |
+| per-slot `slotonly` vs `none` (outline width) | 0 px | 3,459 px | 76,583 px |
+| per-slot `baseonly` vs `both` (shift/rim/owidth/normal) | 0 px | 3–453 k px | 76–473 k px |
+| per-slot `baseonly` vs `both` (**shade**) | 0 px | **0 px** | 399,577 px |
+| name-token cells vs `plain` | 203,636 px | **0 px** (all 8) | 0 px |
+| UV `scrollx_t0` vs `still_t1` | — | 0 px | 0 px |
+| UV `owidth_t1` vs `owidth_t0` (spec: the mask animates) | — | **0 px** | 352 px |
+
+The outline-width slot moves far less on VMK because this sphere hits the 2026-06-14 under-extrusion, so VMK's outline barely leaves the surface; the transform now applies, it just has little silhouette to move. Visual comparison of the UV cells shows the same animated geometry in VMK and three-vrm for scroll, rotation, rotation + scroll (the spec order), the B-channel mask, and `KHR(anim(uv))`. SSIM between them is 0.90–0.95 on every cell, `still_t1` included. That level comes from a standing difference, not the animation: VMK shows the base texture through the shaded hemisphere, where three-vrm draws flat shade colour.
+
+**Correction (same day): the preview missed a #457 gap that the corpus already catches.** I first read the per-slot cells only as `slotonly` vs `none`. `mtoon_slotxform_shade_baseonly` renders identically to `_both` on `1af2eff`, so the shade texture took the base colour's transform. Every generator texture slot shares one image (texture index 0). When `shadeMultiplyTexture` and `baseColorTexture` reference the same image, VMK reused the base colour sample, transform included. Upstream found the same gap from this preview and fixed it in `62c1f77`: the sample is reused only when the transforms match too. That fix ships in the rc.1 squash-merge. Gate check: shade `baseonly` must differ from `both`.
+
+**Recorded divergences.**
+1. **Outline width mask is not animated.** The MToon 1.0 spec lists `outlineWidthMultiplyTexture` among the animated textures. VMK 1.2.1 (deliberately, documented in its release notes per its maintainers) and three-vrm (`mtoon.vert` samples raw `vUv`) both sample it unanimated, so `owidth_t1` equals `owidth_t0` apart from three-vrm's 352 edge pixels. UniVRM samples it at raw `texcoord0`, with no transform at all. Every reference departs from the spec text here; this is logged as a spec divergence, not a VMK defect.
+2. **UniVRM v0.131.0 UV-animation order** (source reading): it computes `rot(TRANSFORM_TEX(uv) + scroll − 0.5) + 0.5`. That scrolls before rotating and applies `_MainTex_ST` before the animation, against both spec rules. So `rotscroll_t1` and `khrscale_t1` will separate UniVRM from the spec once it renders again.
+3. **VMK draws the base texture in shade, standing.** Pre-existing and outside RFC 0007; noted because it sets the SSIM level of every textured cell.
+
+**Pointers.** RFC 0007; `docs/operation-contract.md` § `set_material_time`; VMK PR #460. The re-gate goes against the `1.2.1-rc.1` tag; the preview renders are in `goldens-cache-ab120/cov121/` (gitignored).
+
 ## 2026-11-01 (VMK 1.2.0-rc.2 re-gate — both rc.1 conditions met) — **`1.2.0-rc.2` (`6b2e2cb`) re-gated against rc.1 (`c4925b5`) and the pin `1.0.0` (`a94531d`): GO for stable `1.2.0`. Both conditions of the rc.1 conditional GO (entry below) are met. Condition (2): the zwrite stripe artifact is FIXED by #453, which makes single-sided BLEND cull back faces. `mtoon_alpha_blend_zwrite_true` goes 0.9395 → **0.9906** SSIM vs three-vrm and `zwrite_false` goes 0.9647 → **0.9906**, the best VMK has ever scored on either cell. The acceptance test passes: the single-sided sphere is byte-identical with zwrite on/off, as in three-vrm, and `doubleSided` false/true now differ. Condition (1): the rc.2 release text and `docs/releases/1.2.0.md` add a "Rendering changes since 1.1.2" section covering #429, #444, #445 and #427. `rc.1 → rc.2` is byte-identical on 460/462 synthetic, 116/116 0.x, 12/12 `leaftail_v0`, 39/39 humanoid and 2/2 AvatarSample_U cells. The only movers are the two single-sided BLEND cells and 557 px of AliciaSolid's bangs, all toward three-vrm. The gate row `1.0.0 → rc.2` has the same 22 cells below 0.85 as rc.1, all toward the reference. Two pre-existing spec divergences are noted for upstream, neither gating. (a) Name-matched materials (`lace`/`frill`/…) are forced two-sided and depth-writing whatever their authored flags; this is byte-identical since `1.0.0`. (b) VMK applies `baseColorTexture`'s `KHR_texture_transform` to every MToon texture; #450 extends that to the double-sided outline width mask. Do NOT pin (pre-release; policy).**
 
 **Method.** Same harness as the rc.1 entry: a clean build at `6b2e2cb` (checkout and `Package.resolved` verified, exe and bundle stashed) and a serial render of the same corpora. Isolation holds: the collider probe differs. rc.2 fails the same 94-cell set as every other side. The zwrite × doubleSided probe spheres (`dsprobe_*`: same mesh and plan as the corpus cells, no outline) reproduce both corpus movers' `rc.1 → rc.2` statistics exactly, an independent serial re-render. New probes this run:

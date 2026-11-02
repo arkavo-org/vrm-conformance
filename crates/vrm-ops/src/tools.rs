@@ -91,6 +91,24 @@ pub struct RenderResult {
     pub actual_color_space: ColorSpace,
 }
 
+/// Pin the MToon UV-animation clock (RFC 0007). Every later `render` in the
+/// session draws UV animation as if `time_seconds` had elapsed since the
+/// animation started at zero, whatever physics stepping or earlier renders
+/// did to the adapter's own clock. Affects MToon materials only.
+///
+/// Errors: `-32602` for a negative or non-finite time; `-32000`
+/// Unimplemented (`data.phase = "material-time"`) when the adapter cannot
+/// pin the clock. The runner fails a timed plan on either.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetMaterialTimeParams {
+    pub session_id: String,
+    pub time_seconds: f32,
+}
+
+/// `set_material_time` returns an empty object on success.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SetMaterialTimeResult {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ColorSpace {
     Linear,
