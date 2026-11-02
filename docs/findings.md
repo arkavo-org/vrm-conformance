@@ -2,6 +2,79 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-11-01 (VMK standing shading-level and outline gaps — causes found; #466 is a suite-side adapter gap) — **Three pre-existing VMK divergences, which the VMK maintainers asked to investigate before stable 1.2.1, are measured against three-vrm on 1.2.1-rc.2 (`80adaa5`), and their causes are now confirmed from VMK source (maintainers) plus an A/B here:**
+- **#466 (darker at N·L = 0) is ours.** VMK divides direct light by π on purpose (VMK#205). It provides `setLightNormalizationMode(.radiometric)` to cancel that and documents it as the setting for this corpus (VMK#213), but our VMK adapter never calls it.
+  - A/B with the call added: the flat / lit / shaded levels go 167 / 181 / 149 → **244 / 255 / 210**, against the model's prediction of 242 / 255 / 208.
+  - Mean SSIM against three-vrm rises 0.934 → **0.964** on 79 synthetic cells (64 toward, 8 away by ≤ 0.011) and 0.763 → **0.821** on 34 humanoid cells (all 34 toward; 6 → 11 at or above 0.85).
+- **#465 (texture visible in the shaded hemisphere) is a small VMK spec gap.** VMK's GI proxy is `giAlbedo = mix(shade, base, giEqualizationFactor)`. The spec gives 0.15 × base under uniform ambient; VMK gives 0.15 × (0.9·base + 0.1·shade). three-vrm's 0.15/π × base is further from the spec than VMK is.
+- **Outline under-extrusion is a VMK spec gap (mechanism corrected).** VMK's world mode extrudes by `factor × cameraDistance × 0.01`, about 67× too thin at 1.5 m. Its screen mode reads the factor as pixels, where the spec means a fraction of screen height. UniVRM MToon10 and three-vrm extrude `normal × width` in world units.
+
+**ADAPTER DECISION PENDING (user):** call `.radiometric` in the VMK adapter and update `docs/methodology.md` §"Directional intensity convention", whose VMK row ("no scaling needed") is stale for VMK ≥ the #205 change. That re-baselines every VMK golden. The fixes to the GI proxy and the outline are upstream's call, for rc.3 or later.**
+
+**Setups.**
+- *Shared default plan* (`sidecar.rs` `build_default_test_plan`):
+  - Camera at (0, 1.4, 1.5) aimed at (0, 1.4, 0), fov 30°; 1024² sRGB, MSAA 4.
+  - Directional light: travel direction (−0.3, −0.6, −0.7), colour 1, intensity 1.0. Ambient: colour 0.5 × intensity 0.3.
+  - No shadows; tone mapping none.
+  - Sphere radius 0.3 m, centred at world (0, 1.36, 0), about 768 px across.
+- *How the adapters apply light:*
+  - **VMK** passes the directional light through raw (`setLight(0, dir, colour, intensity: 1.0)`) and the ambient as `colour × intensity` = 0.15. It does no tone mapping, renders into an `.rgba8Unorm_srgb` target, and leaves `outlineWidth`/`outlineScale` at VMK's defaults (0.02 / 1.0).
+  - **three-vrm** sets DirectionalLight intensity to 1.0 × π (methodology §"Directional intensity convention") and AmbientLight to 0.5 × 0.3. It has no environment map or light probe, uses NoToneMapping, and outputs `SRGBColorSpace`.
+  - Its MToon shader adds ambient as irradiance × Lambert, i.e. about 0.15/π × base. A source grep finds `giEqualizationFactor` declared but never used in arithmetic in the shipped shader.
+
+**#466 / #465 — a factor-of-π gap in the direct term.**
+- *Cells:* `nmapquad_flat_*`, `nmapquad_px_lx` (lit) and `nmapquad_nx_lx` (shaded): a white, untextured quad with MToon defaults (shade 0.5, shift 0, toony 0.9, giEqualization 0.9), lit edge-on. The shaded-hemisphere symptom shows on `mtoon_uvxform_identity`: same lights and MToon defaults, with the quadrant checkerboard as `baseColorTexture` and no shade texture.
+- *Measured mean sRGB* (lit / flat N·L = 0 / shaded): **VMK 181 / 165 / 149**, **three-vrm 255 / 232 / 195**.
+- *Model.* MToon's toon ramp at N·L = 0 with toony 0.9 gives shading 0.5, so the flat cell's lit/shade mix is 0.75.
+  - **VMK:** direct = mix(shade, base, shading) / π, plus ambient ≈ 0.135 × base. That predicts 0.453 → 181, 0.374 → 165 and 0.294 → 149. All three match.
+  - **three-vrm:** direct = mix(...), because its π intensity cancels Lambert's 1/π, plus ambient ≈ 0.048 × base. That predicts 1.048 → 255 (clipped), 0.798 → 232 and 0.548 → 195. All three match.
+  - VMK's 0.135 is close to 0.15 × 0.9, which may be giEqualization; that is unconfirmed.
+- *Consequence for #465.* Under `.automatic`, the base-texture term in VMK's shaded hemisphere (≈ 0.135 × base) is about as large as the π-reduced shade term (shade/π ≈ 0.159), so the texture dominates. Most of #465 is therefore the same π gap as #466, and `.radiometric` lifts the shade term to 0.5. The residual is the GI proxy (below). The `62c1f77` shared-sample shortcut is not involved, because the affected cells bind no shade texture.
+- *Cause, confirmed: direct term.* VMK's shader applies `BRDF_LAMBERT_NORM = 1/π` on purpose (VMK#205). `VRMRenderer.setLightNormalizationMode(.radiometric)` sets the normalization factor to π to cancel it, and its doc comment says it matches "UniVRM Built-in RP and three-vrm against the vrm-conformance corpus (see issue #213)". The default `.automatic` leaves the factor at 1, and our adapter never calls the setter.
+  - The MToon spec's lighting has no 1/π (README §Lighting "Implementation": `color = lerp(shadeColorTerm, baseColorTerm, shading) * lightColor`). So `.radiometric` is the spec-consistent setting for this corpus's "intensity 1.0".
+  - `docs/methodology.md`'s table (resolved in run 10) records the VMK adapter as needing no scaling. That was written before VMK#205, and no adapter change followed.
+  - Upstream will not change VMK's default in a patch release, because consumer apps' light tuning depends on it. The fix belongs in our adapter.
+- *A/B: rc.2 with `.radiometric`, everything else identical.* Full corpus, rendered serially. SSIM against three-vrm is measured on every cell that has a three-vrm reference.
+
+| group | cells | mean SSIM, `.automatic` → `.radiometric` | toward / away | ≥ 0.85 |
+| --- | --- | --- | --- | --- |
+| synthetic MToon | 79 | 0.9341 → **0.9637** | 64 / 8 | 76 → 76 |
+| outline sweep | 7 | 0.8724 → 0.8756 | 1 / 0 | 5 → 5 |
+| humanoid | 34 | 0.7627 → **0.8209** | 34 / 0 | 6 → 11 |
+
+  - The 8 cells that move away are the half-transparent BLEND name cells, by 0.991 → 0.980 each. Brighter direct light shifts the blend; that is small and uniform across them.
+  - The `nmapquad` levels land within 2 px of the model's prediction.
+- *Residual: the ambient term.* The spec's GI is `color += gi * litColor` with `gi = lerp(rawGi(n), uniformedGi, giEqualizationFactor)` (README §GI Equalization). Under uniform ambient that is 0.15 × base, whatever giEqualization is.
+  - VMK's GI proxy is `giAlbedo = mix(shade, base, giEqualizationFactor)`, which gives 0.15 × (0.9·base + 0.1·shade). That is small but a real gap from the spec; upstream is proposing a fix.
+  - three-vrm gives 0.15/π × base ≈ 0.048 (Lambert 1/π on ambient), further from the spec. So three-vrm's near-flat shaded hemisphere under-represents ambient, and #465 should be judged against the spec formula, not three-vrm's look.
+
+**Outline under-extrusion.**
+- *Cells:* `mtoon_outline_{none, world_0p01, world_0p03, world_0p05, world_0p1, screen_0p01, screen_0p05}` (`mtoon_basic_sweep`): black outline, lightingMix 1. Visible height at the sphere is 2 · 1.5 · tan 15° ≈ 0.804 m, so 0.01 m of world width ≈ 12.7 px.
+- *Measured per-side thickness:*
+
+| outline | VMK 1.2.1-rc.2 | three-vrm | nominal |
+| --- | --- | --- | --- |
+| world 0.01 | 0 px | 14 px | 12.7 px |
+| world 0.03 | 0 px | 41 px | 38 px |
+| world 0.05 | 1 px | 69 px | 64 px |
+| world 0.1 | 2 px | 126 px | 127 px |
+| screen 0.01 | 0 px | 5 px | — |
+| screen 0.05 | 0 px | 26 px | — |
+
+- *Mechanism, confirmed by upstream source reading; it corrects my first hypothesis.* VMK's world mode extrudes `outlineWidthFactor × cameraDistance × 0.01` (unchanged since v0.1.0). At 1.5 m that is 0.015× the authored width, predicting 0.05 → 0.96 px and 0.1 → 1.9 px against the 1 and 2 px measured. My first guess, a multiply by `VRMRenderer.outlineWidth` (0.02), predicted 1.3 and 2.5 px and is withdrawn.
+  - VMK's screen mode reads the factor as pixels, where the spec means a fraction of screen height. That explains the 0 px at factors 0.01 and 0.05.
+  - UniVRM MToon10 world mode is `positionWS + normalWS × width`, and three-vrm agrees: three-vrm tracks nominal.
+  - Upstream reports that VRoid's 0.0005 m outlines barely extrude in VMK today; what shows is mostly back faces at the silhouette. A spec fix would change every outlined avatar visibly, so that decision is upstream's.
+- This is the mechanism behind the 2026-06-14 "VMK under-extrudes vs the reference" finding. That entry's silhouette-size divergence (VMK vs UniVRM 0.95 → 0.63 as width rose from 0.01 to 0.1) is consistent with a 50× scale-down.
+
+**Status.**
+- *Suite side:* adopting `.radiometric` in the VMK adapter (and updating the methodology table) waits on the user's decision, because it re-baselines every VMK golden. The A/B above is the evidence. If adopted, `nmapquad` levels and the shaded hemisphere become spec-checkable on VMK, with the residual ambient gap.
+- *Upstream:* the GI-proxy fix (#465) may go into `1.2.1-rc.3`. A spec-conformant outline would change every outlined avatar, which is the maintainers' call. The suite will gate rc.3 with these acceptance tests:
+  - the N·L = 0 and shaded levels under `.radiometric` against the spec model;
+  - outline per-side thickness within a few px of nominal.
+
+The A/B data is in `goldens-cache-ab120/gate121/radiometric_ab.json` (gitignored).
+
 ## 2026-11-01 (VMK 1.2.1 gate — GO on `1.2.1-rc.2`) — **`1.2.1-rc.2` (`80adaa5`) gated against `1.2.0` (`6b2e2cb`) and `1.2.1-rc` (`f3bc5ec`): GO for stable `1.2.1`.**
 - rc.2 is rc plus three commits: #449 (eager texture decode), #462 (CI only) and #464 (the normal-map X fix this suite found and arbitrated).
 - All 34 expectation checks pass on rc.2, and #464 passes the glTF-analytic normal-map convention test.
