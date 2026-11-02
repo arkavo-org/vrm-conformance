@@ -601,6 +601,17 @@ pub enum Cmd {
         json: bool,
     },
 
+    /// Emit the normal-map convention cells (6 assets): a flat quad with a
+    /// uniform ±X or ±Y tilted normal map (no TANGENT), lit edge-on along the
+    /// same axis. glTF (+X = increasing U, +Y = up) predicts `px_lx` and
+    /// `py_ly` lit, `nx_lx` and `ny_ly` shaded. VRM 1.0 only.
+    EmitNormalMapConventionSweep {
+        #[arg(long)]
+        output_dir: Utf8PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Emit the name-heuristic BLEND sweep (12 assets): the half-transparent
     /// BLEND sphere under a control name (`plain`) and the names VMK routes
     /// into `transparentZWrite` (`lace`, `frill`, `ribbon`, `collar`,
@@ -2832,6 +2843,22 @@ pub fn run(cli: Cli) -> Result<()> {
                 |p, stem| crate::emit::emit_with_sidecars_timed(p, stem, times[&p.id]),
             )
         }
+        Cmd::EmitNormalMapConventionSweep {
+            output_dir,
+            json: emit_json,
+        } => {
+            let cells = crate::sweep::normal_map_convention_sweep();
+            let lights: std::collections::HashMap<String, [f32; 3]> =
+                cells.iter().map(|(p, l)| (p.id.clone(), *l)).collect();
+            let params: Vec<MToonParams> = cells.into_iter().map(|(p, _)| p).collect();
+            emit_mtoon_sweep(
+                "emit-normal-map-convention-sweep",
+                &params,
+                &output_dir,
+                emit_json,
+                |p, stem| crate::emit::emit_with_sidecars_normal_quad(p, stem, lights[&p.id]),
+            )
+        }
         Cmd::EmitMaterialNameBlendSweep {
             output_dir,
             json: emit_json,
@@ -3595,6 +3622,29 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                     "emit-uv-animation-sweep": {
                         "summary": "MToon UV-animation sweep (11 assets, RFC 0007): checkerboard sphere with scroll, rotation, combined rotation+scroll, B-channel mask, KHR-order, shade-texture and outline-mask variants plus still and t=0 controls. Every plan sets material_time_seconds, so the runner calls set_material_time before render. VRM 1.0 only.",
+                        "input_schema": {
+                            "type": "object",
+                            "required": ["output_dir"],
+                            "properties": {
+                                "output_dir": { "type": "string" },
+                                "json": {
+                                    "type": "boolean",
+                                    "description": "Emit NDJSON progress on stderr and a JSON summary on stdout"
+                                }
+                            }
+                        },
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {
+                                "ok": { "type": "boolean" },
+                                "count": { "type": "integer" },
+                                "output_dir": { "type": "string" },
+                                "assets": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "emit-normal-map-convention-sweep": {
+                        "summary": "Normal-map tangent-space convention cells (6 assets): flat quad, uniform +-X or +-Y tilted normal map without TANGENT, lit edge-on along the same axis. glTF predicts px_lx and py_ly lit, nx_lx and ny_ly shaded. VRM 1.0 only.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],

@@ -2,6 +2,68 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-11-01 (VMK 1.2.1-rc gate — verdict pending rc.2) — **`1.2.1-rc` (`f3bc5ec`, the squash-merge of VMK PR #460) checked against `1.2.0` (`6b2e2cb`): NO conformance regression, and every release-note claim the corpus can reach is VERIFIED. All 34 expectation checks on the new cells pass. Every real avatar (39 humanoid cells, AvatarSample_U, AliciaSolid) and every VRM 0.x cell is byte-identical to 1.2.0, as the notes claim. Of 32 arbitrated movers, 21 move toward three-vrm, 8 are flat and 3 move away. Two of the three expose a standing VMK normal-map X mirror that 1.2.0's single-transform behaviour happened to cancel. A new analytic cell confirms VMK is the renderer that departs from glTF. The third is a 0.001 SSIM change. VERDICT ON HOLD: upstream is folding PR #449 (eager ImageIO texture decode, claimed pixel-identical) into `1.2.1-rc.2`. Gate plan: clean build of rc.2, byte-compare against these rc renders; if identical, this result transfers. Do NOT pin (pre-release; policy).**
+
+**Method.** Clean isolated builds from this branch's adapter source:
+- `1.2.0`, without the flag (the API is absent);
+- `1.2.1-rc`, with `-DVMK_UV_ANIMATION_TIME`.
+
+Each build verified its checkout and `Package.resolved` SHA and stashed the exe together with the bundle. The collider isolation probe differs on both builds. Rendering was serial, with every `_assets*` dir rendered into its own folder (fixes the leaftail id shadowing). Corpora: 474-plan synthetic, 207-plan VRM 0.x, 41-plan humanoid, AvatarSample_U (2), AliciaSolid (3), and the 56 cells from #26/#27.
+
+Both sides fail the same 94 known-broken cells; 1.2.0 additionally fails the 11 timed UV-animation plans by design. A serial repeat of rc is 698/698 byte-identical. Arbiter: three-vrm; every toward/away call is provisional until UniVRM runs again.
+
+| group | identical / movers (1.2.0 → 1.2.1-rc) |
+| --- | --- |
+| synthetic VRM 1.0 | 470 / 4 (rigid `mtoon_uvxform_*`, ≤ 7 px at Δ1: rounding from moving the transform to sample time) |
+| VRM 0.x | 116 / 0 |
+| humanoid / AvatarSample_U / AliciaSolid | 39 / 0, 2 / 0, 3 / 0 |
+| name cells (#456) | 5 / 7 (every name-token cell except `lace_zw1_ds`, which was already two-sided + zwrite) |
+| skinned uvxform (#457) | 1 / 7 (all non-identity cells) |
+| per-slot (#457) | 11 / 14 (`slotonly` and `baseonly` on all 5 slots; `both` rounding ≤ 376 px at Δ1–2) |
+| UV animation (#458/#459) | renders on 1.2.1-rc only |
+
+**Expectation checks (34/34 pass).**
+- Each skinned cell equals its rigid twin (1 px, from 410–476 k).
+- On every slot, `slotonly` ≠ `none` and `baseonly` ≠ `both`. That includes the shared-image shade case fixed by `62c1f77`: 399,297 px against three-vrm's 399,577.
+- All 8 name-token cells equal `plain`.
+- UV animation: t = 0 equals still; scroll, rotation, rotation + scroll, mask, KHR-order and shade cells animate, with SSIM against three-vrm 0.904–0.947 (still-cell baseline 0.933).
+- The outline width mask stays unanimated, as the notes document (`owidth_t1` = `owidth_t0`, 0 px).
+
+**Release-note claims vs observation.**
+- "#452: output on an idle GPU unchanged bit for bit" — **verified**: every spring cell, synthetic and humanoid, is byte-identical.
+- "#452: concurrent-load flake fixed" — **not demonstrated**. 40 loaded runs (two concurrent VMK loads) gave 0 outliers on 1.2.0 and on rc. At the 2026-11-01 rate of about 2 %, this test cannot separate them; the fix rests on its mechanism (parents read from a pre-dispatch copy) and upstream's tests.
+- "None of the 199 local VRMs renders differently; AvatarSample_U byte-identical" — **verified** for every real avatar in this corpus. None of them use UV animation, non-identity texture transforms or the accessory name tokens.
+- #456, #457 (including the UniVRM departure), #458 and #459 — **verified** by the cells above.
+
+**Arbitration (SSIM vs three-vrm, 1.2.0 → rc).**
+- **Toward (21 movers):** names 0.9395 → 0.9906 (lace double-sided 0.953 → 0.978); skinned 0.868–0.916 → 0.921–0.936; shade `baseonly` 0.735 → 0.914; shade `slotonly` 0.888 → 0.947; and the rim and shift slots.
+- **Away (3 movers):** `normal_slotonly` 0.965 → 0.900, `normal_baseonly` 0.927 → 0.850, and `owidth_baseonly` 0.909 → 0.908 (the outline under-extrusion geometry, noise level).
+
+**New finding, arbitrated: VMK's derivative normal-map tangent is reversed in X (pre-existing; three-vrm follows glTF).**
+
+*The symptom.* The quadrant normal map tilts ±X across its left/right split, so an offset of [0.5, 0] is the same as an X mirror.
+- VMK's untransformed `normal_none` matches three-vrm's transformed `slotonly` (0.965) better than three-vrm's `none` (0.910).
+- VMK's transformed `slotonly` matches three-vrm's `none` (0.970) better than three-vrm's `slotonly` (0.900).
+
+1.2.0's single-transform behaviour happened to cancel the mirror in exactly these cells, and the correct 1.2.1 behaviour exposes it.
+
+*The arbiter: `emit-normal-map-convention-sweep` (6 cells, added here).* A flat quad faces the camera, with U along world +X and the image top at world +Y. It has no TANGENT attribute (as on VRoid avatars) and carries a uniform ±X or ±Y tilted normal map, lit edge-on along the same axis. glTF 2.0 (+X = increasing U, +Y = up) predicts the tilt toward the light renders lit. Mean quad colour:
+
+| cell | VMK 1.2.0 | VMK 1.2.1-rc | three-vrm |
+| --- | --- | --- | --- |
+| `px_lx` / `nx_lx` (light from +X) | 149 / **181** | 149 / **181** | **255** / 195 |
+| `py_ly` / `ny_ly` (light from +Y) | **181** / 149 | **181** / 149 | **255** / 195 |
+
+- **three-vrm follows glTF on both axes. VMK follows it on Y and is mirrored on X** in both versions, which render byte-identically.
+- This confirms the VMK maintainers' source analysis. VMK and three.js share the tangent-free Schüler formula. Metal's `dfdy` points down the screen, so VMK's frame comes out as (−T, −B). three's GLTFLoader also negates `normalScale.y` for glTF's V-down UVs, so three gets (T, −B). The two agree on Y and differ on X.
+- The lighting convention is not the cause: a lighting flip would also flip the Y pair, and the existing MToon cells agree on the lit side.
+- Scope: every normal-mapped material without TANGENT, which covers nearly every VRoid material. The fix will move real avatars wherever the normal map isn't flat.
+- The absolute levels also differ (flat quad 165 on VMK vs 232 on three-vrm, both at N·L = 0). That's a separate shading-level question, not investigated here.
+
+**Standing items.** The outline width mask is unanimated (VMK's deliberate, documented divergence from the spec; three-vrm likewise). UniVRM differs from VMK 1.2.1 by design on per-texture transforms and UV-animation order. VMK draws the base texture in the shaded hemisphere (pre-existing; not the `62c1f77` shortcut, since the affected cells have no shade texture).
+
+**Pointers.** [`1.2.1-rc`](https://github.com/arkavo-org/VRMMetalKit/releases/tag/1.2.1-rc) (`f3bc5ec`, pre-release). Scratch: `goldens-cache-ab120/gate121/` (gitignored; `gate.sh`, `cmp.py`, `newcells.py`, `flake.sh`, `ab.json`).
+
 ## 2026-11-01 (RFC 0007 `set_material_time` + VMK 1.2.1 candidate preview) — **The suite can now test MToon UV animation at a pinned time. A preview render of VMK PR #460 (`1af2eff`, the 1.2.1 candidate) fixes every #456/#457 cell except one shared-image shade case (correction below), and it matches three-vrm on every UV-animation cell. Both renderers leave the outline width mask unanimated, which departs from the spec; VMK documents this as deliberate. This is a preview, not the gate: the 1.2.1-rc.1 re-gate (full corpus, clean build) still runs when the tag exists.**
 
 **What landed.** [RFC 0007](../rfcs/0007-material-time-op.md):
