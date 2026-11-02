@@ -60,6 +60,14 @@ Both sides fail the same 94 known-broken cells; 1.2.0 additionally fails the 11 
 - Scope: every normal-mapped material without TANGENT, which covers nearly every VRoid material. The fix will move real avatars wherever the normal map isn't flat.
 - The absolute levels also differ (flat quad 165 on VMK vs 232 on three-vrm, both at N·L = 0). That's a separate shading-level question, not investigated here.
 
+*Fix pre-check (same day, before rc.2): VMK PR #464 (`f305e10`, negates T in `mtoonApplyNormalMap`) passes the acceptance test.*
+- Convention cells: `px_lx` 181 > `nx_lx` 149, and `py_ly` 181 > `ny_ly` 149 is unchanged. The flat X cell now matches the flat Y cell (167).
+- Attribution, from clean flagged builds:
+  - **#449 alone** (`1.2.1-rc` → `d27a9c9`, main with the eager texture decode) is byte-identical on all 38 humanoid PNGs, the 30-frame humanoid sequence, AvatarSample_U, AliciaSolid and the convention cells. Upstream's "every decoded byte identical" claim holds on this corpus.
+  - **#464** moves 33/38 humanoid PNGs, all 30 sequence frames, both AvatarSample_U cells and the 3 X-axis convention cells. AliciaSolid does not move.
+  - Movements are small (up to 19 k px; AvatarSample_U legs 19.4 k, `avatarA_face` 16.4 k, VRoid expression cells about 1.3 k).
+- Against three-vrm, 17 movers go toward (VRoid expression, gaze and bust cells, +0.0002 to +0.0006 SSIM), 0 go away, and the rest are flat. These ratios are small because the standing real-avatar divergence dominates whole-image SSIM.
+
 **Standing items.** The outline width mask is unanimated (VMK's deliberate, documented divergence from the spec; three-vrm likewise). UniVRM differs from VMK 1.2.1 by design on per-texture transforms and UV-animation order. VMK draws the base texture in the shaded hemisphere (pre-existing; not the `62c1f77` shortcut, since the affected cells have no shade texture).
 
 **Pointers.** [`1.2.1-rc`](https://github.com/arkavo-org/VRMMetalKit/releases/tag/1.2.1-rc) (`f3bc5ec`, pre-release). Scratch: `goldens-cache-ab120/gate121/` (gitignored; `gate.sh`, `cmp.py`, `newcells.py`, `flake.sh`, `ab.json`).
