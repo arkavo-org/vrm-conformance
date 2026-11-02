@@ -157,6 +157,46 @@ pub fn pack_mesh(mesh: &MeshData) -> PackedMesh {
     PackedMesh { binary: bin, json }
 }
 
+/// Append single-joint skin data to an already packed mesh: every vertex
+/// bound to joint 0 with weight 1, plus the given inverse-bind matrices.
+/// Updates the buffer length, bufferViews and accessors in place and
+/// returns the accessor indices `(JOINTS_0, WEIGHTS_0, inverseBindMatrices)`.
+pub fn append_single_joint_skin(
+    packed: &mut PackedMesh,
+    vertex_count: usize,
+    inverse_bind_matrices: &[[f32; 16]],
+) -> (usize, usize, usize) {
+    let joints = vec![[0u16; 4]; vertex_count];
+    let weights = vec![[1.0f32, 0.0, 0.0, 0.0]; vertex_count];
+    let bin = &mut packed.binary;
+    align_to(bin, 4);
+    let (j_off, j_len) = write_u16_vec4_array(bin, &joints);
+    align_to(bin, 4);
+    let (w_off, w_len) = write_f32_vec4_array(bin, &weights);
+    align_to(bin, 4);
+    let (m_off, m_len) = write_mat4_array(bin, inverse_bind_matrices);
+    let byte_length = bin.len();
+
+    let views = packed.json["bufferViews"]
+        .as_array_mut()
+        .expect("packed mesh has bufferViews");
+    let view = views.len();
+    views.push(json!({ "buffer": 0, "byteOffset": j_off, "byteLength": j_len, "target": TARGET_ARRAY_BUFFER }));
+    views.push(json!({ "buffer": 0, "byteOffset": w_off, "byteLength": w_len, "target": TARGET_ARRAY_BUFFER }));
+    views.push(json!({ "buffer": 0, "byteOffset": m_off, "byteLength": m_len }));
+
+    let accessors = packed.json["accessors"]
+        .as_array_mut()
+        .expect("packed mesh has accessors");
+    let acc = accessors.len();
+    accessors.push(json!({ "bufferView": view, "componentType": GL_UNSIGNED_SHORT, "count": vertex_count, "type": "VEC4" }));
+    accessors.push(json!({ "bufferView": view + 1, "componentType": GL_FLOAT, "count": vertex_count, "type": "VEC4" }));
+    accessors.push(json!({ "bufferView": view + 2, "componentType": GL_FLOAT, "count": inverse_bind_matrices.len(), "type": "MAT4" }));
+
+    packed.json["buffers"][0]["byteLength"] = json!(byte_length);
+    (acc, acc + 1, acc + 2)
+}
+
 /// Pack a mesh plus N POSITION-only morph targets into a single binary
 /// buffer + glTF JSON fragment.
 ///

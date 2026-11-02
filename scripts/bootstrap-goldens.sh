@@ -155,6 +155,31 @@ else
         UVXFORM_DIR=""
     fi
 
+    # VMK 1.2.1 re-gate coverage (VMK#456/#457; docs/findings.md 2026-11-01).
+    # VRM 1.0 only: KHR_texture_transform and the MToon 1.0 material flags.
+    if [ "$SPEC_VERSION" != "0.x" ]; then
+        echo "==> Emitting skinned KHR_texture_transform sweep (8 plans, head-skinned sphere)"
+        UVXFORM_RIGGED_DIR="$GOLDENS_DIR/_assets_uvxform_rigged"
+        rm -rf "$UVXFORM_RIGGED_DIR"; mkdir -p "$UVXFORM_RIGGED_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-texture-transform-rigged-sweep \
+            --output-dir "$UVXFORM_RIGGED_DIR" --json >/dev/null
+
+        echo "==> Emitting per-slot KHR_texture_transform sweep (25 plans, 5 slots x 5 placements)"
+        SLOTXFORM_DIR="$GOLDENS_DIR/_assets_slotxform"
+        rm -rf "$SLOTXFORM_DIR"; mkdir -p "$SLOTXFORM_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-slot-texture-transform-sweep \
+            --output-dir "$SLOTXFORM_DIR" --json >/dev/null
+
+        echo "==> Emitting name-heuristic BLEND sweep (12 plans, plain vs lace/frill/ribbon/collar/ruffle)"
+        MATNAME_BLEND_DIR="$GOLDENS_DIR/_assets_matname_blend"
+        rm -rf "$MATNAME_BLEND_DIR"; mkdir -p "$MATNAME_BLEND_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-material-name-blend-sweep \
+            --output-dir "$MATNAME_BLEND_DIR" --json >/dev/null
+    else
+        echo "    SKIP VMK 1.2.1 coverage sweeps: VRM 1.0 only"
+        UVXFORM_RIGGED_DIR=""; SLOTXFORM_DIR=""; MATNAME_BLEND_DIR=""
+    fi
+
     echo "==> Emitting MToon shadeMultiplyTexture sweep (6 plans, shaded-color path)"
     SHADETEX_DIR="$GOLDENS_DIR/_assets_shadetex"
     rm -rf "$SHADETEX_DIR"; mkdir -p "$SHADETEX_DIR"
@@ -508,6 +533,9 @@ if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
             "${OUTLINE_CM_DIR:-}" \
             "${FIRSTPERSON_DIR:-}" \
             "${UVXFORM_DIR:-}" \
+            "${UVXFORM_RIGGED_DIR:-}" \
+            "${SLOTXFORM_DIR:-}" \
+            "${MATNAME_BLEND_DIR:-}" \
             "${SHADETEX_DIR:-}" \
             "${MATCAP_DIR:-}" \
             "${SHADINGSHIFTTEX_DIR:-}" \

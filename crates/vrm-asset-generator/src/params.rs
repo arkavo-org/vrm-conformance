@@ -145,6 +145,17 @@ pub struct MToonParams {
     /// values in [0,1] interpolate. `None` (default) unchanged.
     pub occlusion_texture_strength: Option<f32>,
 
+    /// `KHR_texture_transform` declared on ONE non-base texture slot's own
+    /// `textureInfo` (glTF scopes the extension per textureInfo). Exists to
+    /// separate the per-texture readings: three-vrm applies each texture's
+    /// own transform, while UniVRM's MToon10 shader samples every fragment
+    /// texture with `baseColorTexture`'s `_MainTex_ST` and the outline width
+    /// mask with raw UVs. The slot's texture must also be enabled by its own
+    /// param (e.g. `shade_multiply_texture`). `None` (default) is skipped on
+    /// serialization so every existing `.meta.json` stays byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot_texture_transform: Option<SlotTextureTransform>,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -190,6 +201,7 @@ impl MToonParams {
             outline_width_multiply_texture: false,
             normal_texture_scale: None,
             occlusion_texture_strength: None,
+            slot_texture_transform: None,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,
@@ -282,4 +294,40 @@ impl TextureTransform {
     pub fn is_identity(&self) -> bool {
         self.offset == [0.0, 0.0] && self.rotation == 0.0 && self.scale == [1.0, 1.0]
     }
+
+    /// The extension payload for a textureInfo's `extensions` object.
+    pub fn to_extension_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "KHR_texture_transform": {
+                "offset": self.offset,
+                "rotation": self.rotation,
+                "scale": self.scale,
+            }
+        })
+    }
+}
+
+/// A texture binding that samples mesh UVs, other than `baseColorTexture`.
+/// `matcapTexture` is deliberately absent: it samples view-space normal UVs,
+/// so a mesh-UV transform has no agreed meaning there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextureSlot {
+    /// `VRMC_materials_mtoon.shadeMultiplyTexture`
+    ShadeMultiply,
+    /// `VRMC_materials_mtoon.shadingShiftTexture`
+    ShadingShift,
+    /// `VRMC_materials_mtoon.rimMultiplyTexture`
+    RimMultiply,
+    /// `VRMC_materials_mtoon.outlineWidthMultiplyTexture` (vertex stage)
+    OutlineWidthMultiply,
+    /// glTF-core `material.normalTexture`
+    Normal,
+}
+
+/// `KHR_texture_transform` attached to a single [`TextureSlot`]'s textureInfo.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SlotTextureTransform {
+    pub slot: TextureSlot,
+    pub transform: TextureTransform,
 }
