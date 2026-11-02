@@ -283,6 +283,17 @@ final class Operations: @unchecked Sendable {
             // gap entirely.
             config.colorPixelFormat = .rgba8Unorm_srgb
             let renderer = VRMRenderer(device: device, config: config)
+            // VRMMetalKit's MToon shader divides direct light by π
+            // (BRDF_LAMBERT_NORM, VMK#205); `.radiometric` sets the
+            // normalization factor to π to cancel it, so a plan's
+            // `directional.intensity: 1.0` lights a surface to its full base
+            // colour as the MToon 1.0 lighting pseudocode specifies
+            // (`lerp(shade, base, shading) * lightColor`). Upstream documents
+            // it as the setting for this corpus (VMK#213). The physics-only
+            // renderer in the animation path draws into discarded targets and
+            // needs no lighting setup. See docs/methodology.md "Directional
+            // intensity convention".
+            renderer.setLightNormalizationMode(.radiometric)
             renderer.loadModel(model)
             // Enable spring-bone physics during draws. No-op for models
             // without VRMC_springBone data (drawCore guards on
