@@ -114,6 +114,11 @@ final class Operations: @unchecked Sendable {
         // internal state (which is zero before any render call).
         var lastLookAtHeadLocalPoint: SIMD3<Float>?
 
+        // RFC 0007: pinned MToon UV-animation clock (seconds), set by
+        // `set_material_time` and applied immediately before each render's
+        // draw. `nil` leaves VRMMetalKit's own clock untouched.
+        var materialTime: Double?
+
         // Wall-clock milliseconds to load the VRMModel + build the VRMRenderer.
         // Populated in handleLoadVrm and exposed via benchmark_execute's
         // resources.load_ms field.
@@ -191,6 +196,7 @@ final class Operations: @unchecked Sendable {
         case "dump_bone_positions":     return handleDumpBonePositions(params: params)
         case "load_vrma":               return handleLoadVrma(params: params)
         case "apply_vrma_at_time":      return handleApplyVrmaAtTime(params: params)
+        case "set_material_time":       return handleSetMaterialTime(params: params)
         case "dump_humanoid_pose":      return handleDumpHumanoidPose(params: params)
         case "dump_expression_weights": return handleDumpExpressionWeights(params: params)
         case "dump_look_at_state":      return handleDumpLookAtState(params: params)
@@ -327,6 +333,37 @@ final class Operations: @unchecked Sendable {
         sessions.removeValue(forKey: id)
         stateLock.unlock()
         return .ok(.object([:]))
+    }
+
+    // MARK: - set_material_time (RFC 0007)
+
+    /// Pins the MToon UV-animation clock for later renders. VRMMetalKit
+    /// exposes `VRMRenderer.uvAnimationTime` from 1.2.1; builds against an
+    /// older pin compile without `VMK_UV_ANIMATION_TIME` and answer
+    /// Unimplemented, so the runner fails timed plans instead of rendering
+    /// at the library's own clock.
+    private func handleSetMaterialTime(params: JSONValue?) -> OpOutcome {
+        guard case .object(let obj) = params,
+              case .string(let sessionId) = obj["session_id"]
+        else {
+            return invalidParams("missing session_id")
+        }
+        guard case .number(let t) = obj["time_seconds"], t.isFinite, t >= 0 else {
+            return invalidParams("time_seconds must be a finite number >= 0")
+        }
+        #if VMK_UV_ANIMATION_TIME
+        guard let session = lookupSession(sessionId) else {
+            return invalidParams("unknown session_id: \(sessionId)")
+        }
+        session.materialTime = t
+        return .ok(.object([:]))
+        #else
+        return .error(
+            code: -32000,
+            message: "Unimplemented: set_material_time needs VRMMetalKit >= 1.2.1 (build with -DVMK_UV_ANIMATION_TIME)",
+            data: .object(["phase": .string("material-time")])
+        )
+        #endif
     }
 
     // MARK: - set_camera / set_lighting / set_post_processing (L3-c)
@@ -580,6 +617,14 @@ final class Operations: @unchecked Sendable {
         // handleRender), so the runtime-isolation assertion never fires
         // off MainActor.
         MainActor.assumeIsolated {
+            #if VMK_UV_ANIMATION_TIME
+            // RFC 0007: draw at the pinned UV-animation time. Physics draws
+            // earlier in the session advance `uvAnimationTime`, so it is
+            // reset here, immediately before the measured draw.
+            if let t = session.materialTime {
+                session.renderer.uvAnimationTime = t
+            }
+            #endif
             // drawOffscreenHeadless's `to`/`depth` args are used only for
             // size detection (`colorTexture.width/.height`); the actual
             // render targets come from the renderPassDescriptor. Pass the

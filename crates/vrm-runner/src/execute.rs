@@ -219,9 +219,21 @@ pub struct ExecuteResult {
     pub sequence: Option<SequenceExecuteResult>,
 }
 
+/// Pre-flight for RFC 0007 plans: a timed plan must pass
+/// `TestPlan::validate` (finite non-negative time, no `render_sequence`),
+/// otherwise the sequence path would ignore the time. Untimed plans skip the
+/// check so existing corpora behave exactly as before.
+fn validate_material_time(plan: &TestPlan) -> Result<()> {
+    if plan.material_time_seconds.is_some() {
+        plan.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
+    }
+    Ok(())
+}
+
 pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteResult> {
     // Pre-flight: camera convention must agree with spec_version.
     validate_camera_convention(plan).map_err(|e| anyhow::anyhow!("{e}"))?;
+    validate_material_time(plan)?;
 
     let asset_path = opts.asset_dir.join(&plan.asset);
     if !asset_path.exists() {
@@ -462,6 +474,7 @@ pub fn execute_plan(plan: &TestPlan, opts: &ExecuteOptions) -> Result<ExecuteRes
             .unwrap_or(ops::ColorSpace::Linear);
         (placeholder_png, cs, Some(seq_result))
     } else {
+        set_material_time_if_requested(&mut adapter, &session_id, plan, opts)?;
         let png = opts
             .output_dir
             .join(format!("{}_{}.png", plan.id, opts.renderer_name));
@@ -583,6 +596,7 @@ pub fn execute_plan_capturing_positions(
 ) -> Result<ops::DumpBonePositionsResult> {
     // Pre-flight: camera convention must agree with spec_version.
     validate_camera_convention(plan).map_err(|e| anyhow::anyhow!("{e}"))?;
+    validate_material_time(plan)?;
 
     let asset_path = opts.asset_dir.join(&plan.asset);
     if !asset_path.exists() {
@@ -715,6 +729,7 @@ pub fn execute_plan_capturing_positions(
             }
         }
     } else {
+        set_material_time_if_requested(&mut adapter, &session_id, plan, opts)?;
         let png = opts
             .output_dir
             .join(format!("{}_{}.png", plan.id, opts.renderer_name));
@@ -876,6 +891,47 @@ pub fn persist_colliders_json_for_test(
         error_message: None,
     };
     persist_colliders_json(&seq, output_dir, plan_id, renderer_name)
+}
+
+/// RFC 0007: pin the MToon UV-animation clock before `render` when the plan
+/// sets `material_time_seconds`. An adapter that cannot (`-32000`
+/// Unimplemented or `-32601` method not found) fails the plan, because
+/// rendering at the adapter's own clock would compare a different moment.
+fn set_material_time_if_requested(
+    adapter: &mut Adapter,
+    session_id: &str,
+    plan: &TestPlan,
+    opts: &ExecuteOptions,
+) -> Result<()> {
+    let Some(time_seconds) = plan.material_time_seconds else {
+        return Ok(());
+    };
+    progress(
+        opts,
+        "set_material_time",
+        &plan.id,
+        json!({ "time_seconds": time_seconds }),
+    );
+    let result: Result<ops::SetMaterialTimeResult, _> = adapter.call(
+        "set_material_time",
+        ops::SetMaterialTimeParams {
+            session_id: session_id.into(),
+            time_seconds,
+        },
+    );
+    match result {
+        Ok(_) => Ok(()),
+        Err(crate::adapter::AdapterError::Rpc(ref e)) if e.code == -32000 || e.code == -32601 => {
+            anyhow::bail!(
+                "set_material_time unsupported by {}: {} (plan {} needs MToon UV animation \
+                 at t={time_seconds}s; RFC 0007)",
+                opts.renderer_name,
+                e.message,
+                plan.id
+            )
+        }
+        Err(e) => Err(anyhow::anyhow!("adapter error: {e}")),
+    }
 }
 
 fn progress(opts: &ExecuteOptions, phase: &str, test_id: &str, extra: serde_json::Value) {

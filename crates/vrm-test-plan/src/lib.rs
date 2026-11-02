@@ -51,6 +51,12 @@ pub struct TestPlan {
     /// maps `ColliderWorldSpec` → `vrm_diff_engine::penetration::ColliderSpec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ccd_colliders: Option<Vec<ColliderWorldSpec>>,
+    /// MToon UV-animation time in seconds (RFC 0007). When set, the runner
+    /// calls `set_material_time` after any physics ops and before `render`,
+    /// and fails the plan if the adapter cannot pin the clock. Absent plans
+    /// never call the op. Single-frame only: rejected with `render_sequence`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_time_seconds: Option<f32>,
 }
 
 /// World-fixed collider geometry for spring-bone CCD conformance checks.
@@ -366,6 +372,19 @@ pub enum TestPlanError {
         a `render_sequence` block with `capture_positions: true`."
     )]
     CcdCollidersRequireCapture,
+
+    #[error(
+        "test plan has `material_time_seconds: {0}` — it must be finite and \
+        non-negative (seconds since the MToon UV animation started)."
+    )]
+    InvalidMaterialTime(f32),
+
+    #[error(
+        "test plan has both `material_time_seconds` and `render_sequence` — \
+        `set_material_time` pins one moment for single-frame renders; sequence \
+        frames advance the adapter's own clock (RFC 0007)."
+    )]
+    MaterialTimeWithRenderSequence,
 }
 
 impl TestPlan {
@@ -379,6 +398,14 @@ impl TestPlan {
     pub fn validate(&self) -> Result<(), TestPlanError> {
         if self.animation.is_some() && self.render_sequence.is_some() {
             return Err(TestPlanError::BothAnimationAndRenderSequence);
+        }
+        if let Some(t) = self.material_time_seconds {
+            if !t.is_finite() || t < 0.0 {
+                return Err(TestPlanError::InvalidMaterialTime(t));
+            }
+            if self.render_sequence.is_some() {
+                return Err(TestPlanError::MaterialTimeWithRenderSequence);
+            }
         }
         if let Some(colliders) = &self.ccd_colliders {
             if !colliders.is_empty() {
@@ -834,6 +861,7 @@ capture_positions: true
             render_sequence: None,
             cross_variant: None,
             ccd_colliders: None,
+            material_time_seconds: None,
         }
     }
 
@@ -974,6 +1002,7 @@ mod ccd_colliders_tests {
             render_sequence: None,
             cross_variant: None,
             ccd_colliders: None,
+            material_time_seconds: None,
         }
     }
 
@@ -1100,6 +1129,77 @@ mod ccd_colliders_tests {
         assert!(
             plan.validate().is_ok(),
             "empty ccd_colliders must not require render_sequence"
+        );
+    }
+}
+
+#[cfg(test)]
+mod material_time_tests {
+    //! RFC 0007: `material_time_seconds` validation and wire stability.
+    use super::*;
+
+    fn plan() -> TestPlan {
+        let yaml = r#"
+id: t
+spec_section: VRMC_materials_mtoon
+asset: t.vrm
+camera: { position: [0, 1.4, 1.5], target: [0, 1.4, 0], up: [0, 1, 0], fov_degrees: 30 }
+lighting:
+  directional: { dir: [-0.3, -0.6, -0.7], color: [1, 1, 1], intensity: 1 }
+  ambient: { color: [0.5, 0.5, 0.5], intensity: 0.3 }
+  cast_shadows: false
+  receive_shadows: false
+output: { width: 64, height: 64, color_space: srgb, msaa: 1 }
+diff: { mode: ssim, threshold: 0.85, reference_renderer: univrm }
+"#;
+        serde_yml::from_str(yaml).expect("minimal plan parses")
+    }
+
+    #[test]
+    fn absent_time_is_not_serialized() {
+        let yaml = serde_yml::to_string(&plan()).unwrap();
+        assert!(!yaml.contains("material_time_seconds"));
+    }
+
+    #[test]
+    fn time_round_trips() {
+        let mut p = plan();
+        p.material_time_seconds = Some(1.25);
+        let back: TestPlan = serde_yml::from_str(&serde_yml::to_string(&p).unwrap()).unwrap();
+        assert_eq!(back.material_time_seconds, Some(1.25));
+        assert!(back.validate().is_ok());
+    }
+
+    #[test]
+    fn negative_or_non_finite_time_is_rejected() {
+        for t in [-0.5_f32, f32::NAN, f32::INFINITY] {
+            let mut p = plan();
+            p.material_time_seconds = Some(t);
+            assert!(
+                matches!(p.validate(), Err(TestPlanError::InvalidMaterialTime(_))),
+                "{t} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn time_with_render_sequence_is_rejected() {
+        let mut p = plan();
+        p.material_time_seconds = Some(1.0);
+        p.render_sequence = Some(RenderSequenceBlock {
+            frame_count: 2,
+            frame_hz: 30.0,
+            physics_dt_seconds: 1.0 / 60.0,
+            output_format: SequenceFormat::PngSequence,
+            animate_root_transform: None,
+            apply_vrma: None,
+            temporal_ssim_threshold: None,
+            capture_positions: false,
+            capture_synthetic_colliders: false,
+        });
+        assert_eq!(
+            p.validate(),
+            Err(TestPlanError::MaterialTimeWithRenderSequence)
         );
     }
 }

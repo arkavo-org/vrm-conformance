@@ -64,6 +64,7 @@ fn synthetic_plan(id: &str, threshold: f32) -> TestPlan {
         render_sequence: None,
         cross_variant: None,
         ccd_colliders: None,
+        material_time_seconds: None,
     }
 }
 

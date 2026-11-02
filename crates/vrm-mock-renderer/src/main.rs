@@ -113,6 +113,9 @@ fn dispatch(
         // Reserved-but-declared ops: return Unimplemented with the phase
         // the operation belongs to. Matches the Swift adapter's labels.
         "set_environment" => Err(handlers::unimplemented(method, "v1.x")),
+        // RFC 0007: the mock does not sample textures, so accepting a
+        // material time would be a silent no-op. Declared, never honoured.
+        "set_material_time" => Err(handlers::unimplemented(method, "material-time")),
         "set_expression" => Err(handlers::unimplemented(method, "Phase 3")),
         "set_humanoid_pose" | "set_root_transform" => {
             Err(handlers::unimplemented(method, "Phase 2"))

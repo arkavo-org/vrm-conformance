@@ -156,6 +156,15 @@ pub struct MToonParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot_texture_transform: Option<SlotTextureTransform>,
 
+    /// When `true`, binds the quadrant checkerboard as
+    /// `VRMC_materials_mtoon.uvAnimationMaskTexture`. Per spec the **B**
+    /// channel scales UV-animation time per texel; the checkerboard's B is
+    /// high only in its bottom-left quadrant, while R is high top-left and
+    /// bottom-right, so B- and R-reading renderers animate different regions.
+    /// `false` (default) is skipped on serialization.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub uv_animation_mask_texture: bool,
+
     pub alpha_mode: AlphaMode,
     /// glTF `alphaCutoff`. Meaningful only when `alpha_mode == Mask`;
     /// emitted in the material JSON only on Mask. glTF default is 0.5.
@@ -202,6 +211,7 @@ impl MToonParams {
             normal_texture_scale: None,
             occlusion_texture_strength: None,
             slot_texture_transform: None,
+            uv_animation_mask_texture: false,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             transparent_with_z_write: false,

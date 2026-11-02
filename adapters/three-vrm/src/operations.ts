@@ -168,6 +168,17 @@ export async function dispatch(
         const result = await ctx.session.loadVrma(p.vrma_path);
         return { ok: true, result };
       }
+      case "set_material_time": {
+        // RFC 0007. Pins the MToon UV-animation clock for later renders.
+        const p = params as { session_id?: string; time_seconds?: number };
+        if (!p?.session_id) return badParams("missing session_id");
+        const t = p.time_seconds;
+        if (typeof t !== "number" || !Number.isFinite(t) || t < 0) {
+          return badParams("time_seconds must be a finite number >= 0");
+        }
+        await ctx.session.setMaterialTime(t);
+        return { ok: true, result: {} };
+      }
       case "apply_vrma_at_time": {
         const p = params as {
           session_id?: string;
@@ -285,6 +296,7 @@ export function knownMethods(): string[] {
     "dump_bone_positions",
     "load_vrma",
     "apply_vrma_at_time",
+    "set_material_time",
     "dump_humanoid_pose",
     "dump_expression_weights",
     "dump_look_at_state",

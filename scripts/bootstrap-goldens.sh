@@ -175,9 +175,18 @@ else
         rm -rf "$MATNAME_BLEND_DIR"; mkdir -p "$MATNAME_BLEND_DIR"
         cargo run --release -q -p vrm-asset-generator -- emit-material-name-blend-sweep \
             --output-dir "$MATNAME_BLEND_DIR" --json >/dev/null
+
+        # RFC 0007: every plan sets material_time_seconds; adapters without
+        # set_material_time fail these plans instead of rendering at their
+        # own clock, and the UniVRM batch path skips them with a warning.
+        echo "==> Emitting MToon UV-animation sweep (11 plans, pinned material time)"
+        UVANIM_DIR="$GOLDENS_DIR/_assets_uvanim"
+        rm -rf "$UVANIM_DIR"; mkdir -p "$UVANIM_DIR"
+        cargo run --release -q -p vrm-asset-generator -- emit-uv-animation-sweep \
+            --output-dir "$UVANIM_DIR" --json >/dev/null
     else
         echo "    SKIP VMK 1.2.1 coverage sweeps: VRM 1.0 only"
-        UVXFORM_RIGGED_DIR=""; SLOTXFORM_DIR=""; MATNAME_BLEND_DIR=""
+        UVXFORM_RIGGED_DIR=""; SLOTXFORM_DIR=""; MATNAME_BLEND_DIR=""; UVANIM_DIR=""
     fi
 
     echo "==> Emitting MToon shadeMultiplyTexture sweep (6 plans, shaded-color path)"
@@ -536,6 +545,7 @@ if [ "${RUN_UNIVRM:-0}" = "1" ] && [ "$OS" = "darwin" ]; then
             "${UVXFORM_RIGGED_DIR:-}" \
             "${SLOTXFORM_DIR:-}" \
             "${MATNAME_BLEND_DIR:-}" \
+            "${UVANIM_DIR:-}" \
             "${SHADETEX_DIR:-}" \
             "${MATCAP_DIR:-}" \
             "${SHADINGSHIFTTEX_DIR:-}" \

@@ -1006,6 +1006,96 @@ pub fn material_name_blend_sweep() -> Vec<MToonParams> {
     out
 }
 
+/// MToon UV animation at a pinned time (RFC 0007). Every cell is the
+/// checkerboard sphere with `baseColorTexture` bound; each plan carries
+/// `material_time_seconds` (second tuple field), so the runner calls
+/// `set_material_time` before `render`. Spec references (MToon 1.0 README):
+/// rotation about (0.5, 0.5) then scroll (§Transform Order), animation
+/// before `KHR_texture_transform` (§Compatibility), mask time scale from the
+/// B channel (§uvAnimationMaskTexture), outline width mask animated
+/// (§UV Animation list).
+///
+/// - `still_t1`, `scrollx_t0`: controls (no motion; time zero).
+/// - `scrollx_t1`, `scrolly_t1`, `rotate_t1`: one motion each.
+/// - `rotscroll_t1`: rotation + scroll; separates the spec order from
+///   scroll-then-rotate (UniVRM v0.131.0).
+/// - `mask_t1`: checkerboard as mask; separates B-channel from R-channel.
+/// - `khrscale_t1`: base `KHR_texture_transform` scale 2 + scroll; separates
+///   KHR(anim(uv)) (spec) from anim(KHR(uv)).
+/// - `shade_t1`: shade multiply texture follows the animation too.
+/// - `owidth_t0`, `owidth_t1`: width-masked outline + scroll at two times;
+///   the spec animates the mask, so the silhouettes must differ (three-vrm,
+///   VMK 1.2.1 and UniVRM do not animate it, per source reading).
+///
+/// Ids avoid VMK's name tokens (`owidth`, not "outline").
+pub fn mtoon_uv_animation_sweep() -> Vec<(MToonParams, f32)> {
+    use std::f32::consts::FRAC_PI_4;
+
+    let cell = |name: &str| {
+        let mut p = MToonParams::defaults(format!("mtoon_uvanim_{name}"));
+        p.texture_transform = Some(TextureTransform::identity());
+        p
+    };
+    let mut out = Vec::new();
+
+    out.push((cell("still_t1"), 1.0));
+
+    let mut p = cell("scrollx_t0");
+    p.uv_animation_scroll_x_speed_factor = 0.25;
+    out.push((p, 0.0));
+
+    let mut p = cell("scrollx_t1");
+    p.uv_animation_scroll_x_speed_factor = 0.25;
+    out.push((p, 1.0));
+
+    let mut p = cell("scrolly_t1");
+    p.uv_animation_scroll_y_speed_factor = 0.25;
+    out.push((p, 1.0));
+
+    let mut p = cell("rotate_t1");
+    p.uv_animation_rotation_speed_factor = FRAC_PI_4;
+    out.push((p, 1.0));
+
+    let mut p = cell("rotscroll_t1");
+    p.uv_animation_rotation_speed_factor = FRAC_PI_4;
+    p.uv_animation_scroll_x_speed_factor = 0.25;
+    out.push((p, 1.0));
+
+    let mut p = cell("mask_t1");
+    p.uv_animation_scroll_x_speed_factor = 0.5;
+    p.uv_animation_mask_texture = true;
+    out.push((p, 1.0));
+
+    let mut p = cell("khrscale_t1");
+    p.texture_transform = Some(TextureTransform {
+        offset: [0.0, 0.0],
+        rotation: 0.0,
+        scale: [2.0, 2.0],
+    });
+    p.uv_animation_scroll_x_speed_factor = 0.25;
+    out.push((p, 1.0));
+
+    let mut p = cell("shade_t1");
+    p.shade_multiply_texture = true;
+    p.uv_animation_scroll_x_speed_factor = 0.25;
+    out.push((p, 1.0));
+
+    // The outline engulfs this sphere (2026-06-14), so only the silhouette
+    // is visible: `owidth_t1` differs from `owidth_t0` exactly when the
+    // renderer animates the width mask.
+    for (name, t) in [("owidth_t0", 0.0), ("owidth_t1", 1.0)] {
+        let mut p = cell(name);
+        p.outline_width_mode = OutlineWidthMode::WorldCoordinates;
+        p.outline_width_factor = 0.05;
+        p.outline_color_factor = [0.0, 0.0, 0.0];
+        p.outline_width_multiply_texture = true;
+        p.uv_animation_scroll_x_speed_factor = 0.5;
+        out.push((p, t));
+    }
+
+    out
+}
+
 fn fmt_num<T: std::fmt::Display + Copy + PartialOrd + Default>(v: T) -> String
 where
     f64: From<T>,
@@ -3829,6 +3919,88 @@ mod vmk_121_coverage_tests {
                 "{} must trip exactly one token",
                 p.id
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod uv_animation_sweep_tests {
+    //! RFC 0007 UV-animation cells: one axis per cell, every cell textured,
+    //! every plan timed.
+    use super::*;
+
+    fn by_id(id: &str) -> (MToonParams, f32) {
+        mtoon_uv_animation_sweep()
+            .into_iter()
+            .find(|(p, _)| p.id == id)
+            .unwrap_or_else(|| panic!("{id} missing"))
+    }
+
+    #[test]
+    fn sweep_has_eleven_unique_cells() {
+        let s = mtoon_uv_animation_sweep();
+        assert_eq!(s.len(), 11);
+        let mut ids: Vec<&str> = s.iter().map(|(p, _)| p.id.as_str()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 11);
+    }
+
+    #[test]
+    fn every_cell_has_a_base_texture_and_a_valid_time() {
+        for (p, t) in mtoon_uv_animation_sweep() {
+            assert!(
+                p.texture_transform.is_some(),
+                "{} needs baseColorTexture",
+                p.id
+            );
+            assert!(t.is_finite() && t >= 0.0, "{}", p.id);
+            assert_eq!(
+                p.id.ends_with("_t0"),
+                t == 0.0,
+                "{}: id must state the time",
+                p.id
+            );
+        }
+    }
+
+    #[test]
+    fn controls_and_discriminators_set_the_intended_axis_only() {
+        let (still, _) = by_id("mtoon_uvanim_still_t1");
+        assert_eq!(still.uv_animation_scroll_x_speed_factor, 0.0);
+        assert_eq!(still.uv_animation_rotation_speed_factor, 0.0);
+
+        let (t0, t) = by_id("mtoon_uvanim_scrollx_t0");
+        let (t1, _) = by_id("mtoon_uvanim_scrollx_t1");
+        assert_eq!(t, 0.0);
+        assert_eq!(
+            t0.uv_animation_scroll_x_speed_factor,
+            t1.uv_animation_scroll_x_speed_factor
+        );
+
+        let (rs, _) = by_id("mtoon_uvanim_rotscroll_t1");
+        assert!(rs.uv_animation_rotation_speed_factor != 0.0);
+        assert!(rs.uv_animation_scroll_x_speed_factor != 0.0);
+
+        let (mask, _) = by_id("mtoon_uvanim_mask_t1");
+        assert!(mask.uv_animation_mask_texture);
+
+        let (khr, _) = by_id("mtoon_uvanim_khrscale_t1");
+        assert!(!khr.texture_transform.unwrap().is_identity());
+
+        let (owidth, _) = by_id("mtoon_uvanim_owidth_t1");
+        assert!(owidth.outline_width_multiply_texture);
+        assert_ne!(owidth.outline_width_mode, OutlineWidthMode::None);
+    }
+
+    #[test]
+    fn ids_avoid_vmk_name_tokens() {
+        for (p, _) in mtoon_uv_animation_sweep() {
+            for token in [
+                "line", "skin", "hair", "face", "body", "cloth", "eye", "lip",
+            ] {
+                assert!(!p.id.contains(token), "{} contains {token}", p.id);
+            }
         }
     }
 }

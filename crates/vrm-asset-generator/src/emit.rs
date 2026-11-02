@@ -246,6 +246,7 @@ fn emit_vrm_inner(
         || params.shading_shift_texture_scale.is_some()
         || params.rim_multiply_texture
         || params.outline_width_multiply_texture
+        || params.uv_animation_mask_texture
         || params.normal_texture_scale.is_some()
         || params.occlusion_texture_strength.is_some();
     let needs_normal_map = params.normal_texture_scale.is_some();
@@ -679,6 +680,31 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
         .unwrap_or_default();
     let plan = build_default_test_plan(params, &asset_relpath);
     write_test_yaml(&plan, &yaml_path)?;
+
+    Ok(())
+}
+
+/// [`emit_with_sidecars`] whose test plan pins the MToon UV-animation clock
+/// at `material_time_seconds` (RFC 0007), so the runner calls
+/// `set_material_time` before `render`.
+pub fn emit_with_sidecars_timed(
+    params: &MToonParams,
+    stem: &Utf8Path,
+    material_time_seconds: f32,
+) -> Result<()> {
+    let vrm_path = stem.with_extension("vrm");
+    emit_vrm(params, &vrm_path)?;
+
+    let meta_path = stem.with_extension("meta.json");
+    write_meta_json(params, None, &vrm_path, &meta_path)?;
+
+    let asset_relpath = vrm_path
+        .file_name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let mut plan = build_default_test_plan(params, &asset_relpath);
+    plan.material_time_seconds = Some(material_time_seconds);
+    write_test_yaml(&plan, &stem.with_extension("test.yaml"))?;
 
     Ok(())
 }

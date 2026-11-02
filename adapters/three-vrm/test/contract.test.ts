@@ -484,3 +484,29 @@ test(
     }
   },
 );
+
+test("knownMethods() catalog includes set_material_time (RFC 0007)", () => {
+  assert.ok(new Set(knownMethods()).has("set_material_time"));
+});
+
+test("set_material_time rejects a negative time with InvalidParams (-32602)", async () => {
+  const h = spawnAdapter();
+  try {
+    const resp = await rpc(h, 41, "set_material_time", { session_id: "s", time_seconds: -1 });
+    assert.equal(resp.error?.code, -32602);
+  } finally {
+    h.stdin.end();
+    await new Promise((r) => h.child.on("exit", r));
+  }
+});
+
+test("set_material_time without session_id returns InvalidParams (-32602)", async () => {
+  const h = spawnAdapter();
+  try {
+    const resp = await rpc(h, 42, "set_material_time", { time_seconds: 1 });
+    assert.equal(resp.error?.code, -32602);
+  } finally {
+    h.stdin.end();
+    await new Promise((r) => h.child.on("exit", r));
+  }
+});

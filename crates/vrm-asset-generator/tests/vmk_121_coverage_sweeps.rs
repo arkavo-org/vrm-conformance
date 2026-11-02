@@ -200,3 +200,28 @@ fn existing_sweep_sidecars_do_not_gain_the_slot_field() {
         "unset slot transform must not serialize, keeping existing sidecars byte-identical"
     );
 }
+
+#[test]
+fn uv_animation_sweep_emits_timed_plans_and_the_mask_binding() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("uvanim");
+    emit("emit-uv-animation-sweep", &out);
+    assert_eq!(count_ext(&out, ".vrm"), 11);
+
+    let plan = std::fs::read_to_string(out.join("mtoon_uvanim_rotscroll_t1.test.yaml")).unwrap();
+    assert!(plan.contains("material_time_seconds: 1.0"), "{plan}");
+    let plan0 = std::fs::read_to_string(out.join("mtoon_uvanim_scrollx_t0.test.yaml")).unwrap();
+    assert!(plan0.contains("material_time_seconds: 0.0"), "{plan0}");
+
+    let (doc, _) = read_glb(&out.join("mtoon_uvanim_mask_t1.vrm"));
+    let mtoon = &doc["materials"][0]["extensions"]["VRMC_materials_mtoon"];
+    assert_eq!(mtoon["uvAnimationMaskTexture"]["index"], 0);
+    assert_eq!(mtoon["uvAnimationScrollXSpeedFactor"], 0.5);
+    assert!(doc["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"].is_object());
+
+    let (still, _) = read_glb(&out.join("mtoon_uvanim_still_t1.vrm"));
+    assert!(
+        still["materials"][0]["extensions"]["VRMC_materials_mtoon"]["uvAnimationMaskTexture"]
+            .is_null()
+    );
+}
