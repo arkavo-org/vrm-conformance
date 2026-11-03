@@ -2,6 +2,64 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-11-01 (VMK 1.2.1 gate — GO on `1.2.1-rc.3`) — **`1.2.1-rc.3` (`5279707`) gated against `1.2.1-rc.2` and the pinned `1.2.0`, both re-rendered with `.radiometric`: GO for stable `1.2.1`. This supersedes the rc.2 GO below.**
+- rc.3 adds two spec fixes on top of rc.2:
+  - #465: the indirect term is now `ambient × baseColor`, so `giEqualizationFactor` has no effect under uniform ambient.
+  - #467: `outlineWidthFactor` is in metres (world mode) or a ratio of screen height (screen mode).
+- Both pass their spec acceptance tests, and every new-cell expectation check (34/34) still passes.
+- Real-avatar outlines become visible thin lines, and the VRM 0.x centimetre width converts correctly (AliciaSolid).
+- Against three-vrm, the outline sweep jumps from 0.876 to 0.979. The movers that go *away* from three-vrm trace to three-vrm's own departures from the spec: ambient divided by π, and screen outlines drawn at half the spec's width. The spec model is the arbiter there.
+- Pin NOT advanced; that needs the user's request.
+
+**Method.**
+- Clean flagged build from the adapter source with `.radiometric`. The fail set is the same 94 cells, the collider isolation probe differs, and a serial repeat is byte-identical (704/704).
+- rc.3's `Sources/` differs from the accepted candidate `64434aa` only in doc comments (`VRMTypes.swift`), and the renders are byte-identical on all 87 overlapping images.
+- Baselines: `rc122rad` (rc.2) and `v120rad` (1.2.0), both rendered with `.radiometric`. Arbiter: three-vrm, plus the MToon spec model where three-vrm departs from the spec.
+
+**Candidate acceptance** (pre-check on `fc02fab` / `64434aa`, unchanged at rc.3).
+- *#465 GI.* `nmapquad` flat / lit / shaded moved 243.9 / 254.8 / 210.0 → 244.9 / 254.8 / 211.0. The spec model (shaded = 0.5 + 0.15 × base) predicts +0.9 / 0 / +1.1.
+- *#467 outline, per-side px:*
+
+| outline | rc.2 | rc.3 | three-vrm | nominal |
+| --- | --- | --- | --- | --- |
+| world 0.01 | 0 | 14 | 14 | 12.7 |
+| world 0.03 | 0 | 41 | 41 | 38 |
+| world 0.05 | 1 | 69 | 69 | 64 |
+| world 0.1 | 2 | 126 | 126 | 127 |
+| screen 0.01 | 0 | 10 | 5 | 10.2 |
+| screen 0.05 | 0 | 51 | 26 | 51.2 |
+
+  - World mode now matches three-vrm pixel for pixel.
+  - Screen mode follows the spec ("a ratio to the screen height", README §Outline). three-vrm draws half that.
+
+**rc.2 → rc.3 (both radiometric).**
+- Nearly every lit cell moves, because #465 changes ambient everywhere.
+  - VRM 0.x: 116 movers, min SSIM 0.99999 (the 0.x synthetic cells have no outlines).
+  - Humanoid: 39 movers, min 0.960 (thin outlines appear on VRoid avatars).
+  - AvatarSample_U: 2 movers, min 0.985.
+  - AliciaSolid: 3 movers, min 0.885 against rc.2.
+- AliciaSolid's eight 0.x outline materials are world mode at `_OutlineWidth` 0.05 (centimetres, i.e. 0.5 mm). rc.3 moves toward three-vrm on `head` (0.841 → 0.851) and `bangs` (0.747 → 0.771), and is flat on `full` (0.935 → 0.934). The image shows thin lines, not 5 cm bands, so the centimetre-to-metre conversion is right.
+- Against three-vrm on movers with a reference:
+  - synthetic: 85 cells, 0.965 → 0.970 (27 toward, 57 away, 1 unchanged: `mtoon_uvanim_shade_t1`, −0.00005).
+  - outline sweep: 7 cells, 0.876 → 0.979.
+  - humanoid: 34 cells, 0.821 → 0.826 (23 toward, 11 away).
+- The away moves are small (at most 0.008: matcap cells, screen outlines, shade slots). They trace to three-vrm's below-spec ambient (0.15/π vs the spec's 0.15) and its half-width screen outlines.
+
+**Gate row `1.2.0` → `1.2.1-rc.3` (both radiometric).**
+- 12 cells fall below 0.85. All are outline cells that now draw outlines (`outline_world_0p1` 0.631, `screen_0p1` 0.715, `outlinewidthtex_*`, `outlinecolor_*`, `slotxform_owidth_*`), plus `slotxform_shade_baseonly` (the #457 per-texture fix).
+- Against three-vrm: synthetic 0.939 → 0.966 (45 toward, 33 away); outline 0.876 → 0.979; humanoid 0.821 → 0.826. Cells at or above 0.85: 72 → 76 synthetic, 5 → 7 outline.
+- Every mover attributes to #452/#456/#457/#458/#459 (rc), #464 (rc.2) or #465/#467 (rc.3).
+
+**SIGN-OFF (regression-check gate). GO** on promoting `1.2.1-rc.3` (`5279707`) to stable `1.2.1`. If stable is tagged on `5279707`, this run is its regression check.
+
+Not covered:
+- #452's concurrent-load flake fix (it reproduced on neither side).
+- The look of the outline change on real avatars. GameOfMods is doing a visual check; this suite measures geometry, not taste.
+- UniVRM arbitration (licence-blocked).
+- three-vrm as an arbiter on ambient and screen-outline cells, where it departs from the spec. Those verdicts rest on the spec model.
+
+**Pointers.** [`1.2.1-rc.3`](https://github.com/arkavo-org/VRMMetalKit/releases/tag/1.2.1-rc.3) (`5279707`, pre-release). Stashes are in `goldens-cache-ab120/gate121/{rc122rad, v120rad, gi465, ol467, rc123}`, with comparison data in `ab_rc2rad_rc3.json`, `ab_v120rad_rc3.json` and `arb_*.json` (all gitignored).
+
 ## 2026-11-01 (VMK standing shading-level and outline gaps — causes found; #466 fixed suite-side by adopting `.radiometric`) — **Three pre-existing VMK divergences, which the VMK maintainers asked to investigate before stable 1.2.1, are measured against three-vrm on 1.2.1-rc.2 (`80adaa5`), and their causes are now confirmed from VMK source (maintainers) plus an A/B here:**
 - **#466 (darker at N·L = 0) is ours.** VMK divides direct light by π on purpose (VMK#205). It provides `setLightNormalizationMode(.radiometric)` to cancel that and documents it as the setting for this corpus (VMK#213), but our VMK adapter never calls it.
   - A/B with the call added: the flat / lit / shaded levels go 167 / 181 / 149 → **244 / 255 / 210**, against the model's prediction of 243 / 255 / 210.
