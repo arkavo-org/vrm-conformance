@@ -1024,11 +1024,28 @@ pub fn material_name_blend_sweep() -> Vec<MToonParams> {
 ///   KHR(anim(uv)) (spec) from anim(KHR(uv)).
 /// - `shade_t1`: shade multiply texture follows the animation too.
 /// - `owidth_t0`, `owidth_t1`: width-masked outline + scroll at two times;
-///   the spec animates the mask, so the silhouettes must differ (three-vrm,
-///   VMK 1.2.1 and UniVRM do not animate it, per source reading).
+///   the spec animates the mask, so the silhouettes must differ (three-vrm
+///   and UniVRM v0.131.0 do not animate it, per source reading; VMK does
+///   from 1.2.1).
+///
+/// Outline-mask pairs (VMK #469): each animated cell has a static twin at
+/// t = 0 whose `KHR_texture_transform` on the width mask performs the same
+/// UV change, so the pair must render identically when a renderer animates
+/// the mask per spec. Renderers that honour per-texture KHR on the mask
+/// (three-vrm) render the twin as an independent prediction even though
+/// they do not animate the mask themselves.
+/// - `owidth_scroll_twin_t0` pairs with `owidth_t1`: offset (0.5, 0).
+/// - `owidth_rot_t1` / `owidth_rot_twin_t0`: rotation π/4 about (0.5, 0.5),
+///   i.e. KHR rotation π/4 with offset `c - R·c`, `c = (0.5, 0.5)`.
+/// - `owidth_maskb255_t1` / `owidth_maskb0_t1`: a uniform animation mask
+///   with B = 1 (R = G = 0) must equal `owidth_t1`; B = 0 (R = G = 1) must
+///   equal `owidth_t0`, so the time scale comes from B alone.
+/// - `owidth_maskb128_t1` / `owidth_maskb128_twin_t0`: B = 128/255 scales
+///   the scroll to 0.5 × 128/255, sampled as linear data (not sRGB).
 ///
 /// Ids avoid VMK's name tokens (`owidth`, not "outline").
 pub fn mtoon_uv_animation_sweep() -> Vec<(MToonParams, f32)> {
+    use crate::params::{SlotTextureTransform, TextureSlot};
     use std::f32::consts::FRAC_PI_4;
 
     let cell = |name: &str| {
@@ -1092,6 +1109,54 @@ pub fn mtoon_uv_animation_sweep() -> Vec<(MToonParams, f32)> {
         p.uv_animation_scroll_x_speed_factor = 0.5;
         out.push((p, t));
     }
+
+    let owidth = |name: &str, scroll_x: f32, rotation: f32| {
+        let mut p = cell(name);
+        p.outline_width_mode = OutlineWidthMode::WorldCoordinates;
+        p.outline_width_factor = 0.05;
+        p.outline_color_factor = [0.0, 0.0, 0.0];
+        p.outline_width_multiply_texture = true;
+        p.uv_animation_scroll_x_speed_factor = scroll_x;
+        p.uv_animation_rotation_speed_factor = rotation;
+        p
+    };
+    let mask_xform = |offset: [f32; 2], rotation: f32| {
+        Some(SlotTextureTransform {
+            slot: TextureSlot::OutlineWidthMultiply,
+            transform: TextureTransform {
+                offset,
+                rotation,
+                scale: [1.0, 1.0],
+            },
+        })
+    };
+
+    let mut p = owidth("owidth_scroll_twin_t0", 0.5, 0.0);
+    p.slot_texture_transform = mask_xform([0.5, 0.0], 0.0);
+    out.push((p, 0.0));
+
+    out.push((owidth("owidth_rot_t1", 0.0, FRAC_PI_4), 1.0));
+    // Rotating about c = (0.5, 0.5) is R·uv + (c - R·c), with R the row
+    // matrix [[cos, sin], [-sin, cos]] shared by MToon UV animation and
+    // KHR_texture_transform.
+    let (sin, cos) = FRAC_PI_4.sin_cos();
+    let rc = [0.5 * (cos + sin), 0.5 * (cos - sin)];
+    let mut p = owidth("owidth_rot_twin_t0", 0.0, FRAC_PI_4);
+    p.slot_texture_transform = mask_xform([0.5 - rc[0], 0.5 - rc[1]], FRAC_PI_4);
+    out.push((p, 0.0));
+
+    for (name, rgb) in [
+        ("owidth_maskb255_t1", [0, 0, 255]),
+        ("owidth_maskb0_t1", [255, 255, 0]),
+        ("owidth_maskb128_t1", [0, 0, 128]),
+    ] {
+        let mut p = owidth(name, 0.5, 0.0);
+        p.uv_animation_mask_color = Some(rgb);
+        out.push((p, 1.0));
+    }
+    let mut p = owidth("owidth_maskb128_twin_t0", 0.5, 0.0);
+    p.slot_texture_transform = mask_xform([0.5 * 128.0 / 255.0, 0.0], 0.0);
+    out.push((p, 0.0));
 
     out
 }
@@ -3970,13 +4035,13 @@ mod uv_animation_sweep_tests {
     }
 
     #[test]
-    fn sweep_has_eleven_unique_cells() {
+    fn sweep_has_eighteen_unique_cells() {
         let s = mtoon_uv_animation_sweep();
-        assert_eq!(s.len(), 11);
+        assert_eq!(s.len(), 18);
         let mut ids: Vec<&str> = s.iter().map(|(p, _)| p.id.as_str()).collect();
         ids.sort();
         ids.dedup();
-        assert_eq!(ids.len(), 11);
+        assert_eq!(ids.len(), 18);
     }
 
     #[test]
@@ -4024,6 +4089,81 @@ mod uv_animation_sweep_tests {
         let (owidth, _) = by_id("mtoon_uvanim_owidth_t1");
         assert!(owidth.outline_width_multiply_texture);
         assert_ne!(owidth.outline_width_mode, OutlineWidthMode::None);
+    }
+
+    /// Each static twin must differ from its animated partner only in the
+    /// mask transform (or uniform mask) and the time, so a pair can only
+    /// disagree through the renderer's outline-mask animation.
+    #[test]
+    fn outline_mask_twins_differ_from_their_partner_only_in_the_intended_axis() {
+        let strip = |mut p: MToonParams| {
+            p.id = String::new();
+            p.slot_texture_transform = None;
+            p.uv_animation_mask_color = None;
+            serde_json::to_value(p).expect("params serialize")
+        };
+        for (anim, twin) in [
+            (
+                "mtoon_uvanim_owidth_t1",
+                "mtoon_uvanim_owidth_scroll_twin_t0",
+            ),
+            (
+                "mtoon_uvanim_owidth_rot_t1",
+                "mtoon_uvanim_owidth_rot_twin_t0",
+            ),
+            ("mtoon_uvanim_owidth_maskb255_t1", "mtoon_uvanim_owidth_t1"),
+            ("mtoon_uvanim_owidth_maskb0_t1", "mtoon_uvanim_owidth_t0"),
+            (
+                "mtoon_uvanim_owidth_maskb128_t1",
+                "mtoon_uvanim_owidth_maskb128_twin_t0",
+            ),
+        ] {
+            let (a, ta) = by_id(anim);
+            let (b, tb) = by_id(twin);
+            assert_eq!(strip(a), strip(b), "{anim} vs {twin}");
+            assert_eq!(ta, 1.0, "{anim}");
+            assert_eq!(tb, if twin.ends_with("_t0") { 0.0 } else { 1.0 });
+        }
+    }
+
+    #[test]
+    fn outline_mask_twin_transforms_reproduce_the_animation() {
+        use std::f32::consts::FRAC_PI_4;
+        let mask = |id: &str| by_id(id).0.slot_texture_transform.expect(id);
+
+        let scroll = mask("mtoon_uvanim_owidth_scroll_twin_t0");
+        assert_eq!(
+            scroll.slot,
+            crate::params::TextureSlot::OutlineWidthMultiply
+        );
+        assert_eq!(scroll.transform.offset, [0.5, 0.0]);
+
+        // Twin of a π/4 rotation about (0.5, 0.5) at t = 1: the transformed
+        // centre must stay put, and a corner must land where rotating it
+        // about the centre puts it.
+        let rot = mask("mtoon_uvanim_owidth_rot_twin_t0").transform;
+        assert_eq!(rot.rotation, FRAC_PI_4);
+        let apply = |uv: [f32; 2]| {
+            let (s, c) = rot.rotation.sin_cos();
+            [
+                c * uv[0] + s * uv[1] + rot.offset[0],
+                -s * uv[0] + c * uv[1] + rot.offset[1],
+            ]
+        };
+        let centre = apply([0.5, 0.5]);
+        assert!((centre[0] - 0.5).abs() < 1e-6 && (centre[1] - 0.5).abs() < 1e-6);
+        let corner = apply([1.0, 0.5]);
+        let (s, c) = FRAC_PI_4.sin_cos();
+        assert!((corner[0] - (0.5 + 0.5 * c)).abs() < 1e-6);
+        assert!((corner[1] - (0.5 - 0.5 * s)).abs() < 1e-6);
+
+        let half = mask("mtoon_uvanim_owidth_maskb128_twin_t0").transform;
+        let (anim, t) = by_id("mtoon_uvanim_owidth_maskb128_t1");
+        let b = anim.uv_animation_mask_color.unwrap()[2] as f32 / 255.0;
+        assert_eq!(
+            half.offset,
+            [anim.uv_animation_scroll_x_speed_factor * t * b, 0.0]
+        );
     }
 
     #[test]
