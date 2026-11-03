@@ -31,7 +31,7 @@ The conformance suite's prior default (`color_space: Linear`) therefore asked th
 
 Adapters return `actual_color_space` in their render response so the runner can flag any deviation from the declared plan.
 
-### Directional intensity convention (resolved in run 10)
+### Directional intensity convention (resolved in run 10; VMK row updated 2026-11-01)
 
 three.js since r155 uses physically-correct intensity scaling — a `DirectionalLight` with intensity `1.0` is dimmer by a factor of π than the same setting in legacy three.js or in Unity URP. three-vrm's spec-intended MToon baseline ([pixiv/three-vrm#1838](https://github.com/pixiv/three-vrm/issues/1838)) assumes `intensity = Math.PI`.
 
@@ -40,7 +40,7 @@ three.js since r155 uses physically-correct intensity scaling — a `Directional
 | Adapter | Scaling applied |
 |---|---|
 | three-vrm | `state.directional.intensity = d.intensity * Math.PI` — required because three.js's `DirectionalLight` uses lux (physically-correct). |
-| vrm-metal-kit | None — VRMMetalKit's lighting model already produces output consistent with intensity 1.0 = "Unity URP intensity 1.0" semantics. |
+| vrm-metal-kit | `renderer.setLightNormalizationMode(.radiometric)` at `load_vrm` (since 2026-11-01). VRMMetalKit's MToon shader divides direct light by π by design (`BRDF_LAMBERT_NORM`, VMK#205); `.radiometric` cancels it and is upstream's documented setting for this corpus (VMK#213). The earlier entry here ("none needed") predates VMK#205 and was stale: without it VMK's direct term was low by π (`docs/findings.md` 2026-11-01). VMK renders before that date used `.automatic` and are not comparable. |
 | godot-vrm | None — Godot 4's `DirectionalLight3D.light_energy` defaults match the same convention. |
 | univrm (in design) | TBD — verify at L3 implementation time against UniVRM's lighting setup. |
 

@@ -2,14 +2,19 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
-## 2026-11-01 (VMK standing shading-level and outline gaps — causes found; #466 is a suite-side adapter gap) — **Three pre-existing VMK divergences, which the VMK maintainers asked to investigate before stable 1.2.1, are measured against three-vrm on 1.2.1-rc.2 (`80adaa5`), and their causes are now confirmed from VMK source (maintainers) plus an A/B here:**
+## 2026-11-01 (VMK standing shading-level and outline gaps — causes found; #466 fixed suite-side by adopting `.radiometric`) — **Three pre-existing VMK divergences, which the VMK maintainers asked to investigate before stable 1.2.1, are measured against three-vrm on 1.2.1-rc.2 (`80adaa5`), and their causes are now confirmed from VMK source (maintainers) plus an A/B here:**
 - **#466 (darker at N·L = 0) is ours.** VMK divides direct light by π on purpose (VMK#205). It provides `setLightNormalizationMode(.radiometric)` to cancel that and documents it as the setting for this corpus (VMK#213), but our VMK adapter never calls it.
   - A/B with the call added: the flat / lit / shaded levels go 167 / 181 / 149 → **244 / 255 / 210**, against the model's prediction of 243 / 255 / 210.
   - Mean SSIM against three-vrm rises 0.934 → **0.964** on 79 synthetic cells (64 toward, 8 away by ≤ 0.011) and 0.763 → **0.821** on 34 humanoid cells (all 34 toward; 6 → 11 at or above 0.85).
 - **#465 (texture visible in the shaded hemisphere) is a small VMK spec gap.** VMK's GI proxy is `giAlbedo = mix(shade, base, giEqualizationFactor)`. The spec gives 0.15 × base under uniform ambient; VMK gives 0.15 × (0.9·base + 0.1·shade). three-vrm's 0.15/π × base is further from the spec than VMK is.
 - **Outline under-extrusion is a VMK spec gap (mechanism corrected).** VMK's world mode extrudes by `factor × cameraDistance × 0.01`, about 67× too thin at 1.5 m. Its screen mode reads the factor as pixels, where the spec means a fraction of screen height. UniVRM MToon10 and three-vrm extrude `normal × width` in world units.
 
-**ADAPTER DECISION PENDING (user):** call `.radiometric` in the VMK adapter and update `docs/methodology.md` §"Directional intensity convention", whose VMK row ("no scaling needed") is stale for VMK ≥ the #205 change. That re-baselines every VMK golden. The fixes to the GI proxy and the outline are upstream's call, for rc.3 or later.
+**ADOPTED (user decision, 2026-11-01):** the VMK adapter now calls `renderer.setLightNormalizationMode(.radiometric)` at `load_vrm`, and `docs/methodology.md` §"Directional intensity convention" is updated (its VMK row, "no scaling needed", predated VMK#205). VMK renders made before this change used `.automatic`, are not comparable, and must be re-rendered.
+- Measured on the pinned `1.2.0` with a clean build from the adopting branch (serial; fail set unchanged), mean SSIM against three-vrm:
+  - synthetic (83 cells): 0.913 → 0.938, 61 toward and 11 away.
+  - humanoid (34 cells): 0.763 → 0.821, all 34 toward; 6 → 11 at or above 0.85.
+- The 11 that move away are 1.2.0's own known defects interacting with the brighter direct term: the name-heuristic BLEND cells 0.939 → 0.915 (fixed in 1.2.1), `slotxform_shade_slotonly` (single base transform, fixed in 1.2.1) and `nmapquad_nx_lx` (normal-map mirror, fixed in 1.2.1-rc.2).
+- The GI-proxy and outline fixes remain upstream's call, for rc.3 or later.
 
 **Setups.**
 - *Shared default plan* (`sidecar.rs` `build_default_test_plan`):
@@ -68,7 +73,7 @@ This document records cross-renderer divergence findings produced by the suite, 
 - This is the mechanism behind the 2026-06-14 "VMK under-extrudes vs the reference" finding. That entry's silhouette-size divergence (VMK vs UniVRM 0.95 → 0.63 as width rose from 0.01 to 0.1) is consistent with the ~67× (0.015×) scale-down.
 
 **Status.**
-- *Suite side:* adopting `.radiometric` in the VMK adapter (and updating the methodology table) waits on the user's decision, because it re-baselines every VMK golden. The A/B above is the evidence. If adopted, `nmapquad` levels and the shaded hemisphere become spec-checkable on VMK, with the residual ambient gap.
+- *Suite side:* `.radiometric` is adopted (see the header). `nmapquad` levels and the shaded hemisphere are now spec-checkable on VMK, with the residual ambient gap. Local VMK caches made before this change are stale. The committed goldens manifest has no entries, so nothing needs re-uploading.
 - *Upstream:* the GI-proxy fix (#465) may go into `1.2.1-rc.3`. A spec-conformant outline would change every outlined avatar, which is the maintainers' call. The suite will gate rc.3 with these acceptance tests:
   - the N·L = 0 and shaded levels under `.radiometric` against the spec model;
   - outline per-side thickness within a few px of nominal.
