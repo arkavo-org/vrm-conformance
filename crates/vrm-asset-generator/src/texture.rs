@@ -89,6 +89,13 @@ pub fn uniform_normal_map_16(nx: f32, ny: f32) -> RgbaImage {
     RgbaImage::from_pixel(16, 16, px)
 }
 
+/// A 16×16 texture of one opaque colour. Used as a uniform
+/// `uvAnimationMaskTexture`, so the per-texel time scale is the same
+/// everywhere.
+pub fn uniform_rgb_16(rgb: [u8; 3]) -> RgbaImage {
+    RgbaImage::from_pixel(16, 16, image::Rgba([rgb[0], rgb[1], rgb[2], 255]))
+}
+
 /// PNG-encode an image and wrap it in a `data:` URI suitable for
 /// `glTF.images[*].uri`. The base64 dance avoids touching the GLB
 /// binary chunk — keeps texture additions JSON-only, no new

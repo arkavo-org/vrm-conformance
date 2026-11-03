@@ -31,7 +31,7 @@ RFC-level — touches ops contract + adapter implementations + asset generator +
 
 ### UV-animation sweep needs a clock contract — RESOLVED by [RFC 0007](../rfcs/0007-material-time-op.md) (2026-11-01)
 
-**Resolution.** A dedicated `set_material_time` op plus the plan field `material_time_seconds`, rather than a `RenderParams` field, because adapters ignore unknown param fields and would silently render at their own clock. Adapters that cannot pin the clock return Unimplemented, and the runner fails the plan. `emit-uv-animation-sweep` (11 cells) uses it. The original notes follow.
+**Resolution.** A dedicated `set_material_time` op plus the plan field `material_time_seconds`, rather than a `RenderParams` field, because adapters ignore unknown param fields and would silently render at their own clock. Adapters that cannot pin the clock return Unimplemented, and the runner fails the plan. `emit-uv-animation-sweep` (18 cells: 11 from RFC 0007, plus 7 outline-mask twin cells added after VMK #469) uses it. The original notes follow.
 
 **Context.** MToon's `uvAnimationScrollX/YSpeedFactor` and `uvAnimationRotationSpeedFactor` are time-dependent — rendering at time T applies a UV shift of `(speed * T) mod 1`. The current `render` op renders a single frame at an unspecified time; without a "capture time" parameter, all UV-animation sweep variants would render at t=0 (the same frame) regardless of speed values.
 

@@ -165,6 +165,16 @@ pub struct MToonParams {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub uv_animation_mask_texture: bool,
 
+    /// When `Some([r, g, b])`, binds a uniform texture of that colour as
+    /// `uvAnimationMaskTexture` (its own image, after the checkerboard and
+    /// any normal map) instead of the checkerboard. A uniform B scales the
+    /// animation time everywhere by `b / 255`, which a static
+    /// `KHR_texture_transform` can predict exactly; R and G must be ignored.
+    /// Takes precedence over `uv_animation_mask_texture`. `None` (default)
+    /// is skipped on serialization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uv_animation_mask_color: Option<[u8; 3]>,
+
     /// When `Some([nx, ny])` (with `normal_texture_scale` set), the normal
     /// texture is a uniform tilt instead of the quadrant map
     /// (`texture::uniform_normal_map_16`). Used by the normal-map convention
@@ -219,6 +229,7 @@ impl MToonParams {
             occlusion_texture_strength: None,
             slot_texture_transform: None,
             uv_animation_mask_texture: false,
+            uv_animation_mask_color: None,
             normal_map_tilt: None,
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,

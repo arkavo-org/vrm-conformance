@@ -589,9 +589,10 @@ pub enum Cmd {
         json: bool,
     },
 
-    /// Emit the MToon UV-animation sweep (11 assets, RFC 0007): the
+    /// Emit the MToon UV-animation sweep (18 assets, RFC 0007): the
     /// checkerboard sphere with scroll / rotation / mask / KHR-order / shade /
-    /// outline-mask variants. Each plan sets `material_time_seconds`, so the
+    /// outline-mask variants, and outline-mask cells paired with static
+    /// `KHR_texture_transform` twins. Each plan sets `material_time_seconds`, so the
     /// runner pins the UV-animation clock with `set_material_time`; adapters
     /// that cannot pin it fail those plans. VRM 1.0 only.
     EmitUvAnimationSweep {
@@ -3621,7 +3622,7 @@ pub fn run(cli: Cli) -> Result<()> {
                         }
                     },
                     "emit-uv-animation-sweep": {
-                        "summary": "MToon UV-animation sweep (11 assets, RFC 0007): checkerboard sphere with scroll, rotation, combined rotation+scroll, B-channel mask, KHR-order, shade-texture and outline-mask variants plus still and t=0 controls. Every plan sets material_time_seconds, so the runner calls set_material_time before render. VRM 1.0 only.",
+                        "summary": "MToon UV-animation sweep (18 assets, RFC 0007): checkerboard sphere with scroll, rotation, combined rotation+scroll, B-channel mask, KHR-order, shade-texture and outline-mask variants plus still and t=0 controls, and outline-mask cells paired with static KHR_texture_transform twins that must render identically. Every plan sets material_time_seconds, so the runner calls set_material_time before render. VRM 1.0 only.",
                         "input_schema": {
                             "type": "object",
                             "required": ["output_dir"],

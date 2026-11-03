@@ -247,6 +247,7 @@ fn emit_vrm_inner(
         || params.rim_multiply_texture
         || params.outline_width_multiply_texture
         || params.uv_animation_mask_texture
+        || params.uv_animation_mask_color.is_some()
         || params.normal_texture_scale.is_some()
         || params.occlusion_texture_strength.is_some();
     let needs_normal_map = params.normal_texture_scale.is_some();
@@ -285,6 +286,15 @@ fn emit_vrm_inner(
             }));
             samplers.push(sampler);
             textures.push(json!({ "source": 1, "sampler": 1 }));
+        }
+
+        if let Some(rgb) = params.uv_animation_mask_color {
+            assert_eq!(
+                textures.len(),
+                crate::vrm_ext::uv_animation_mask_color_index(params)
+            );
+            images.push(uv_animation_mask_image(params, rgb));
+            textures.push(json!({ "source": images.len() - 1, "sampler": 0 }));
         }
 
         doc["images"] = Value::Array(images);
@@ -602,6 +612,18 @@ pub fn emit_vrm_textured_quad(params: &MToonParams, output: &Utf8Path) -> Result
             .push(json!({ "source": 1, "sampler": 0 }));
     }
 
+    if let Some(rgb) = params.uv_animation_mask_color {
+        let images = doc["images"].as_array_mut().unwrap();
+        images.push(uv_animation_mask_image(params, rgb));
+        let source = images.len() - 1;
+        let textures = doc["textures"].as_array_mut().unwrap();
+        assert_eq!(
+            textures.len(),
+            crate::vrm_ext::uv_animation_mask_color_index(params)
+        );
+        textures.push(json!({ "source": source, "sampler": 0 }));
+    }
+
     for key in ["buffers", "bufferViews", "accessors"] {
         doc[key] = packed.json[key].clone();
     }
@@ -705,6 +727,16 @@ pub fn emit_with_sidecars(params: &MToonParams, stem: &Utf8Path) -> Result<()> {
     write_test_yaml(&plan, &yaml_path)?;
 
     Ok(())
+}
+
+/// glTF image for a uniform `uvAnimationMaskTexture` (see
+/// `MToonParams::uv_animation_mask_color`).
+fn uv_animation_mask_image(params: &MToonParams, rgb: [u8; 3]) -> Value {
+    json!({
+        "name": format!("{}_uv_animation_mask", params.id),
+        "uri": crate::texture::image_as_data_uri(&crate::texture::uniform_rgb_16(rgb)),
+        "mimeType": "image/png",
+    })
 }
 
 /// [`emit_with_sidecars`] whose test plan pins the MToon UV-animation clock

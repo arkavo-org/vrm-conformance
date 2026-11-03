@@ -206,7 +206,7 @@ fn uv_animation_sweep_emits_timed_plans_and_the_mask_binding() {
     let tmp = tempfile::tempdir().unwrap();
     let out = tmp.path().join("uvanim");
     emit("emit-uv-animation-sweep", &out);
-    assert_eq!(count_ext(&out, ".vrm"), 11);
+    assert_eq!(count_ext(&out, ".vrm"), 18);
 
     let plan = std::fs::read_to_string(out.join("mtoon_uvanim_rotscroll_t1.test.yaml")).unwrap();
     assert!(plan.contains("material_time_seconds: 1.0"), "{plan}");
@@ -224,4 +224,28 @@ fn uv_animation_sweep_emits_timed_plans_and_the_mask_binding() {
         still["materials"][0]["extensions"]["VRMC_materials_mtoon"]["uvAnimationMaskTexture"]
             .is_null()
     );
+
+    // Uniform animation mask: its own image at texture index 1, bound as
+    // uvAnimationMaskTexture; the width mask stays on the checkerboard.
+    let (b128, _) = read_glb(&out.join("mtoon_uvanim_owidth_maskb128_t1.vrm"));
+    let mtoon = &b128["materials"][0]["extensions"]["VRMC_materials_mtoon"];
+    assert_eq!(mtoon["uvAnimationMaskTexture"]["index"], 1);
+    assert_eq!(mtoon["outlineWidthMultiplyTexture"]["index"], 0);
+    assert_eq!(b128["textures"][1]["source"], 1);
+    assert_eq!(b128["images"].as_array().unwrap().len(), 2);
+
+    // Static twin: KHR_texture_transform on the width mask only.
+    let (twin, _) = read_glb(&out.join("mtoon_uvanim_owidth_scroll_twin_t0.vrm"));
+    let mtoon = &twin["materials"][0]["extensions"]["VRMC_materials_mtoon"];
+    assert_eq!(
+        mtoon["outlineWidthMultiplyTexture"]["extensions"]["KHR_texture_transform"]["offset"],
+        serde_json::json!([0.5, 0.0])
+    );
+    assert!(twin["extensionsUsed"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("KHR_texture_transform")));
+    let plan =
+        std::fs::read_to_string(out.join("mtoon_uvanim_owidth_scroll_twin_t0.test.yaml")).unwrap();
+    assert!(plan.contains("material_time_seconds: 0.0"), "{plan}");
 }

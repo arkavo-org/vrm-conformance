@@ -312,7 +312,9 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
     // `outlineWidthFactor > 0` — the sweep handles that.
     // `uvAnimationMaskTexture` per VRMC_materials_mtoon-1.0: the B channel
     // scales UV-animation time per texel (README §uvAnimationMaskTexture).
-    if p.uv_animation_mask_texture {
+    if p.uv_animation_mask_color.is_some() {
+        mtoon["uvAnimationMaskTexture"] = json!({ "index": uv_animation_mask_color_index(p) });
+    } else if p.uv_animation_mask_texture {
         mtoon["uvAnimationMaskTexture"] = json!({ "index": 0 });
     }
 
@@ -322,6 +324,17 @@ pub fn vrmc_materials_mtoon(p: &MToonParams) -> Value {
     }
 
     mtoon
+}
+
+/// Texture index of the uniform `uvAnimationMaskTexture`
+/// (`MToonParams::uv_animation_mask_color`): appended after the checkerboard
+/// (index 0) and the normal map, when there is one (index 1).
+pub fn uv_animation_mask_color_index(p: &MToonParams) -> usize {
+    if p.normal_texture_scale.is_some() {
+        2
+    } else {
+        1
+    }
 }
 
 /// True when `slot`'s texture binding is enabled on `p`.
