@@ -2,6 +2,13 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-11-03 (VMK pin advanced to stable `1.2.1`) — **The VMK adapter now pins `1.2.1` (`2162dd0`, the rc.4 commit), signed off by the user after the rc.4 GO below. It defines `VMK_UV_ANIMATION_TIME` on both targets, so `set_material_time` is real on VMK.**
+- Verified the tag: `1.2.1` points to `2162dd0`, released as Latest, not a pre-release.
+- Ran a clean build of the adapter from this change (the define now comes from `Package.swift`, not `-Xswiftc`). `Package.resolved` and the checkout are both at `2162dd0`.
+- `swift test` passes: 41 tests, 0 failures, 3 skipped (two fixture-dependent tests, plus the Unimplemented-path test, which only runs without the define). A new test checks that `set_material_time` on an unknown session returns InvalidParams.
+- Serial full-corpus render: 733/733 byte-identical to the rc.4 gate render, and the fail set is unchanged (94). The timed UV-animation plans render, so the define reaches the adapter.
+- Re-baseline any local VMK goldens made at `1.2.0` or with `.automatic`. The committed manifest has no VMK entries.
+
 ## 2026-11-03 (VMK 1.2.1 gate — GO on `1.2.1-rc.4`) — **`1.2.1-rc.4` (`2162dd0`) gated against `1.2.1-rc.3` and the pinned `1.2.0`, all rendered with `.radiometric`: GO for stable `1.2.1`. This supersedes the rc.3 GO below.**
 - rc.4 adds two changes on top of rc.3:
   - #469: UV animation now moves the outline width mask, as the MToon 1.0 spec says it should. The order is: animation, scaled by the animation mask's B channel, then the mask's own `KHR_texture_transform`. VMK previously left the mask unanimated on purpose (RFC 0007 preview entry below), so this reverses that documented divergence.

@@ -137,7 +137,7 @@ Multi-frame capture for temporal conformance. End-to-end across all four real ad
 
 ### `set_material_time` (RFC 0007)
 
-Pins the MToon UV-animation clock for single-frame renders. Plans opt in with `material_time_seconds:` (rejected together with `render_sequence:`). The runner calls the op after physics and before `render`, and fails the plan if the adapter answers Unimplemented, so a timed plan never renders at an adapter's own clock. three-vrm implements it. VMK implements it only when built with `-DVMK_UV_ANIMATION_TIME`, which needs VMK ≥ 1.2.1; add that define to `Package.swift` when the pin reaches 1.2.1. Mock, Godot and Babylon return Unimplemented, and the UniVRM batch path skips timed plans. Corpus: `emit-uv-animation-sweep`.
+Pins the MToon UV-animation clock for single-frame renders. Plans opt in with `material_time_seconds:` (rejected together with `render_sequence:`). The runner calls the op after physics and before `render`, and fails the plan if the adapter answers Unimplemented, so a timed plan never renders at an adapter's own clock. three-vrm implements it. VMK implements it from the 1.2.1 pin: `Package.swift` defines `VMK_UV_ANIMATION_TIME` on both targets (the API needs VMK ≥ 1.2.1, so drop the define if the pin ever goes lower). Mock, Godot and Babylon return Unimplemented, and the UniVRM batch path skips timed plans. Corpus: `emit-uv-animation-sweep` (18 cells, including outline-mask cells paired with static `KHR_texture_transform` twins).
 
 ### CI guardrails
 

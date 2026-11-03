@@ -230,6 +230,22 @@ final class JsonRpcServerTests: XCTestCase {
         XCTAssertEqual(err["code"] as? Int, -32602)
     }
 
+    func testSetMaterialTimeUnknownSessionIsInvalidParams() throws {
+        #if VMK_UV_ANIMATION_TIME
+        // RFC 0007 with the clock API available: a valid time against an
+        // unknown session is InvalidParams, not Unimplemented.
+        let request = #"{"jsonrpc":"2.0","id":10,"method":"set_material_time","params":{"session_id":"nope","time_seconds":1.0}}"#
+        let writer = MemoryWriter()
+        JsonRpcServer(input: MemoryReader(frame(request)), output: writer, log: MemoryWriter()).run()
+
+        let resp = try XCTUnwrap(splitFramedResponses(writer.data).first)
+        let err = try XCTUnwrap(resp["error"] as? [String: Any])
+        XCTAssertEqual(err["code"] as? Int, -32602)
+        #else
+        throw XCTSkip("built without VMK_UV_ANIMATION_TIME: the op is Unimplemented")
+        #endif
+    }
+
     func testSetMaterialTimeWithoutFlagIsUnimplemented() throws {
         #if VMK_UV_ANIMATION_TIME
         throw XCTSkip("built with VMK_UV_ANIMATION_TIME: the op is real")

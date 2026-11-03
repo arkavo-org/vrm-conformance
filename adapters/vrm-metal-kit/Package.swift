@@ -637,7 +637,22 @@ let package = Package(
             // (name-matched lace/frill materials), #457 (KHR_texture_transform
             // from baseColorTexture). Pin-only bump — no adapter code change.
             // Prior pin: 1.0.0 (a94531d).
-            revision: "6b2e2cb8ba5e08de3c729de6a1c437db46fe1bec"
+            // 1.2.1 (2162dd0, 2026-11-03) — stable, tagged on the same commit as
+            // 1.2.1-rc.4. Gated in docs/findings.md 2026-11-01..03 (rc, rc.2,
+            // rc.3, rc.4 GO). vs 1.2.0, rendered with this adapter's
+            // `.radiometric` normalization (PR #30): #456 name-matched
+            // materials honour authored flags, #457 per-texture
+            // KHR_texture_transform (incl. skinned), #464 normal-map X
+            // convention, #465 spec GI (ambient × base), #467 spec outline
+            // width (metres / screen-height ratio), #469 outline width mask
+            // follows UV animation, #328 hemisphere ambient API (95 textured
+            // cells move ≤ 2/255 from shader rounding). 12 cells fall below
+            // 0.85 vs 1.2.0, all deliberate spec fixes. Exposes
+            // `VRMRenderer.uvAnimationTime`, so both targets now define
+            // VMK_UV_ANIMATION_TIME and `set_material_time` (RFC 0007) is
+            // real. Re-baseline any local VMK goldens. Prior pin: 1.2.0
+            // (6b2e2cb).
+            revision: "2162dd04a03284802fd4bba780ef56cedad435d2"
         ),
     ],
     targets: [
@@ -645,11 +660,15 @@ let package = Package(
             name: "VRMMetalKitAdapter",
             dependencies: [
                 .product(name: "VRMMetalKit", package: "VRMMetalKit"),
-            ]
+            ],
+            // `VRMRenderer.uvAnimationTime` exists from VRMMetalKit 1.2.1;
+            // drop this define if the pin ever goes below that.
+            swiftSettings: [.define("VMK_UV_ANIMATION_TIME")]
         ),
         .testTarget(
             name: "VRMMetalKitAdapterTests",
-            dependencies: ["VRMMetalKitAdapter"]
+            dependencies: ["VRMMetalKitAdapter"],
+            swiftSettings: [.define("VMK_UV_ANIMATION_TIME")]
         ),
     ]
 )
