@@ -124,7 +124,7 @@ These cover MToon material tests and must be implemented by every renderer adapt
 
 - Params: `SetMaterialTimeParams { session_id, time_seconds }`. `time_seconds` must be finite and ≥ 0, otherwise the adapter returns `-32602`.
 - Result: `{}`
-- An adapter that cannot pin the clock returns `-32000` Unimplemented with `data.phase = "material-time"`. Implemented by three-vrm, and by VRMMetalKit when built with `-DVMK_UV_ANIMATION_TIME` (VMK ≥ 1.2.1). The mock declares the op but returns Unimplemented.
+- An adapter that cannot pin the clock returns `-32000` Unimplemented with `data.phase = "material-time"`. Implemented by three-vrm, and by VRMMetalKit from the 1.2.1 pin (`Package.swift` defines `VMK_UV_ANIMATION_TIME`; a build without it returns Unimplemented). The mock declares the op but returns Unimplemented.
 - The runner calls it after any physics ops and before `render`, only when the plan sets `material_time_seconds`. On `-32000` or `-32601` it fails the plan (`set_material_time unsupported by <renderer>`) rather than rendering at another time. `execute-test-batch` skips timed plans with a warning, because the batch protocol cannot carry the time. A plan that sets both `material_time_seconds` and `render_sequence` is invalid.
 
 ### `render_sequence`
