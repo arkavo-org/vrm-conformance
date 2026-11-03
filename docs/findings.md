@@ -40,7 +40,7 @@ This document records cross-renderer divergence findings produced by the suite, 
   - AliciaSolid: 3 movers, min 0.885 against rc.2.
 - AliciaSolid's eight 0.x outline materials are world mode at `_OutlineWidth` 0.05 (centimetres, i.e. 0.5 mm). rc.3 moves toward three-vrm on `head` (0.841 → 0.851) and `bangs` (0.747 → 0.771), and is flat on `full` (0.935 → 0.934). The image shows thin lines, not 5 cm bands, so the centimetre-to-metre conversion is right.
 - Against three-vrm on movers with a reference:
-  - synthetic: 85 cells, 0.965 → 0.970 (27 toward, 57 away).
+  - synthetic: 85 cells, 0.965 → 0.970 (27 toward, 57 away, 1 unchanged: `mtoon_uvanim_shade_t1`, −0.00005).
   - outline sweep: 7 cells, 0.876 → 0.979.
   - humanoid: 34 cells, 0.821 → 0.826 (23 toward, 11 away).
 - The away moves are small (at most 0.008: matcap cells, screen outlines, shade slots). They trace to three-vrm's below-spec ambient (0.15/π vs the spec's 0.15) and its half-width screen outlines.
