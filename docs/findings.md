@@ -62,7 +62,7 @@ Not covered:
 
 ## 2026-11-01 (VMK standing shading-level and outline gaps — causes found; #466 fixed suite-side by adopting `.radiometric`) — **Three pre-existing VMK divergences, which the VMK maintainers asked to investigate before stable 1.2.1, are measured against three-vrm on 1.2.1-rc.2 (`80adaa5`), and their causes are now confirmed from VMK source (maintainers) plus an A/B here:**
 - **#466 (darker at N·L = 0) is ours.** VMK divides direct light by π on purpose (VMK#205). It provides `setLightNormalizationMode(.radiometric)` to cancel that and documents it as the setting for this corpus (VMK#213), but our VMK adapter never calls it.
-  - A/B with the call added: the flat / lit / shaded levels go 167 / 181 / 149 → **244 / 255 / 210**, against the model's prediction of 242 / 255 / 208.
+  - A/B with the call added: the flat / lit / shaded levels go 167 / 181 / 149 → **244 / 255 / 210**, against the model's prediction of 243 / 255 / 210.
   - Mean SSIM against three-vrm rises 0.934 → **0.964** on 79 synthetic cells (64 toward, 8 away by ≤ 0.011) and 0.763 → **0.821** on 34 humanoid cells (all 34 toward; 6 → 11 at or above 0.85).
 - **#465 (texture visible in the shaded hemisphere) is a small VMK spec gap.** VMK's GI proxy is `giAlbedo = mix(shade, base, giEqualizationFactor)`. The spec gives 0.15 × base under uniform ambient; VMK gives 0.15 × (0.9·base + 0.1·shade). three-vrm's 0.15/π × base is further from the spec than VMK is.
 - **Outline under-extrusion is a VMK spec gap (mechanism corrected).** VMK's world mode extrudes by `factor × cameraDistance × 0.01`, about 67× too thin at 1.5 m. Its screen mode reads the factor as pixels, where the spec means a fraction of screen height. UniVRM MToon10 and three-vrm extrude `normal × width` in world units.
@@ -87,11 +87,11 @@ Not covered:
 
 **#466 / #465 — a factor-of-π gap in the direct term.**
 - *Cells:* `nmapquad_flat_*`, `nmapquad_px_lx` (lit) and `nmapquad_nx_lx` (shaded): a white, untextured quad with MToon defaults (shade 0.5, shift 0, toony 0.9, giEqualization 0.9), lit edge-on. The shaded-hemisphere symptom shows on `mtoon_uvxform_identity`: same lights and MToon defaults, with the quadrant checkerboard as `baseColorTexture` and no shade texture.
-- *Measured mean sRGB* (lit / flat N·L = 0 / shaded): **VMK 181 / 165 / 149**, **three-vrm 255 / 232 / 195**.
+- *Measured mean sRGB* (lit / flat N·L = 0 / shaded): **VMK 181 / 167 / 149**, **three-vrm 255 / 232 / 195**.
 - *Model.* MToon's toon ramp at N·L = 0 with toony 0.9 gives shading 0.5, so the flat cell's lit/shade mix is 0.75.
-  - **VMK:** direct = mix(shade, base, shading) / π, plus ambient ≈ 0.135 × base. That predicts 0.453 → 181, 0.374 → 165 and 0.294 → 149. All three match.
+  - **VMK:** direct = mix(shade, base, shading) / π, plus ambient 0.15 × mix(shade, base, 0.9) = 0.135 × base + 0.015 × shade (0.1425 here). That predicts 0.461 → 181, 0.381 → 166 and 0.302 → 149, each within one level of the measurement.
   - **three-vrm:** direct = mix(...), because its π intensity cancels Lambert's 1/π, plus ambient ≈ 0.048 × base. That predicts 1.048 → 255 (clipped), 0.798 → 232 and 0.548 → 195. All three match.
-  - VMK's 0.135 is close to 0.15 × 0.9, which may be giEqualization; that is unconfirmed.
+  - The ambient term is the GI proxy confirmed under #465 above. An earlier fit used 0.135 × base alone, which drops the proxy's 0.015 × shade part and predicts 179 / 165 / 148.
 - *Consequence for #465.* Under `.automatic`, the base-texture term in VMK's shaded hemisphere (≈ 0.135 × base) is about as large as the π-reduced shade term (shade/π ≈ 0.159), so the texture dominates. Most of #465 is therefore the same π gap as #466, and `.radiometric` lifts the shade term to 0.5. The residual is the GI proxy (below). The `62c1f77` shared-sample shortcut is not involved, because the affected cells bind no shade texture.
 - *Cause, confirmed: direct term.* VMK's shader applies `BRDF_LAMBERT_NORM = 1/π` on purpose (VMK#205). `VRMRenderer.setLightNormalizationMode(.radiometric)` sets the normalization factor to π to cancel it, and its doc comment says it matches "UniVRM Built-in RP and three-vrm against the vrm-conformance corpus (see issue #213)". The default `.automatic` leaves the factor at 1, and our adapter never calls the setter.
   - The MToon spec's lighting has no 1/π (README §Lighting "Implementation": `color = lerp(shadeColorTerm, baseColorTerm, shading) * lightColor`). So `.radiometric` is the spec-consistent setting for this corpus's "intensity 1.0".
@@ -128,7 +128,7 @@ Not covered:
   - VMK's screen mode reads the factor as pixels, where the spec means a fraction of screen height. That explains the 0 px at factors 0.01 and 0.05.
   - UniVRM MToon10 world mode is `positionWS + normalWS × width`, and three-vrm agrees: three-vrm tracks nominal.
   - Upstream reports that VRoid's 0.0005 m outlines barely extrude in VMK today; what shows is mostly back faces at the silhouette. A spec fix would change every outlined avatar visibly, so that decision is upstream's.
-- This is the mechanism behind the 2026-06-14 "VMK under-extrudes vs the reference" finding. That entry's silhouette-size divergence (VMK vs UniVRM 0.95 → 0.63 as width rose from 0.01 to 0.1) is consistent with a 50× scale-down.
+- This is the mechanism behind the 2026-06-14 "VMK under-extrudes vs the reference" finding. That entry's silhouette-size divergence (VMK vs UniVRM 0.95 → 0.63 as width rose from 0.01 to 0.1) is consistent with the ~67× (0.015×) scale-down.
 
 **Status.**
 - *Suite side:* `.radiometric` is adopted (see the header). `nmapquad` levels and the shaded hemisphere are now spec-checkable on VMK, with the residual ambient gap. Local VMK caches made before this change are stale. The committed goldens manifest has no entries, so nothing needs re-uploading.
