@@ -2,6 +2,54 @@
 
 This document records cross-renderer divergence findings produced by the suite, in the order they were surfaced. Each entry has a brief observation, the data behind it, and pointers to any upstream issues filed. Findings are a deliverable in their own right — the project's purpose is to produce falsifiable signal that drives upstream fixes (or methodology refinements when divergence turns out to be legitimate).
 
+## 2026-11-03 (VMK 1.2.1 gate — GO on `1.2.1-rc.4`) — **`1.2.1-rc.4` (`2162dd0`) gated against `1.2.1-rc.3` and the pinned `1.2.0`, all rendered with `.radiometric`: GO for stable `1.2.1`. This supersedes the rc.3 GO below.**
+- rc.4 adds two changes on top of rc.3:
+  - #469: UV animation now moves the outline width mask, as the MToon 1.0 spec says it should. The order is: animation, scaled by the animation mask's B channel, then the mask's own `KHR_texture_transform`. VMK previously left the mask unanimated on purpose (RFC 0007 preview entry below), so this reverses that documented divergence.
+  - #328: new `setHemisphereAmbient(sky:ground:)`, so `giEqualizationFactor` takes effect once the ambient has direction. Uniform ambient skips the blend.
+- #469 passes every acceptance check, and all 43 expectation checks pass (34 from earlier gates plus 9 outline-mask checks).
+- #328 does not change shading under uniform ambient. It does move 95 textured cells by 1–2/255, from rounding in the recompiled fragment shader. Upstream corrected its release notes, which had said "byte-identical".
+- Pin NOT advanced; that needs the user's request.
+
+**Method.**
+- Clean isolated build of `2162dd0` with `-DVMK_UV_ANIMATION_TIME`, from the adapter at `3f046b9` (`.radiometric`, now on main). Serial full-corpus render (733 PNGs), a repeat render, and 7 outline-mask probe cells.
+- `2162dd0` is the squash of VMK PR #470. Its `Sources/` and `Package.swift` trees are identical to `59ff308`, the candidate pre-checked on the same day. Every render is byte-identical to that pre-check (740/740).
+- For attribution, the pre-check also built `21e2e8f` (#469 alone).
+
+**Results.**
+- *Determinism and failures:* the repeat render is byte-identical (733/733). The fail set is unchanged (94, the same cells as rc.3).
+- *rc.3 → rc.4, attributed by bisect:*
+  - rc.3 → `21e2e8f` (#469): exactly one cell moves, `mtoon_uvanim_owidth_t1`. Every other cell is byte-identical, including `owidth_t0` and all cells with no mask or no animation.
+  - `21e2e8f` → rc.4 (#328): 95 cells move by at most 2/255 (90 at 1, 4 at 2, plus one sequence), with minimum SSIM 0.9994.
+    - The movers are all 39 humanoid cells and the textured synthetic cells: `uvxform` (rigid and rigged), `slotxform`, `pbrtex`, `rimtex`, `uvanim`, AliciaSolid and AvatarSample_U.
+    - The other 461 synthetic 1.0 cells, all 116 0.x cells, `names` and `nmapconv` are byte-identical.
+    - The sign is mixed within each cell (`uvxform_identity`: 1,803 pixels up, 632 down). That is rounding, not a changed term.
+    - If the hemisphere branch were taken, every lit sphere would shift visibly, and none does.
+- *Against three-vrm (rc.3 → rc.4):* the rounding movers are flat (48 of 51 synthetic and 34 of 34 humanoid unchanged to 1e-4). `owidth_t1` moves away, 0.941 → 0.870, because three-vrm does not animate the mask.
+- *Against the pinned `1.2.0`:* the same 682 cells move and the same 12 fall below 0.85 as for rc.3, with none new. Against three-vrm, synthetic cells average 0.939 → 0.966, outline cells 0.876 → 0.979 and humanoid cells 0.821 → 0.826.
+
+**#469 acceptance: outline width mask × UV animation.**
+- No other renderer can arbitrate here. three-vrm samples the mask at raw `vUv`, and UniVRM v0.131.0 at raw `texcoord0`, so neither animates it. The spec text is the authority, and VMK now follows it.
+- The checks below are VMK self-consistency tests: each animated cell must equal a static `KHR_texture_transform` on the mask at t = 0 that does the same thing. VMK's KHR rows and `animateUV` use the same rotation convention, so the predictions are exact.
+
+| Check | rc.4 | rc.3 (control) |
+|---|---|---|
+| `owidth_t1` (scroll 0.5 × t 1) vs `owidth_t0` | 76,604 px | 0 px |
+| scroll: `owidth_t1` = mask KHR offset (0.5, 0) at t 0 | **0 px** | 76,604 px |
+| rotation π/4 = KHR rotation π/4, offset (−0.2071, 0.5) | **0 px** | 55,588 px |
+| animation mask B = 1 → equals `owidth_t1` (= KHR offset 0.5) | **0 px** | 76,604 px vs KHR offset 0.5 |
+| animation mask B = 0, R = G = 1 → equals `owidth_t0` | **0 px** | — |
+| animation mask B = 128/255 = KHR offset 0.251 at t 0 | **0 px** | 65,057 px |
+
+- The B = 0 cell shows the scale comes from B, not R or G. The B = 128 cell shows the animation mask is sampled as linear data, not sRGB-decoded.
+- The probe cells are local ad-hoc edits of `owidth_t1` (seven variants, all 0 errors in `vrm-validator`), not generator output. They should become cells in `emit-uv-animation-sweep` before the next gate that relies on them.
+
+**Not covered.**
+- *Hemisphere ambient (sky ≠ ground at giEqualization 0 / 0.9 / 1).* `set_lighting` takes one ambient colour, so this cell needs an operation-contract change across all adapters. Even then three-vrm's `HemisphereLight` carries 1/π, so it could not arbitrate, the same as plain ambient.
+- UniVRM is still licence-blocked, so all verdicts are provisional.
+- The spring-bone flake (#452) is being re-run upstream: 0 of 399 runs divergent so far on rc.3.
+
+**Standing items.** Divergence 1 of the RFC 0007 preview entry ("Outline width mask is not animated") no longer applies to VMK, which now follows the spec; three-vrm and UniVRM still diverge. three-vrm is not a valid arbiter for ambient level, screen-mode outline width or outline-mask animation; use the spec model for those.
+
 ## 2026-11-01 (VMK 1.2.1 gate — GO on `1.2.1-rc.3`) — **`1.2.1-rc.3` (`5279707`) gated against `1.2.1-rc.2` and the pinned `1.2.0`, both re-rendered with `.radiometric`: GO for stable `1.2.1`. This supersedes the rc.2 GO below.**
 - rc.3 adds two spec fixes on top of rc.2:
   - #465: the indirect term is now `ambient × baseColor`, so `giEqualizationFactor` has no effect under uniform ambient.
